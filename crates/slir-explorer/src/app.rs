@@ -9,7 +9,7 @@ use crate::module;
 use crate::no_module_selected::NoModuleSelected;
 use crate::not_found::NotFound;
 
-pub const MODULE_DIR: &'static str = "target/debug/deps";
+pub const MODULE_DIR: &'static str = "target/risl/debug/deps";
 
 #[component]
 pub fn App() -> impl IntoView {
