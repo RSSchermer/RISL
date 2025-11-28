@@ -1,3 +1,4 @@
+use empa_smi as smi;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -9,7 +10,7 @@ use crate::ty::{ScalarKind, Type, TypeKind, TypeRegistry, VectorSize};
 use crate::{
     Constant, ConstantKind, EntryPointKind, FnSig, Function, InterpolationSampling,
     InterpolationType, Module, OverridableConstantKind, ShaderIOBinding, StorageBinding,
-    UniformBinding, smi,
+    UniformBinding,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -152,7 +153,7 @@ fn build_resource_binding_map(
                     group: data.resource_binding.group,
                     binding: data.resource_binding.binding,
                     resource_type: smi::ResourceType::Uniform(smi::SizedBufferLayout {
-                        memory_units: layout.head,
+                        memory_units: layout.head.into(),
                     }),
                 }
             }
@@ -160,7 +161,7 @@ fn build_resource_binding_map(
                 let data = &module.storage_bindings[b];
                 let layout = buffer_layout_provider.layout(&module.ty, data.ty).clone();
                 let layout = smi::UnsizedBufferLayout {
-                    sized_head: layout.head,
+                    sized_head: layout.head.into(),
                     unsized_tail: layout.tail,
                 };
 
@@ -217,7 +218,8 @@ fn build_overridable_constant_map(
         overridable_constant_map.insert(
             constant,
             smi::OverridableConstant {
-                id: data.id(),
+                name: constant.name.to_string().into(),
+                id: Some(data.id() as u16),
                 constant_type,
                 required,
             },
@@ -386,12 +388,12 @@ pub fn build_smi(module: &Module, cfg: &Cfg) -> smi::ShaderModuleInterface {
         resource_bindings.sort();
 
         entry_points.push(smi::EntryPoint {
-            name: sig.name.to_string(),
+            name: sig.name.to_string().into(),
             stage: shader_stage(&kind),
-            input_bindings: collect_input_bindings(&module.ty, sig),
-            output_bindings: collect_output_bindings(&module.ty, sig),
-            overridable_constants,
-            resource_bindings,
+            input_bindings: collect_input_bindings(&module.ty, sig).into(),
+            output_bindings: collect_output_bindings(&module.ty, sig).into(),
+            overridable_constants: overridable_constants.into(),
+            resource_bindings: resource_bindings.into(),
         })
     }
 
@@ -401,24 +403,24 @@ pub fn build_smi(module: &Module, cfg: &Cfg) -> smi::ShaderModuleInterface {
     entry_points.sort_by(|a, b| a.name.cmp(&b.name));
 
     smi::ShaderModuleInterface {
-        overridable_constants,
-        resource_bindings,
-        entry_points,
+        overridable_constants: overridable_constants.into(),
+        resource_bindings: resource_bindings.into(),
+        entry_points: entry_points.into(),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use empa_smi::{
+        IoBinding, MemoryUnit, MemoryUnitLayout, OverridableConstantType, ResourceType,
+        SizedBufferLayout, UnsizedBufferLayout,
+    };
+
     use super::*;
     use crate::cfg::{BlockPosition, ConstPtr, RootIdentifier, Terminator};
-    use crate::smi::{
-        IoBinding, MemoryUnit, MemoryUnitLayout, OverridableConstantType, ResourceType,
-        SizedBufferLayout, UnsizedBufferLayout, UnsizedTailLayout,
-    };
     use crate::ty::{Struct, StructField, TY_DUMMY, TY_F32, TY_U32, TY_VEC4_F32};
     use crate::{
-        FnArg, Interpolation, OverridableConstant, ResourceBinding, StorageBindingData, Symbol,
-        UniformBindingData,
+        FnArg, Interpolation, ResourceBinding, StorageBindingData, Symbol, UniformBindingData,
     };
 
     #[test]
@@ -710,12 +712,14 @@ mod tests {
             smi.overridable_constants,
             vec![
                 smi::OverridableConstant {
-                    id: 0,
+                    name: "overridable_0".into(),
+                    id: Some(0),
                     constant_type: OverridableConstantType::UnsignedInteger,
                     required: false,
                 },
                 smi::OverridableConstant {
-                    id: 10,
+                    name: "overridable_1".into(),
+                    id: Some(10),
                     constant_type: OverridableConstantType::UnsignedInteger,
                     required: true,
                 }
@@ -732,7 +736,8 @@ mod tests {
                         memory_units: vec![MemoryUnit {
                             offset: 0,
                             layout: MemoryUnitLayout::Float,
-                        }],
+                        }]
+                        .into(),
                     }),
                 },
                 smi::ResourceBinding {
@@ -742,7 +747,8 @@ mod tests {
                         memory_units: vec![MemoryUnit {
                             offset: 0,
                             layout: MemoryUnitLayout::Float,
-                        }],
+                        }]
+                        .into(),
                     }),
                 },
                 smi::ResourceBinding {
@@ -752,7 +758,8 @@ mod tests {
                         sized_head: vec![MemoryUnit {
                             offset: 0,
                             layout: MemoryUnitLayout::Float,
-                        }],
+                        }]
+                        .into(),
                         unsized_tail: None,
                     }),
                 },
@@ -763,7 +770,8 @@ mod tests {
                         sized_head: vec![MemoryUnit {
                             offset: 0,
                             layout: MemoryUnitLayout::Float,
-                        }],
+                        }]
+                        .into(),
                         unsized_tail: None,
                     }),
                 }
@@ -775,7 +783,7 @@ mod tests {
         assert_eq!(smi.entry_points[0].name, "entry_point_0");
         assert_eq!(smi.entry_points[0].stage, smi::ShaderStage::Vertex);
         assert_eq!(
-            &smi.entry_points[0].input_bindings,
+            smi.entry_points[0].input_bindings.as_ref(),
             &[
                 IoBinding {
                     location: 0,
@@ -790,7 +798,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            &smi.entry_points[0].output_bindings,
+            smi.entry_points[0].output_bindings.as_ref(),
             &[
                 IoBinding {
                     location: 0,
@@ -807,14 +815,14 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(&smi.entry_points[0].overridable_constants, &[0, 1]);
-        assert_eq!(&smi.entry_points[0].resource_bindings, &[0, 1, 2]);
+        assert_eq!(smi.entry_points[0].overridable_constants.as_ref(), &[0, 1]);
+        assert_eq!(smi.entry_points[0].resource_bindings.as_ref(), &[0, 1, 2]);
 
-        assert_eq!(smi.entry_points[1].name, "entry_point_1");
+        assert_eq!(smi.entry_points[1].name.as_ref(), "entry_point_1");
         assert_eq!(smi.entry_points[1].stage, smi::ShaderStage::Compute);
-        assert_eq!(&smi.entry_points[1].input_bindings, &[]);
-        assert_eq!(&smi.entry_points[1].output_bindings, &[]);
-        assert_eq!(&smi.entry_points[1].overridable_constants, &[0]);
-        assert_eq!(&smi.entry_points[1].resource_bindings, &[0, 3]);
+        assert_eq!(&smi.entry_points[1].input_bindings.as_ref(), &[]);
+        assert_eq!(&smi.entry_points[1].output_bindings.as_ref(), &[]);
+        assert_eq!(&smi.entry_points[1].overridable_constants.as_ref(), &[0]);
+        assert_eq!(&smi.entry_points[1].resource_bindings.as_ref(), &[0, 3]);
     }
 }

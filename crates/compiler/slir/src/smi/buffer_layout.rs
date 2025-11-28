@@ -1,6 +1,6 @@
+use empa_smi::{ArrayLayout, MemoryUnit, MemoryUnitLayout, UnsizedTailLayout};
 use rustc_hash::FxHashMap;
 
-use crate::smi::{MemoryUnit, MemoryUnitLayout, UnsizedTailLayout};
 use crate::ty;
 use crate::ty::{ScalarKind, Struct, Type, TypeKind, TypeRegistry, VectorSize};
 
@@ -141,13 +141,15 @@ impl MemoryLayoutBuilder {
             "the element type of an array must be sized"
         );
 
+        let layout = ArrayLayout {
+            element_layout: element_layout_builder.head.into(),
+            stride,
+            len,
+        };
+
         self.head.push(MemoryUnit {
             offset,
-            layout: MemoryUnitLayout::Array {
-                element_layout: element_layout_builder.head,
-                stride,
-                len,
-            },
+            layout: MemoryUnitLayout::Array(layout),
         });
     }
 
@@ -169,7 +171,7 @@ impl MemoryLayoutBuilder {
 
         self.tail = Some(UnsizedTailLayout {
             offset,
-            element_layout: element_layout_builder.head,
+            element_layout: element_layout_builder.head.into(),
             stride,
         });
     }
@@ -253,7 +255,7 @@ mod tests {
                     },
                     MemoryUnit {
                         offset: 20,
-                        layout: MemoryUnitLayout::Array {
+                        layout: MemoryUnitLayout::Array(ArrayLayout {
                             element_layout: vec![
                                 MemoryUnit {
                                     offset: 0,
@@ -263,10 +265,11 @@ mod tests {
                                     offset: 4,
                                     layout: MemoryUnitLayout::Float
                                 },
-                            ],
+                            ]
+                            .into(),
                             stride: 8,
                             len: 4
-                        }
+                        })
                     },
                 ],
                 tail: None,
@@ -344,7 +347,8 @@ mod tests {
                             offset: 4,
                             layout: MemoryUnitLayout::Float
                         },
-                    ],
+                    ]
+                    .into(),
                     stride: 8,
                 }),
             }

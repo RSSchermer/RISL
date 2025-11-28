@@ -9,7 +9,6 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
 
-use crate::smi::OverridableConstantType;
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeRegistry};
 
 slotmap::new_key_type! {
