@@ -6,4 +6,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+empa-smi = { workspace = true }
 risl-macros = { version = "0.1.0", path = "../risl_macros" }

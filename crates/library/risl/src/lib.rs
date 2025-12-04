@@ -3,7 +3,6 @@
 pub mod mem;
 pub mod primitive;
 pub mod resource;
-pub mod smi;
 pub mod workgroup;
 
 pub use risl_macros::{compute, fragment, gpu, shader_io, shader_module, vertex};
@@ -14,4 +13,13 @@ pub mod prelude {
     pub use super::resource::{Resource, resource};
     pub use super::workgroup::workgroup_shared;
     pub use super::{compute, fragment, gpu, shader_io, shader_module, vertex};
+}
+
+pub mod smi {
+    pub use empa_smi::{
+        ArrayLayout, EntryPoint, Interpolate, InterpolationType, IoBinding, IoBindingType,
+        MemoryUnit, MemoryUnitLayout, OverridableConstant, OverridableConstantType,
+        ResourceBinding, ResourceType, Sampling, ShaderModuleInterface, ShaderStage,
+        SizedBufferLayout, StorageTextureFormat, TexelType, UnsizedBufferLayout, UnsizedTailLayout,
+    };
 }
