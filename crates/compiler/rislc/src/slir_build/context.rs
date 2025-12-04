@@ -166,6 +166,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
     }
 
     pub fn ty_and_layout_resolve(&self, layout: TyAndLayout) -> slir::ty::Type {
+        dbg!(&layout);
         // Note: this cannot be inlined into the if-let expression, because then the borrow guard would
         // not drop in time, which would result in an "already borrowed" error.
         let ty = self.ty_to_slir.borrow().get(&layout).copied();

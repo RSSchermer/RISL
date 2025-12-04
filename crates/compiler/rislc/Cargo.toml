@@ -26,6 +26,7 @@ internment = { workspace = true }
 itertools = { workspace = true }
 regex = { workspace = true }
 rustc-hash = { workspace = true }
+sled = { workspace = true }
 slir = { workspace = true }
 smallvec = { workspace = true }
 thin-vec = "0.2"

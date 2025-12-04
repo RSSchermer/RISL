@@ -6,10 +6,10 @@ use rustc_hir::{
 };
 use rustc_span::def_id::{DefId, LocalDefId, LocalModDefId};
 use rustc_span::source_map::Spanned;
-use rustc_span::{Ident, Span};
+use rustc_span::{Ident, Span, Symbol};
 
 pub struct HirExt {
-    pub shader_source_requests: Vec<ShaderSourceRequest>,
+    pub shader_requests: Vec<ShaderRequest>,
     pub mod_ext: IndexMap<LocalModDefId, ModExt>,
     pub fn_ext: IndexMap<LocalDefId, FnExt>,
     pub struct_ext: IndexMap<ItemId, StructExt>,
@@ -26,7 +26,7 @@ pub struct HirExt {
 impl HirExt {
     pub fn new() -> Self {
         HirExt {
-            shader_source_requests: vec![],
+            shader_requests: vec![],
             mod_ext: Default::default(),
             fn_ext: Default::default(),
             struct_ext: Default::default(),
@@ -147,10 +147,18 @@ impl HirExt {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShaderRequestKind {
+    Wgsl,
+    ShaderModuleInterface,
+}
+
 #[derive(Debug)]
-pub struct ShaderSourceRequest {
+pub struct ShaderRequest {
     pub shader_mod: DefId,
     pub span: Span,
+    pub request_id: Symbol,
+    pub kind: ShaderRequestKind,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

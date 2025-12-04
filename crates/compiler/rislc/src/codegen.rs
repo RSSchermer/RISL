@@ -4,12 +4,12 @@ use std::io::Read;
 use ar::Archive;
 use rustc_public::rustc_internal::run;
 use rustc_span::Symbol;
-use rustc_span::def_id::LOCAL_CRATE;
+use rustc_span::def_id::{DefId, LOCAL_CRATE};
 use slir::{rvsdg, scf};
 
 use crate::artifact::{SlirArtifactBuilder, SlirArtifactBuilderConfig};
 use crate::compiler::LIB_MODULE_FILENAME;
-use crate::context::RislContext as Cx;
+use crate::context::{RislContext as Cx, RislContext};
 use crate::monomorphize::collect_shader_module_codegen_units;
 use crate::slir_build::build_shader_module;
 
@@ -76,12 +76,11 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
         // final compilation step (e.g. to WGSL, SPIRV, HLSL, etc.), which is typically done by a macro
         // in the second compilation phase (when the actual non-RISL Rust code gets compiled).
         for shader_module in shader_modules {
-            let name = format!("{}-{}", crate_name, shader_module.name);
-            let name = slir::Symbol::new(name);
+            let name = slir::Symbol::new(cx.shader_module_name(shader_module.def_id.to_def_id()));
             let mut artifact_builder = SlirArtifactBuilder::new(
                 cx,
                 SlirArtifactBuilderConfig {
-                    module_name: name,
+                    module_id: shader_module.def_id,
                     include_rvsdg_initial: true,
                     include_rvsdg_transformed: true,
                     include_wgsl: true,
@@ -114,6 +113,8 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
 
             artifact_builder.finish(&module);
         }
+
+        for shader_request in &cx.hir_ext().shader_requests {}
 
         // We also create one additional module for the whole crate for the SLIR of all "free functions"
         // (functions that are not part of a `mod` item with a `#[risl::shader_module]` attribute). This

@@ -11,7 +11,7 @@ use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::{DefId, LocalModDefId};
 use rustc_span::source_map::{Spanned, respan};
-use rustc_span::{ErrorGuaranteed, Span};
+use rustc_span::{ErrorGuaranteed, Span, Symbol};
 
 use crate::attr::{
     AttrBlendSrc, AttrInterpolate, Attributes, BuiltinName, InterpolationSamplingName,
@@ -20,7 +20,8 @@ use crate::attr::{
 use crate::hir_ext::{
     BlendSrc, ConstExt, EnumExt, FieldExt, FnExt, HirExt, ImplExt, Interpolation,
     InterpolationSampling, InterpolationType, ModExt, OverrideId, ParamExt, ResourceBinding,
-    ShaderIOBinding, ShaderSourceRequest, StaticExt, StructExt, TraitExt, WorkgroupSize,
+    ShaderIOBinding, ShaderRequest, ShaderRequestKind, StaticExt, StructExt, TraitExt,
+    WorkgroupSize,
 };
 
 // Borrowed from https://github.com/Rust-GPU/rust-gpu
@@ -61,18 +62,25 @@ fn try_resolve_stmt_to_mod_id(tcx: TyCtxt<'_>, stmt: &Stmt) -> Result<DefId, Err
         .err("expected a `use` statement that points to a shader module"))
 }
 
-fn try_build_shader_source_request(
+fn try_build_shader_request(
     tcx: TyCtxt<'_>,
     block: &ConstBlock,
     span: Span,
-) -> Result<ShaderSourceRequest, ErrorGuaranteed> {
+    request_id: Symbol,
+    kind: ShaderRequestKind,
+) -> Result<ShaderRequest, ErrorGuaranteed> {
     let body = tcx.hir_body(block.body);
 
     if let ExprKind::Block(e, _) = body.value.kind {
         if let Some(stmt) = e.stmts.first() {
             let shader_mod = try_resolve_stmt_to_mod_id(tcx, stmt)?;
 
-            Ok(ShaderSourceRequest { shader_mod, span })
+            Ok(ShaderRequest {
+                shader_mod,
+                span,
+                request_id,
+                kind,
+            })
         } else {
             Err(tcx.dcx().span_err(
                 body.value.span,
@@ -432,9 +440,15 @@ impl<'a, 'tcx> Visitor<'tcx> for Locator<'a, 'tcx> {
         attrs.check_target(self.tcx, &Target::Expression);
 
         if let ExprKind::ConstBlock(block) = &ex.kind {
-            if attrs.shader_source_request.is_some() {
-                if let Ok(request) = try_build_shader_source_request(self.tcx, block, ex.span) {
-                    self.hir_ext.shader_source_requests.push(request);
+            if let Some(attr) = &attrs.shader_wgsl {
+                if let Ok(request) = try_build_shader_request(
+                    self.tcx,
+                    block,
+                    ex.span,
+                    attr.request_id,
+                    ShaderRequestKind::Wgsl,
+                ) {
+                    self.hir_ext.shader_requests.push(request);
                 }
             }
         }

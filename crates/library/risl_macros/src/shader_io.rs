@@ -10,7 +10,7 @@ use syn::{
 pub fn expand_attribute(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
         return quote! {
-            compile_error!("the `gpu` attribute does not accept any arguments");
+            compile_error!("the `shader_io` attribute does not accept any arguments");
         }
         .into();
     }

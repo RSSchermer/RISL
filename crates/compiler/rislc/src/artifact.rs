@@ -1,10 +1,11 @@
 use std::fs::File;
 
 use ar::{GnuBuilder, Header};
+use rustc_span::def_id::LocalModDefId;
+use slir::Module;
 use slir::cfg::Cfg;
 use slir::rvsdg::Rvsdg;
 use slir::scf::Scf;
-use slir::{Module, Symbol};
 
 use crate::context::RislContext;
 
@@ -16,7 +17,7 @@ pub const RVSDG_TRANSFORMED_IDENTIFIER: &'static str = "rvsdg_transformed";
 pub const WGSL_IDENTIFIER: &'static str = "wgsl";
 
 pub struct SlirArtifactBuilderConfig {
-    pub module_name: slir::Symbol,
+    pub module_id: LocalModDefId,
     pub include_rvsdg_initial: bool,
     pub include_rvsdg_transformed: bool,
     pub include_wgsl: bool,
@@ -24,7 +25,6 @@ pub struct SlirArtifactBuilderConfig {
 
 pub struct SlirArtifactBuilder {
     inner: GnuBuilder<File>,
-    module_name: Symbol,
     module_identifier: Vec<u8>,
     cfg_identifier: Vec<u8>,
     scf_identifier: Vec<u8>,
@@ -36,22 +36,13 @@ pub struct SlirArtifactBuilder {
 impl SlirArtifactBuilder {
     pub fn new(cx: &RislContext, config: SlirArtifactBuilderConfig) -> Self {
         let SlirArtifactBuilderConfig {
-            module_name,
+            module_id,
             include_rvsdg_initial,
             include_rvsdg_transformed,
             include_wgsl,
         } = config;
 
-        let mut filename = cx
-            .tcx()
-            .sess
-            .io
-            .output_dir
-            .clone()
-            .expect("not output directory specified");
-
-        filename.push(format!("{}.slir", module_name));
-
+        let filename = cx.shader_artifact_file_path(module_id.to_def_id());
         let file = File::create(filename).expect("failed to create slir artifact file");
 
         let module_identifier = MODULE_IDENTIFIER.as_bytes().to_vec();
@@ -85,7 +76,6 @@ impl SlirArtifactBuilder {
 
         SlirArtifactBuilder {
             inner,
-            module_name,
             module_identifier,
             cfg_identifier,
             scf_identifier,
@@ -156,11 +146,6 @@ impl SlirArtifactBuilder {
     }
 
     pub fn finish(mut self, module: &Module) {
-        assert_eq!(
-            module.name, self.module_name,
-            "module name must match the module name with which this builder was initialized"
-        );
-
         let encoding = bincode::serde::encode_to_vec(&module, bincode::config::standard())
             .expect("failed to encode SLIR module");
 
