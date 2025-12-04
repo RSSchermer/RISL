@@ -735,6 +735,15 @@ impl<'v> RootCollector<'_, 'v> {
     }
 
     fn process_impl_item(&mut self, id: hir::ImplItemId) {
+        let hir_id = self.cx.tcx().hir_impl_item(id).hir_id();
+        let parent_id = self.cx.tcx().hir_get_parent_item(hir_id);
+        let parent = self.cx.tcx().hir_expect_item(parent_id.def_id);
+        let parent_ext = self.cx.hir_ext().extend_item(parent);
+
+        if !self.is_shader_module && parent_ext.is_none() {
+            return;
+        }
+
         if matches!(self.cx.tcx().def_kind(id.owner_id), DefKind::AssocFn) {
             self.push_if_root(id.owner_id.def_id);
         }
