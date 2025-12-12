@@ -1,9 +1,6 @@
 use indexmap::IndexMap;
 use rustc_ast::{IsAuto, Mutability};
-use rustc_hir::{
-    BodyId, Constness, EnumDef, FnSig, GenericBounds, Generics, HirId, Impl, Item, ItemId,
-    ItemKind, Mod, Safety, TraitItemId, Ty, VariantData,
-};
+use rustc_hir::{BodyId, ConstItemRhs, Constness, EnumDef, FnSig, GenericBounds, Generics, HirId, Impl, Item, ItemId, ItemKind, Mod, Safety, TraitItemId, Ty, VariantData};
 use rustc_span::def_id::{DefId, LocalDefId, LocalModDefId};
 use rustc_span::source_map::Spanned;
 use rustc_span::{Ident, Span};
@@ -53,10 +50,10 @@ impl HirExt {
                     item,
                     kind: ExtendedItemKind::Static(*mutability, *ident, ty, *body_id, ext),
                 }),
-            ItemKind::Const(ident, generics, ty, body_id) => {
+            ItemKind::Const(ident, generics, ty, rhs) => {
                 self.const_ext.get(&item.item_id()).map(|ext| ExtendedItem {
                     item,
-                    kind: ExtendedItemKind::Const(*ident, generics, ty, *body_id, ext),
+                    kind: ExtendedItemKind::Const(*ident, generics, ty, *rhs, ext),
                 })
             }
             ItemKind::Fn {
@@ -318,11 +315,11 @@ impl<'hir, 'ext> ExtendedItem<'hir, 'ext> {
         Ident,
         &'hir Generics<'hir>,
         &'hir Ty<'hir>,
-        BodyId,
+        ConstItemRhs<'hir>,
         &'ext ConstExt,
     ) {
-        if let ExtendedItemKind::Const(ident, generics, ty, body_id, ext) = self.kind {
-            (ident, generics, ty, body_id, ext)
+        if let ExtendedItemKind::Const(ident, generics, ty, rhs, ext) = self.kind {
+            (ident, generics, ty, rhs, ext)
         } else {
             panic!("expected const")
         }
@@ -375,7 +372,7 @@ pub enum ExtendedItemKind<'hir, 'ext> {
         Ident,
         &'hir Generics<'hir>,
         &'hir Ty<'hir>,
-        BodyId,
+        ConstItemRhs<'hir>,
         &'ext ConstExt,
     ),
     Static(Mutability, Ident, &'hir Ty<'hir>, BodyId, &'ext StaticExt),

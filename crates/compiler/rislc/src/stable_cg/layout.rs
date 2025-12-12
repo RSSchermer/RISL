@@ -5,7 +5,15 @@ use rustc_public::target::{MachineInfo, MachineSize};
 use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
 
-pub type ShapeToken = Intern<LayoutShape>;
+pub type ShapeToken = Intern<ShapeWrapper>;
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ShapeWrapper {
+    shape: LayoutShape,
+}
+
+unsafe impl Send for ShapeWrapper {}
+unsafe impl Sync for ShapeWrapper {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Layout {
@@ -27,7 +35,9 @@ impl From<ShapeToken> for Layout {
 
 impl From<LayoutShape> for Layout {
     fn from(shape: LayoutShape) -> Self {
-        Layout::Shape(Intern::new(shape))
+        Layout::Shape(Intern::new(ShapeWrapper {
+            shape
+        }))
     }
 }
 
@@ -35,7 +45,7 @@ impl Layout {
     pub fn shape(&self) -> LayoutShape {
         match self {
             Layout::Layout(t) => t.shape(),
-            Layout::Shape(s) => (**s).clone(),
+            Layout::Shape(s) => s.as_ref().shape.clone(),
         }
     }
 }

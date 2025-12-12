@@ -5,7 +5,7 @@ members = [
     "crates/compiler/slir",
     "crates/library/risl",
     "crates/library/risl_macros",
-    "crates/risl_cli",
+    "crates/risl_cargo",
     "crates/slir-explorer",
     "tests/examples/builtin_vec",
     "tests/examples/hello_world",
@@ -20,7 +20,7 @@ default-members = [
     "crates/compiler/slir",
     "crates/library/risl",
     "crates/library/risl_macros",
-    "crates/risl_cli",
+    "crates/risl_cargo",
     "crates/slir-explorer",
 ]
 
@@ -32,25 +32,27 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 ar = "0.9"
 arrayvec = "0.7"
-bincode = "2.0.0-rc.3"
+bincode = "2"
 bit-set = "0.8"
 bit-vec = "0.8"
+cargo = "0.92"
+color-print = "0.3"
 delegate = "0.13"
-either = "1.15"
+either = "1"
 empa-smi = "0.1.1"
-indexmap = "2.7"
+indexmap = "2"
 index_vec = "0.1"
 internment = "0.8"
 itertools = "0.14"
-ordered-float = "4.6"
+ordered-float = "5"
 proc-macro2 = "1.0"
-regex = "1.11"
-rustc-hash = "2.1"
-serde = "1.0"
+regex = "1"
+rustc-hash = "2"
+serde = "1"
 slir = { path = "./crates/compiler/slir", version = "0.1.0" }
-slotmap = "1.0"
+slotmap = "1"
 smallvec = "1.13"
-syn = "2.0"
+syn = "2"
 thin-vec = "0.2"
-thiserror = "2.0"
-quote = "1.0"
+thiserror = "2"
+quote = "1"

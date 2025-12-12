@@ -530,7 +530,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     | mir::CastKind::PointerWithExposedProvenance
                     | mir::CastKind::Transmute
                     | mir::CastKind::Subtype
-                    | mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer)
+                    | mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_))
                     | mir::CastKind::PointerCoercion(PointerCoercion::ClosureFnPointer(_))
                     | mir::CastKind::PointerCoercion(PointerCoercion::UnsafeFnPointer) => {
                         bug!("cast not supported by RISL")
@@ -710,36 +710,6 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 }
             }
 
-            mir::Rvalue::NullaryOp(null_op, ty) => {
-                let layout = ty.layout().unwrap();
-                let shape = layout.shape();
-
-                let val = match null_op {
-                    mir::NullOp::OffsetOf(fields) => {
-                        todo!()
-                        // let val = bx
-                        //     .tcx()
-                        //     .offset_of_subfield(bx.typing_env(), layout, fields.iter())
-                        //     .bytes();
-                        // bx.cx().const_usize(val)
-                    }
-                    mir::NullOp::UbChecks | mir::NullOp::ContractChecks => {
-                        bug!("not supported by RISL")
-                    }
-                };
-
-                let ty = Ty::usize_ty();
-                let layout = ty.layout().unwrap();
-
-                OperandRef {
-                    val: OperandValue::Immediate(val),
-                    layout: TyAndLayout {
-                        ty,
-                        layout: layout.into(),
-                    },
-                }
-            }
-
             mir::Rvalue::Use(operand) => self.codegen_operand(bx, operand),
             mir::Rvalue::Repeat(..) => bug!("{rvalue:?} in codegen_rvalue_operand"),
             mir::Rvalue::Aggregate(_, fields) => {
@@ -792,7 +762,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             }
             mir::Rvalue::ThreadLocalRef(..)
             | mir::Rvalue::ShallowInitBox(..)
-            | mir::Rvalue::AddressOf(..) => {
+            | mir::Rvalue::AddressOf(..)
+            | mir::Rvalue::NullaryOp(..)=> {
                 bug!("not supported by RISL")
             }
         }

@@ -6,4 +6,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-cargo = "0.70"
+cargo = { workspace = true }
+color-print = { workspace = true }
