@@ -10,7 +10,7 @@ use rustc_public::{Error, abi};
 use crate::stable_cg::TyAndLayout;
 use crate::stable_cg::layout::ScalarExt;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Scalar {
     U32(u32),
     I32(i32),
@@ -19,7 +19,7 @@ pub enum Scalar {
     Pointer(Pointer),
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Pointer {
     pub alloc_id: AllocId,
     pub offset: u64,
@@ -31,7 +31,7 @@ impl Scalar {
         allocation: &Allocation,
         offset: usize,
         abi: abi::Scalar,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> Scalar {
         let size = abi.size(&MachineInfo::target());
         let end = offset + size.bytes();

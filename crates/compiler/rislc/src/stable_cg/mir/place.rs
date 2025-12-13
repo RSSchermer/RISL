@@ -48,11 +48,11 @@ impl<V: CodegenObject> PlaceValue<V> {
     /// The allocation itself is untyped.
     pub fn alloca<'a, Bx: BuilderMethods<'a, Value = V>>(
         bx: &mut Bx,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> PlaceValue<V> {
         let llval = bx.alloca(layout);
 
-        PlaceValue::new_sized(llval, layout.layout.shape().abi_align)
+        PlaceValue::new_sized(llval, layout.layout.abi_align)
     }
 
     /// Creates a `PlaceRef` to this location with the given type.
@@ -73,7 +73,7 @@ impl<V: CodegenObject> PlaceValue<V> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct PlaceRef<V> {
     /// The location and extra runtime properties of the place.
     pub val: PlaceValue<V>,
@@ -88,11 +88,13 @@ pub struct PlaceRef<V> {
 
 impl<'a, V: CodegenObject> PlaceRef<V> {
     pub fn new_sized(llval: V, layout: TyAndLayout) -> PlaceRef<V> {
-        PlaceRef::new_sized_aligned(llval, layout, layout.layout.shape().abi_align)
+        let align = layout.layout.abi_align;
+
+        PlaceRef::new_sized_aligned(llval, layout, align)
     }
 
     pub fn new_sized_aligned(llval: V, layout: TyAndLayout, align: Align) -> PlaceRef<V> {
-        assert!(layout.layout.shape().is_sized());
+        assert!(layout.layout.is_sized());
 
         PlaceValue::new_sized(llval, align).with_type(layout)
     }
@@ -101,11 +103,11 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
     // unless LLVM IR names are turned on (e.g. for `--emit=llvm-ir`).
     pub fn alloca<Bx: BuilderMethods<'a, Value = V>>(bx: &mut Bx, layout: TyAndLayout) -> Self {
         assert!(
-            layout.layout.shape().is_sized(),
+            layout.layout.is_sized(),
             "tried to statically allocate unsized place"
         );
 
-        PlaceValue::alloca(bx, layout).with_type(layout)
+        PlaceValue::alloca(bx, &layout).with_type(layout)
     }
 
     /// Returns a place for an indirect reference to an unsized place.
@@ -116,7 +118,7 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
         layout: TyAndLayout,
     ) -> Self {
         assert!(
-            layout.layout.shape().is_unsized(),
+            layout.layout.is_unsized(),
             "tried to allocate indirect place for sized values"
         );
 
@@ -126,10 +128,8 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
     }
 
     pub fn len<Cx: ConstCodegenMethods<Value = V>>(&self, cx: &Cx) -> V {
-        let layout_shape = self.layout.layout.shape();
-
-        if let FieldsShape::Array { count, .. } = &layout_shape.fields {
-            if layout_shape.is_unsized() {
+        if let FieldsShape::Array { count, .. } = &self.layout.layout.fields {
+            if self.layout.layout.is_unsized() {
                 assert_eq!(*count, 0);
 
                 self.val.llextra.unwrap()
@@ -144,17 +144,17 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
 
 impl<'a, V: CodegenObject> PlaceRef<V> {
     /// Access a field, at a point when the value's case is known.
-    pub fn project_field<Bx: BuilderMethods<'a, Value = V>>(self, bx: &mut Bx, ix: usize) -> Self {
+    pub fn project_field<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx, ix: usize) -> Self {
         let field = self.layout.field(ix);
         let ptr = bx.ptr_element_ptr(
-            bx.backend_type(field),
+            bx.backend_type(&field),
             self.val.llval,
             &[bx.const_u32(ix as u32)],
         );
         let val = PlaceValue {
             llval: ptr,
             llextra: self.val.llextra,
-            align: field.layout.shape().abi_align,
+            align: field.layout.abi_align,
         };
 
         val.with_type(field)
@@ -166,9 +166,9 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
         llindex: V,
     ) -> Self {
         let layout = self.layout.field(0);
-        let llval = bx.ptr_element_ptr(bx.backend_type(layout), self.val.llval, &[llindex]);
+        let llval = bx.ptr_element_ptr(bx.backend_type(&layout), self.val.llval, &[llindex]);
 
-        PlaceValue::new_sized(llval, layout.layout.shape().abi_align).with_type(layout)
+        PlaceValue::new_sized(llval, layout.layout.abi_align).with_type(layout)
     }
 
     pub fn project_subslice<Bx: BuilderMethods<'a, Value = V>>(
@@ -177,14 +177,14 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
         lloffset: V,
         slice_layout: TyAndLayout,
     ) -> Self {
-        let llval = bx.offset_slice_ptr(self.val.llval, lloffset, bx.backend_type(slice_layout));
+        let llval = bx.offset_slice_ptr(self.val.llval, lloffset, bx.backend_type(&slice_layout));
 
-        PlaceValue::new_sized(llval, slice_layout.layout.shape().abi_align).with_type(slice_layout)
+        PlaceValue::new_sized(llval, slice_layout.layout.abi_align).with_type(slice_layout)
     }
 
     /// Obtain the actual discriminant of a value.
     #[instrument(level = "trace", skip(bx))]
-    pub fn codegen_get_discr<Bx: BuilderMethods<'a, Value = V>>(self, bx: &mut Bx) -> V {
+    pub fn codegen_get_discr<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx) -> V {
         bx.get_discriminant(self.val.llval)
     }
 
@@ -195,7 +195,7 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
         bx: &mut Bx,
         variant_index: VariantIdx,
     ) {
-        match self.layout.layout.shape().variants {
+        match self.layout.layout.variants {
             VariantsShape::Empty => bug!("cannot set discriminant on a type without variants"),
             VariantsShape::Single { index } => assert_eq!(index, variant_index),
             VariantsShape::Multiple { .. } => {
@@ -209,15 +209,15 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
         bx: &mut Bx,
         variant_index: VariantIdx,
     ) -> Self {
-        match self.layout.layout.shape().variants {
-            VariantsShape::Empty => *self,
+        match &self.layout.layout.variants {
+            VariantsShape::Empty => (*self).clone(),
             VariantsShape::Single { index } => {
-                assert_eq!(index, variant_index);
+                assert_eq!(*index, variant_index);
 
-                *self
+                (*self).clone()
             }
             VariantsShape::Multiple { .. } => {
-                let mut downcast = *self;
+                let mut downcast = (*self).clone();
 
                 downcast.val.llval = bx.ptr_variant_ptr(self.val.llval, variant_index);
                 downcast.layout = downcast.layout.for_variant(variant_index);
@@ -238,11 +238,11 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
     // }
 
     pub fn storage_live<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx) {
-        bx.lifetime_start(self.val.llval, self.layout.layout.shape().size);
+        bx.lifetime_start(self.val.llval, self.layout.layout.size);
     }
 
     pub fn storage_dead<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx) {
-        bx.lifetime_end(self.val.llval, self.layout.layout.shape().size);
+        bx.lifetime_end(self.val.llval, self.layout.layout.size);
     }
 }
 
@@ -256,8 +256,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
         let mut base = 0;
 
-        let mut cg_base = match self.locals[place_ref.local] {
-            LocalRef::Place(place) => place,
+        let mut cg_base = match &self.locals[place_ref.local] {
+            LocalRef::Place(place) => (*place).clone(),
             LocalRef::UnsizedPlace(place) => bx.load_operand(place).deref(cx),
             LocalRef::Operand(..) => {
                 if matches!(
@@ -286,7 +286,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
         for elem in place_ref.projection[base..].iter() {
             cg_base = match *elem {
-                mir::ProjectionElem::Deref => bx.load_operand(cg_base).deref(cx),
+                mir::ProjectionElem::Deref => bx.load_operand(&cg_base).deref(cx),
                 mir::ProjectionElem::Field(field, _) => cg_base.project_field(bx, field),
                 mir::ProjectionElem::OpaqueCast(ty) => {
                     bug!("encountered OpaqueCast({ty}) in codegen")
@@ -342,7 +342,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     let layout = TyAndLayout::expect_from_ty(projected_ty);
                     let mut subslice = cg_base.project_subslice(bx, bx.const_usize(from), layout);
 
-                    if subslice.layout.layout.shape().is_unsized() {
+                    if subslice.layout.layout.is_unsized() {
                         assert!(from_end, "slice subslices should be `from_end`");
 
                         subslice.val.llextra =

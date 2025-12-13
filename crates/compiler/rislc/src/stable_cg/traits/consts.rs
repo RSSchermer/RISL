@@ -41,7 +41,7 @@ pub trait ConstCodegenMethods: BackendTypes {
     fn const_to_opt_uint(&self, v: Self::Value) -> Option<u64>;
     fn const_to_opt_u128(&self, v: Self::Value, sign_ext: bool) -> Option<u128>;
 
-    fn const_data_from_alloc(&self, alloc: &Allocation, layout: TyAndLayout) -> Self::Value;
+    fn const_data_from_alloc(&self, alloc: &Allocation, layout: &TyAndLayout) -> Self::Value;
 
     fn scalar_to_backend(&self, cv: Scalar) -> Self::Value;
 }

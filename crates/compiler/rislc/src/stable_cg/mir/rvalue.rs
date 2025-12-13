@@ -148,8 +148,8 @@ fn bin_op_to_fcmp_predicate(op: mir::BinOp) -> RealPredicate {
 /// to a value of type `dst_ty`, and stores the result in `dst`.
 fn coerce_unsized_into<'a, Bx: BuilderMethods<'a>>(
     bx: &mut Bx,
-    src: PlaceRef<Bx::Value>,
-    dst: PlaceRef<Bx::Value>,
+    src: &PlaceRef<Bx::Value>,
+    dst: &PlaceRef<Bx::Value>,
 ) {
     let src_ty = src.layout.ty;
     let dst_ty = dst.layout.ty;
@@ -184,15 +184,15 @@ fn coerce_unsized_into<'a, Bx: BuilderMethods<'a>>(
                 let src_field = src.project_field(bx, i);
                 let dst_field = dst.project_field(bx, i);
 
-                if dst_field.layout.layout.shape().is_1zst() {
+                if dst_field.layout.layout.is_1zst() {
                     // No data here, nothing to copy/coerce.
                     continue;
                 }
 
                 if src_field.layout.ty == dst_field.layout.ty {
-                    bx.typed_place_copy(dst_field.val, src_field.val, src_field.layout);
+                    bx.typed_place_copy(dst_field.val, src_field.val, &src_field.layout);
                 } else {
-                    coerce_unsized_into(bx, src_field, dst_field);
+                    coerce_unsized_into(bx, &src_field, &dst_field);
                 }
             }
         }
@@ -275,14 +275,12 @@ fn unsize_ptr<'a, Bx: BuilderMethods<'a>>(
 
             let src_layout = TyAndLayout {
                 ty: src_ty,
-                layout: src_ty.layout().unwrap().into(),
+                layout: src_ty.layout().unwrap().shape(),
             };
             let dst_layout = TyAndLayout {
                 ty: dst_ty,
-                layout: dst_ty.layout().unwrap().into(),
+                layout: dst_ty.layout().unwrap().shape(),
             };
-            let src_shape = src_layout.layout.shape();
-            let dst_shape = dst_layout.layout.shape();
 
             if src_ty == dst_ty {
                 return (src, old_info.unwrap());
@@ -290,11 +288,10 @@ fn unsize_ptr<'a, Bx: BuilderMethods<'a>>(
 
             let mut result = None;
 
-            for i in 0..src_shape.fields.count() {
+            for i in 0..src_layout.layout.fields.count() {
                 let src_field = src_layout.field(i);
-                let src_field_shape = src_field.layout.shape();
 
-                if src_field.layout.shape().is_1zst() {
+                if src_field.layout.is_1zst() {
                     // We are looking for the one non-1-ZST field; this is not it.
                     continue;
                 }
@@ -317,11 +314,9 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
     pub(crate) fn codegen_rvalue(
         &mut self,
         bx: &mut Bx,
-        dest: PlaceRef<Bx::Value>,
+        dest: &PlaceRef<Bx::Value>,
         rvalue: &mir::Rvalue,
     ) {
-        let dest_shape = dest.layout.layout.shape();
-
         match rvalue {
             mir::Rvalue::Use(operand) => {
                 let cg_operand = self.codegen_operand(bx, operand);
@@ -337,7 +332,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             ) => {
                 // The destination necessarily contains a wide pointer, so if
                 // it's a scalar pair, it's a wide pointer or newtype thereof.
-                if bx.cx().is_backend_scalar_pair(dest.layout) {
+                if bx.cx().is_backend_scalar_pair(&dest.layout) {
                     // Into-coerce of a thin pointer to a wide pointer -- just
                     // use the operand path.
                     let temp = self.codegen_rvalue_operand(bx, rvalue);
@@ -364,8 +359,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                         let scratch = PlaceRef::alloca(bx, operand.layout);
 
                         scratch.storage_live(bx);
-                        operand.val.store(bx, scratch);
-                        coerce_unsized_into(bx, scratch, dest);
+                        operand.val.store(bx, &scratch);
+                        coerce_unsized_into(bx, &scratch, dest);
                         scratch.storage_dead(bx);
                     }
                     OperandValue::Ref(val) => {
@@ -373,7 +368,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                             bug!("unsized coercion on an unsized rvalue");
                         }
 
-                        coerce_unsized_into(bx, val.with_type(operand.layout), dest);
+                        coerce_unsized_into(bx, &val.with_type(operand.layout), dest);
                     }
                     OperandValue::ZeroSized => {
                         bug!("unsized coercion on a ZST rvalue");
@@ -389,7 +384,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 let cg_elem = self.codegen_operand(bx, elem);
 
                 // Do not generate the loop for zero-sized elements or empty arrays.
-                if dest_shape.is_1zst() {
+                if dest.layout.layout.is_1zst() {
                     return;
                 }
 
@@ -399,7 +394,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     .eval_target_usize()
                     .expect("expected monomorphic const in codegen");
 
-                bx.write_operand_repeatedly(cg_elem, count, dest);
+                bx.write_operand_repeatedly(&cg_elem, count, dest);
             }
 
             // This implementation does field projection, so never use it for `RawPtr`,
@@ -413,7 +408,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
                         (*variant_index, variant_dest, *active_field_index)
                     }
-                    _ => (VariantIdx::to_val(0), dest, None),
+                    _ => (VariantIdx::to_val(0), dest.clone(), None),
                 };
 
                 if active_field_index.is_some() {
@@ -424,7 +419,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     let op = self.codegen_operand(bx, operand);
 
                     // Do not generate stores for zero-sized fields.
-                    if !op.layout.layout.shape().is_1zst() {
+                    if !op.layout.layout.is_1zst() {
                         let field_index = active_field_index.unwrap_or(i);
 
                         let field = if matches!(kind, mir::AggregateKind::Array(_)) {
@@ -435,7 +430,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                             variant_dest.project_field(bx, field_index)
                         };
 
-                        op.val.store(bx, field);
+                        op.val.store(bx, &field);
                     }
                 }
 
@@ -512,10 +507,10 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
                 debug!("cast operand is {:?}", operand);
 
-                let layout = mir_cast_ty.layout().unwrap();
+                let layout = mir_cast_ty.layout().unwrap().shape();
                 let cast = TyAndLayout {
                     ty: *mir_cast_ty,
-                    layout: layout.into(),
+                    layout,
                 };
 
                 let val = match *kind {
@@ -536,7 +531,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                         bug!("cast not supported by RISL")
                     }
                     mir::CastKind::PointerCoercion(PointerCoercion::Unsize) => {
-                        assert!(bx.cx().is_backend_scalar_pair(cast));
+                        assert!(bx.cx().is_backend_scalar_pair(&cast));
 
                         let (lldata, llextra) = operand.val.pointer_parts();
                         let (lldata, llextra) =
@@ -548,17 +543,19 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     | mir::CastKind::FloatToInt
                     | mir::CastKind::FloatToFloat
                     | mir::CastKind::IntToFloat => {
-                        let imm = operand.immediate();
-                        let operand_kind = self.value_kind(operand.layout);
+                        let imm = operand.clone().immediate();
+                        let operand_kind = self.value_kind(&operand.layout);
+
                         let OperandValueKind::Immediate(from_scalar) = operand_kind else {
                             bug!("Found {operand_kind:?} for operand {operand:?}");
                         };
-                        let from_backend_ty = bx.cx().immediate_backend_type(operand.layout);
 
-                        assert!(bx.is_backend_immediate(cast));
+                        let from_backend_ty = bx.cx().immediate_backend_type(&operand.layout);
 
-                        let to_backend_ty = bx.immediate_backend_type(cast);
-                        let cast_kind = self.value_kind(cast);
+                        assert!(bx.is_backend_immediate(&cast));
+
+                        let to_backend_ty = bx.immediate_backend_type(&cast);
+                        let cast_kind = self.value_kind(&cast);
                         let OperandValueKind::Immediate(to_scalar) = cast_kind else {
                             bug!("Found {cast_kind:?} for operand {cast:?}");
                         };
@@ -601,14 +598,10 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             mir::Rvalue::Len(place) => {
                 let size = self.evaluate_array_len(bx, place);
                 let ty = Ty::usize_ty();
-                let layout = ty.layout().unwrap();
 
                 OperandRef {
                     val: OperandValue::Immediate(size),
-                    layout: TyAndLayout {
-                        ty,
-                        layout: layout.into(),
-                    },
+                    layout: TyAndLayout::expect_from_ty(ty),
                 }
             }
 
@@ -638,14 +631,10 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 };
 
                 let ty = op.ty(lhs.layout.ty, rhs.layout.ty);
-                let layout = ty.layout().unwrap();
 
                 OperandRef {
                     val: OperandValue::Immediate(llresult),
-                    layout: TyAndLayout {
-                        ty,
-                        layout: layout.into(),
-                    },
+                    layout: TyAndLayout::expect_from_ty(ty),
                 }
             }
 
@@ -655,18 +644,21 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
                 let (val, layout) = match op {
                     mir::UnOp::Not => {
+                        let layout = operand.layout.clone();
                         let llval = bx.not(operand.immediate());
 
-                        (OperandValue::Immediate(llval), operand.layout)
+                        (OperandValue::Immediate(llval), layout)
                     }
                     mir::UnOp::Neg => {
+                        let layout = operand.layout.clone();
+
                         let llval = if is_float {
                             bx.fneg(operand.immediate())
                         } else {
                             bx.neg(operand.immediate())
                         };
 
-                        (OperandValue::Immediate(llval), operand.layout)
+                        (OperandValue::Immediate(llval), layout)
                     }
                     mir::UnOp::PtrMetadata => {
                         let (_, meta) = operand.val.pointer_parts();
@@ -682,7 +674,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     }
                 };
                 assert!(
-                    val.is_expected_variant_for_type(self.cx, layout),
+                    val.is_expected_variant_for_type(self.cx, &layout),
                     "Made wrong variant {val:?} for type {layout:?}",
                 );
                 OperandRef { val, layout }
@@ -699,14 +691,10 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     )
                     .codegen_get_discr(bx);
                 let ty = Ty::unsigned_ty(UintTy::U32);
-                let layout = ty.layout().unwrap();
 
                 OperandRef {
                     val: OperandValue::Immediate(discr),
-                    layout: TyAndLayout {
-                        ty,
-                        layout: layout.into(),
-                    },
+                    layout: TyAndLayout::expect_from_ty(ty),
                 }
             }
 
@@ -714,23 +702,19 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             mir::Rvalue::Repeat(..) => bug!("{rvalue:?} in codegen_rvalue_operand"),
             mir::Rvalue::Aggregate(_, fields) => {
                 let ty = rvalue.ty(self.mir.locals()).unwrap();
-                let layout = ty.layout().unwrap();
-                let layout = TyAndLayout {
-                    ty,
-                    layout: layout.into(),
-                };
+                let layout = TyAndLayout::expect_from_ty(ty);
 
                 // `rvalue_creates_operand` has arranged that we only get here if
                 // we can build the aggregate immediate from the field immediates.
                 let mut inputs = ArrayVec::<Bx::Value, 2>::new();
                 let mut input_scalars = ArrayVec::<abi::Scalar, 2>::new();
 
-                for field_idx in layout.layout.shape().fields.fields_by_offset_order() {
+                for field_idx in layout.layout.fields.fields_by_offset_order() {
                     let op = self.codegen_operand(bx, &fields[field_idx]);
                     let values = op.val.immediates_or_place().left_or_else(|p| {
                         bug!("Field {field_idx:?} is {p:?} making {layout:?}");
                     });
-                    let scalars = self.value_kind(op.layout).scalars().unwrap();
+                    let scalars = self.value_kind(&op.layout).scalars().unwrap();
 
                     assert_eq!(values.len(), scalars.len());
 
@@ -738,7 +722,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     input_scalars.extend(scalars);
                 }
 
-                let output_scalars = self.value_kind(layout).scalars().unwrap();
+                let output_scalars = self.value_kind(&layout).scalars().unwrap();
 
                 itertools::izip!(&mut inputs, input_scalars, output_scalars).for_each(
                     |(v, in_s, out_s)| {
@@ -754,7 +738,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 let val = OperandValue::from_immediates(inputs);
 
                 assert!(
-                    val.is_expected_variant_for_type(self.cx, layout),
+                    val.is_expected_variant_for_type(self.cx, &layout),
                     "Made wrong variant {val:?} for type {layout:?}",
                 );
 
@@ -763,7 +747,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             mir::Rvalue::ThreadLocalRef(..)
             | mir::Rvalue::ShallowInitBox(..)
             | mir::Rvalue::AddressOf(..)
-            | mir::Rvalue::NullaryOp(..)=> {
+            | mir::Rvalue::NullaryOp(..) => {
                 bug!("not supported by RISL")
             }
         }
@@ -773,7 +757,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         // ZST are passed as operands and require special handling
         // because codegen_place() panics if Local is operand.
         if place.projection.is_empty()
-            && let LocalRef::Operand(op) = self.locals[place.local]
+            && let LocalRef::Operand(op) = self.locals[place.local].clone()
             && let TyKind::RigidTy(RigidTy::Array(_, n)) = op.layout.ty.kind()
         {
             let n = n
@@ -901,17 +885,14 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     .builtin_deref(true)
                     .unwrap_or_else(|| bug!("deref of non-pointer {:?}", input_ty))
                     .ty;
-                let pointee_layout = TyAndLayout {
-                    ty: pointee_type,
-                    layout: pointee_type.layout().unwrap().into(),
-                };
+                let pointee_layout = TyAndLayout::expect_from_ty(pointee_type);
 
-                if pointee_layout.layout.shape().is_1zst() {
+                if pointee_layout.layout.is_1zst() {
                     // `Offset` works in terms of the size of pointee,
                     // so offsetting a pointer to ZST is a noop.
                     lhs
                 } else {
-                    let llty = bx.cx().backend_type(pointee_layout);
+                    let llty = bx.cx().backend_type(&pointee_layout);
 
                     bx.ptr_element_ptr(llty, lhs, &[rhs])
                 }
@@ -1046,29 +1027,30 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                         .ty(self.mir.locals())
                         .expect("should be able to resolve type during codegen");
 
-                    !self.cx.is_backend_ref(TyAndLayout::expect_from_ty(ty))
+                    !self.cx.is_backend_ref(&TyAndLayout::expect_from_ty(ty))
                 }
             }
         }
     }
 
     /// Gets which variant of [`OperandValue`] is expected for a particular type.
-    fn value_kind(&self, layout: TyAndLayout) -> OperandValueKind {
-        let shape = layout.layout.shape();
-
-        if shape.is_1zst() {
+    fn value_kind(&self, layout: &TyAndLayout) -> OperandValueKind {
+        if layout.layout.is_1zst() {
             OperandValueKind::ZeroSized
         } else if self.cx.is_backend_immediate(layout) {
             assert!(!self.cx.is_backend_scalar_pair(layout));
 
-            OperandValueKind::Immediate(match shape.abi {
+            OperandValueKind::Immediate(match layout.layout.abi.clone() {
                 ValueAbi::Scalar(s) => s,
                 ValueAbi::Vector { element, .. } => element,
                 x => bug!("Couldn't translate {x:?} as backend immediate"),
             })
         } else if self.cx.is_backend_scalar_pair(layout) {
-            let ValueAbi::ScalarPair(s1, s2) = shape.abi else {
-                bug!("Couldn't translate {:?} as backend scalar pair", shape.abi,);
+            let ValueAbi::ScalarPair(s1, s2) = layout.layout.abi else {
+                bug!(
+                    "Couldn't translate {:?} as backend scalar pair",
+                    layout.layout.abi,
+                );
             };
 
             OperandValueKind::Pair(s1, s2)

@@ -1,59 +1,13 @@
-use internment::Intern;
 use rustc_middle::bug;
-use rustc_public::abi::{Layout as LayoutToken, LayoutShape, Primitive, Scalar, VariantsShape};
+use rustc_public::abi::{LayoutShape, Primitive, Scalar, VariantsShape};
 use rustc_public::target::{MachineInfo, MachineSize};
 use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
 
-pub type ShapeToken = Intern<ShapeWrapper>;
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct ShapeWrapper {
-    shape: LayoutShape,
-}
-
-unsafe impl Send for ShapeWrapper {}
-unsafe impl Sync for ShapeWrapper {}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Layout {
-    Layout(LayoutToken),
-    Shape(ShapeToken),
-}
-
-impl From<LayoutToken> for Layout {
-    fn from(token: LayoutToken) -> Self {
-        Layout::Layout(token)
-    }
-}
-
-impl From<ShapeToken> for Layout {
-    fn from(token: ShapeToken) -> Self {
-        Layout::Shape(token)
-    }
-}
-
-impl From<LayoutShape> for Layout {
-    fn from(shape: LayoutShape) -> Self {
-        Layout::Shape(Intern::new(ShapeWrapper {
-            shape
-        }))
-    }
-}
-
-impl Layout {
-    pub fn shape(&self) -> LayoutShape {
-        match self {
-            Layout::Layout(t) => t.shape(),
-            Layout::Shape(s) => s.as_ref().shape.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TyAndLayout {
     pub ty: Ty,
-    pub layout: Layout,
+    pub layout: LayoutShape,
 }
 
 impl TyAndLayout {
@@ -64,7 +18,7 @@ impl TyAndLayout {
 
         TyAndLayout {
             ty,
-            layout: layout.into(),
+            layout: layout.shape(),
         }
     }
 
@@ -103,9 +57,7 @@ impl TyAndLayout {
 
                 // Potentially-wide pointers.
                 RigidTy::Ref(_, pointee, mutability) | RigidTy::RawPtr(pointee, mutability) => {
-                    let shape = this.layout.shape();
-
-                    assert!(i < shape.fields.count());
+                    assert!(i < this.layout.fields.count());
 
                     if i == 0 {
                         let unit_ty = Ty::new_tuple(&[]);
@@ -121,11 +73,11 @@ impl TyAndLayout {
                                 mutability,
                             )
                         };
-                        let layout = unit_ptr_ty.layout().unwrap();
+                        let layout = unit_ptr_ty.layout().unwrap().shape();
 
                         TyMaybeWithLayout::TyAndLayout(TyAndLayout {
                             ty: this.ty,
-                            layout: layout.into(),
+                            layout,
                         })
                     } else if i == 1 {
                         // We assume the second field is the size slice, as other wide pointer types
@@ -170,7 +122,7 @@ impl TyAndLayout {
 
                 // ADTs.
                 RigidTy::Adt(def, args) => {
-                    match this.layout.shape().variants {
+                    match this.layout.variants {
                         VariantsShape::Single { index } => {
                             let field = &def.variant(index).unwrap().fields()[i];
 
@@ -204,7 +156,7 @@ impl TyAndLayout {
 
                 TyAndLayout {
                     ty: field_ty,
-                    layout: layout.into(),
+                    layout: layout.shape(),
                 }
             }
             TyMaybeWithLayout::TyAndLayout(field_layout) => field_layout,
@@ -212,7 +164,7 @@ impl TyAndLayout {
     }
 
     pub fn for_variant(self, variant_idx: VariantIdx) -> Self {
-        match self.layout.shape().variants {
+        match self.layout.variants {
             VariantsShape::Single { index } if index == variant_idx => self,
             VariantsShape::Multiple { variants, .. } => {
                 let variant_shape = &variants[variant_idx.to_index()];

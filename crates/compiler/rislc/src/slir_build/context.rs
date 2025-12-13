@@ -165,41 +165,39 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         }
     }
 
-    pub fn ty_and_layout_resolve(&self, layout: TyAndLayout) -> slir::ty::Type {
+    pub fn ty_and_layout_resolve(&self, layout: &TyAndLayout) -> slir::ty::Type {
         // Note: this cannot be inlined into the if-let expression, because then the borrow guard would
         // not drop in time, which would result in an "already borrowed" error.
-        let ty = self.ty_to_slir.borrow().get(&layout).copied();
+        let ty = self.ty_to_slir.borrow().get(layout).copied();
 
         if let Some(ty) = ty {
             ty
         } else {
-            let ty = self.ty_and_layout_register(layout.clone());
+            let ty = self.ty_and_layout_register(layout);
 
-            self.ty_to_slir.borrow_mut().insert(layout, ty);
+            self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
             ty
         }
     }
 
-    fn ty_and_layout_register(&self, layout: TyAndLayout) -> slir::ty::Type {
+    fn ty_and_layout_register(&self, layout: &TyAndLayout) -> slir::ty::Type {
         if let Some(primitive_ty) = RislPrimitiveTy::from_ty(layout.ty) {
             return primitive_ty_to_slir(primitive_ty);
         }
 
-        if let Some(ty) = self.try_register_as_rislc_mem_resource_ty(layout) {
+        if let Some(ty) = self.try_register_as_rislc_mem_resource_ty(&layout) {
             return ty;
         }
-
-        let shape = layout.layout.shape();
 
         // Handle enums before scalar primitives, as there enum types that cam present as scalar
         // primitives (e.g. an Option<T> where T has a "niche"), but we want to explicitly pass
         // those to SLIR as enums regardless.
-        if let VariantsShape::Multiple { variants, .. } = &shape.variants {
+        if let VariantsShape::Multiple { variants, .. } = &layout.layout.variants {
             return self.register_enum(variants, layout);
         }
 
-        match shape.abi {
+        match layout.layout.abi.clone() {
             ValueAbi::Scalar(scalar) => {
                 return self.resolve_scalar_ty(scalar, layout);
             }
@@ -212,12 +210,12 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             _ => {}
         }
 
-        match shape.fields {
+        match layout.layout.fields {
             FieldsShape::Primitive => bug!("primitive should have been handled earlier"),
             FieldsShape::Union(_) => bug!("union types are not supported by RISL"),
             FieldsShape::Array { count, stride } => self.register_array_ty(count, stride, layout),
             FieldsShape::Arbitrary { ref offsets, .. } => {
-                self.register_struct(&shape, offsets, layout)
+                self.register_struct(&layout.layout, offsets, layout)
             }
         }
     }
@@ -228,7 +226,10 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
     /// resources (e.g., the `risl::resource::Storage` type). Such wrappers help us achieve the
     /// interface we want to expose, but end up being noise at lower levels of compilation. We
     /// therefore unpack these types here.
-    fn try_register_as_rislc_mem_resource_ty(&self, layout: TyAndLayout) -> Option<slir::ty::Type> {
+    fn try_register_as_rislc_mem_resource_ty(
+        &self,
+        layout: &TyAndLayout,
+    ) -> Option<slir::ty::Type> {
         let ty = layout.ty;
 
         if let TyKind::RigidTy(RigidTy::Adt(def, generics)) = ty.kind() {
@@ -243,10 +244,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
                 let layout = ty
                     .layout()
                     .expect("type must have a known layout during codegen");
-                let slir_ty = self.ty_and_layout_resolve(TyAndLayout {
-                    ty: *ty,
-                    layout: layout.into(),
-                });
+                let slir_ty = self.ty_and_layout_resolve(&TyAndLayout::expect_from_ty(*ty));
 
                 return Some(slir_ty);
             }
@@ -255,7 +253,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         None
     }
 
-    fn resolve_scalar_ty(&self, scalar: abi::Scalar, layout: TyAndLayout) -> slir::ty::Type {
+    fn resolve_scalar_ty(&self, scalar: abi::Scalar, layout: &TyAndLayout) -> slir::ty::Type {
         if matches!(
             scalar,
             abi::Scalar::Initialized {
@@ -287,13 +285,8 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
 
                 match ty {
                     RigidTy::Ref(_, pointee_ty, _) | RigidTy::RawPtr(pointee_ty, _) => {
-                        let pointee_layout = pointee_ty
-                            .layout()
-                            .expect("type must have known layout during codegen");
-                        let pointee_ty = self.ty_and_layout_resolve(TyAndLayout {
-                            ty: pointee_ty,
-                            layout: pointee_layout.into(),
-                        });
+                        let pointee_ty =
+                            self.ty_and_layout_resolve(&TyAndLayout::expect_from_ty(pointee_ty));
 
                         self.module
                             .borrow()
@@ -311,10 +304,10 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         &self,
         s0: abi::Scalar,
         s1: abi::Scalar,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        let t0 = self.resolve_scalar_ty(s0, layout.field(0));
-        let t1 = self.resolve_scalar_ty(s1, layout.field(1));
+        let t0 = self.resolve_scalar_ty(s0, &layout.field(0));
+        let t1 = self.resolve_scalar_ty(s1, &layout.field(1));
 
         // My understanding from rustc_codegen_llvm is that there is never any padding between
         // the values of a scalar pair (as they are never meant to be stored to memory).
@@ -337,7 +330,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             .ty
             .register(slir::ty::Struct { fields }.into());
 
-        self.ty_to_slir.borrow_mut().insert(layout, ty);
+        self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
         ty
     }
@@ -346,16 +339,16 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         &self,
         element: abi::Scalar,
         count: u64,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        let base = self.resolve_scalar_ty(element, layout.field(0));
+        let base = self.resolve_scalar_ty(element, &layout.field(0));
         let ty = self.module.borrow().ty.register(slir::ty::TypeKind::Array {
             element_ty: base,
             count,
             stride: 4,
         });
 
-        self.ty_to_slir.borrow_mut().insert(layout, ty);
+        self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
         ty
     }
@@ -364,10 +357,10 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         &self,
         count: u64,
         stride: MachineSize,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> slir::ty::Type {
         let element_layout = layout.field(0);
-        let base = self.ty_and_layout_resolve(element_layout);
+        let base = self.ty_and_layout_resolve(&element_layout);
 
         let kind = if layout.ty.kind().is_slice() {
             slir::ty::TypeKind::Slice {
@@ -384,7 +377,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
 
         let ty = self.module.borrow().ty.register(kind);
 
-        self.ty_to_slir.borrow_mut().insert(layout, ty);
+        self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
         ty
     }
@@ -393,7 +386,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         &self,
         shape: &abi::LayoutShape,
         field_offsets: &[MachineSize],
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> slir::ty::Type {
         let TyKind::RigidTy(RigidTy::Adt(def, _)) = layout.ty.kind() else {
             panic!("expected a struct type")
@@ -410,7 +403,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             .into_iter()
             .map(|i| {
                 let layout = layout.field(i);
-                let ty = self.ty_and_layout_resolve(layout);
+                let ty = self.ty_and_layout_resolve(&layout);
 
                 // Not all types have an equal number of field-defs in the THIR representation as
                 // they do in the ABI shape (notably fat pointers won't), but types that have
@@ -441,7 +434,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             .ty
             .register(slir::ty::Struct { fields }.into());
 
-        self.ty_to_slir.borrow_mut().insert(layout, ty);
+        self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
         ty
     }
@@ -449,21 +442,21 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
     fn register_enum(
         &self,
         variant_shapes: &[abi::LayoutShape],
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) -> slir::ty::Type {
         let variants = variant_shapes
             .iter()
             .map(|shape| {
                 let variant_layout = TyAndLayout {
                     ty: layout.ty,
-                    layout: shape.clone().into(),
+                    layout: shape.clone(),
                 };
 
                 let FieldsShape::Arbitrary { offsets, .. } = &shape.fields else {
                     bug!("enum variant should have an arbitrary field shape")
                 };
 
-                self.register_struct(shape, offsets, variant_layout)
+                self.register_struct(shape, offsets, &variant_layout)
             })
             .collect();
 
@@ -473,7 +466,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             .ty
             .register(slir::ty::Enum { variants }.into());
 
-        self.ty_to_slir.borrow_mut().insert(layout, ty);
+        self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
         ty
     }
@@ -494,8 +487,7 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
             .expect("statics referenced by RISL functions must be extended")
             .expect_static();
 
-        let ty = def.ty();
-        let ty = self.ty_and_layout_resolve(TyAndLayout::expect_from_ty(ty));
+        let ty = self.ty_and_layout_resolve(&TyAndLayout::expect_from_ty(def.ty()));
 
         let mut module = self.module.borrow_mut();
 
@@ -591,9 +583,9 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
         let mut args = Vec::new();
 
         if matches!(abi.ret.mode, PassMode::Indirect { .. }) {
-            let ret_ty = self.ty_and_layout_resolve(TyAndLayout {
+            let ret_ty = self.ty_and_layout_resolve(&TyAndLayout {
                 ty: abi.ret.ty,
-                layout: abi.ret.layout.into(),
+                layout: abi.ret.layout.shape(),
             });
 
             args.push(slir::FnArg {
@@ -610,9 +602,9 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
             match arg.mode {
                 PassMode::Ignore => {}
                 PassMode::Direct(_) => {
-                    let ty = self.ty_and_layout_resolve(TyAndLayout {
+                    let ty = self.ty_and_layout_resolve(&TyAndLayout {
                         ty: arg.ty,
-                        layout: arg.layout.into(),
+                        layout: arg.layout.shape(),
                     });
 
                     args.push(slir::FnArg {
@@ -627,11 +619,11 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
 
                     let layout = TyAndLayout {
                         ty: arg.ty,
-                        layout: arg.layout.into(),
+                        layout: arg.layout.shape(),
                     };
 
-                    let a_ty = self.resolve_scalar_ty(a, layout.field(0));
-                    let b_ty = self.resolve_scalar_ty(b, layout.field(1));
+                    let a_ty = self.resolve_scalar_ty(a, &layout.field(0));
+                    let b_ty = self.resolve_scalar_ty(b, &layout.field(1));
 
                     args.push(slir::FnArg {
                         ty: a_ty,
@@ -643,9 +635,9 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
                     });
                 }
                 PassMode::Indirect { .. } => {
-                    let ty = self.ty_and_layout_resolve(TyAndLayout {
+                    let ty = self.ty_and_layout_resolve(&TyAndLayout {
                         ty: arg.ty,
-                        layout: arg.layout.into(),
+                        layout: arg.layout.shape(),
                     });
 
                     args.push(slir::FnArg {
@@ -664,9 +656,9 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
         let ret_ty = if matches!(abi.ret.mode, PassMode::Ignore | PassMode::Indirect { .. }) {
             None
         } else {
-            Some(self.ty_and_layout_resolve(TyAndLayout {
+            Some(self.ty_and_layout_resolve(&TyAndLayout {
                 ty: abi.ret.ty,
-                layout: abi.ret.layout.into(),
+                layout: abi.ret.layout.shape(),
             }))
         };
 
@@ -805,7 +797,7 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
         }
     }
 
-    fn const_data_from_alloc(&self, alloc: &Allocation, layout: TyAndLayout) -> Self::Value {
+    fn const_data_from_alloc(&self, alloc: &Allocation, layout: &TyAndLayout) -> Self::Value {
         todo!()
     }
 
@@ -842,7 +834,7 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
                             name: const_name,
                             module: self.module_name,
                         };
-                        let ty = self.ty_and_layout_resolve(ptr.pointee_layout);
+                        let ty = self.ty_and_layout_resolve(&ptr.pointee_layout);
 
                         self.module
                             .borrow_mut()
@@ -867,7 +859,7 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> LayoutTypeCodegenMethods for CodegenContext<'a, 'tcx> {
-    fn backend_type(&self, layout: TyAndLayout) -> Self::Type {
+    fn backend_type(&self, layout: &TyAndLayout) -> Self::Type {
         self.ty_and_layout_resolve(layout).into()
     }
 
@@ -878,38 +870,34 @@ impl<'a, 'tcx> LayoutTypeCodegenMethods for CodegenContext<'a, 'tcx> {
         ) {
             None
         } else {
-            Some(self.ty_and_layout_resolve(TyAndLayout {
+            Some(self.ty_and_layout_resolve(&TyAndLayout {
                 ty: fn_abi.ret.ty,
-                layout: fn_abi.ret.layout.into(),
+                layout: fn_abi.ret.layout.shape(),
             }))
         };
 
         Type::FnDecl { ret_ty }
     }
 
-    fn immediate_backend_type(&self, layout: TyAndLayout) -> Self::Type {
+    fn immediate_backend_type(&self, layout: &TyAndLayout) -> Self::Type {
         self.ty_and_layout_resolve(layout).into()
     }
 
-    fn is_backend_immediate(&self, layout: TyAndLayout) -> bool {
-        let shape = layout.layout.shape();
-
-        match shape.abi {
+    fn is_backend_immediate(&self, layout: &TyAndLayout) -> bool {
+        match layout.layout.abi {
             ValueAbi::Scalar(_) | ValueAbi::Vector { .. } => true,
             ValueAbi::ScalarPair(..) => false,
-            ValueAbi::Aggregate { .. } => shape.is_1zst(),
+            ValueAbi::Aggregate { .. } => layout.layout.is_1zst(),
         }
     }
 
-    fn is_backend_scalar_pair(&self, layout: TyAndLayout) -> bool {
-        let shape = layout.layout.shape();
-
-        matches!(shape.abi, ValueAbi::ScalarPair(..))
+    fn is_backend_scalar_pair(&self, layout: &TyAndLayout) -> bool {
+        matches!(layout.layout.abi, ValueAbi::ScalarPair(..))
     }
 
     fn scalar_pair_element_backend_type(
         &self,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
         index: usize,
         immediate: bool,
     ) -> Self::Type {

@@ -1,6 +1,9 @@
 use indexmap::IndexMap;
 use rustc_ast::{IsAuto, Mutability};
-use rustc_hir::{BodyId, ConstItemRhs, Constness, EnumDef, FnSig, GenericBounds, Generics, HirId, Impl, Item, ItemId, ItemKind, Mod, Safety, TraitItemId, Ty, VariantData};
+use rustc_hir::{
+    BodyId, ConstItemRhs, Constness, EnumDef, FnSig, GenericBounds, Generics, HirId, Impl, Item,
+    ItemId, ItemKind, Mod, Safety, TraitItemId, Ty, VariantData,
+};
 use rustc_span::def_id::{DefId, LocalDefId, LocalModDefId};
 use rustc_span::source_map::Spanned;
 use rustc_span::{Ident, Span};

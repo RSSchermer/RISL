@@ -71,7 +71,7 @@ impl<T> DerivedTypeCodegenMethods for T where Self: BaseTypeCodegenMethods + Mis
 pub trait LayoutTypeCodegenMethods: BackendTypes {
     /// The backend type used for a rust type when it's in memory,
     /// such as when it's stack-allocated or when it's being loaded or stored.
-    fn backend_type(&self, layout: TyAndLayout) -> Self::Type;
+    fn backend_type(&self, layout: &TyAndLayout) -> Self::Type;
 
     fn fn_decl_backend_type(&self, fn_abi: &FnAbi) -> Self::Type;
 
@@ -84,15 +84,15 @@ pub trait LayoutTypeCodegenMethods: BackendTypes {
     /// Converting values between the two different backend types is done using
     /// [`from_immediate`](super::BuilderMethods::from_immediate) and
     /// [`to_immediate_scalar`](super::BuilderMethods::to_immediate_scalar).
-    fn immediate_backend_type(&self, layout: TyAndLayout) -> Self::Type;
+    fn immediate_backend_type(&self, layout: &TyAndLayout) -> Self::Type;
 
-    fn is_backend_immediate(&self, layout: TyAndLayout) -> bool;
+    fn is_backend_immediate(&self, layout: &TyAndLayout) -> bool;
 
-    fn is_backend_scalar_pair(&self, layout: TyAndLayout) -> bool;
+    fn is_backend_scalar_pair(&self, layout: &TyAndLayout) -> bool;
 
     fn scalar_pair_element_backend_type(
         &self,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
         index: usize,
         immediate: bool,
     ) -> Self::Type;
@@ -105,16 +105,16 @@ pub trait LayoutTypeCodegenMethods: BackendTypes {
     ///
     /// [`OperandValue::Ref`]: crate::mir::operand::OperandValue::Ref
     /// [`load_operand`]: super::BuilderMethods::load_operand
-    fn is_backend_ref(&self, layout: TyAndLayout) -> bool {
-        !(layout.layout.shape().is_1zst()
+    fn is_backend_ref(&self, layout: &TyAndLayout) -> bool {
+        !(layout.layout.is_1zst()
             || self.is_backend_immediate(layout)
             || self.is_backend_scalar_pair(layout))
     }
 }
 
 pub trait ArgAbiBuilderMethods: BackendTypes {
-    fn store_fn_arg(&mut self, arg_abi: &ArgAbi, idx: &mut usize, dst: PlaceRef<Self::Value>);
-    fn store_arg(&mut self, arg_abi: &ArgAbi, val: Self::Value, dst: PlaceRef<Self::Value>);
+    fn store_fn_arg(&mut self, arg_abi: &ArgAbi, idx: &mut usize, dst: &PlaceRef<Self::Value>);
+    fn store_arg(&mut self, arg_abi: &ArgAbi, val: Self::Value, dst: &PlaceRef<Self::Value>);
     fn arg_memory_ty(&self, arg_abi: &ArgAbi) -> Self::Type;
 }
 

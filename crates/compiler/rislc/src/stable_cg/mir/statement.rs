@@ -13,8 +13,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         match &statement.kind {
             mir::StatementKind::Assign(place, rvalue) => {
                 if place.projection.is_empty() {
-                    match self.locals[place.local] {
-                        LocalRef::Place(cg_dest) => self.codegen_rvalue(bx, cg_dest, rvalue),
+                    match self.locals[place.local].clone() {
+                        LocalRef::Place(cg_dest) => self.codegen_rvalue(bx, &cg_dest, rvalue),
                         LocalRef::UnsizedPlace(cg_indirect_dest) => bug!("not supported by RISL"),
                         LocalRef::PendingOperand => {
                             let mut operand = self.codegen_rvalue_operand(bx, rvalue);
@@ -42,7 +42,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
                             match (old.val, &mut new.val) {
                                 (OperandValue::Ref(place), new_val) => {
-                                    new_val.store(bx, place.with_type(new.layout));
+                                    new_val.store(bx, &place.with_type(new.layout.clone()));
                                 }
                                 (OperandValue::Immediate(old), OperandValue::Immediate(new)) => {
                                     let local = bx.as_local(old);
@@ -80,7 +80,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                         },
                     );
 
-                    self.codegen_rvalue(bx, cg_dest, rvalue);
+                    self.codegen_rvalue(bx, &cg_dest, rvalue);
                 }
             }
             mir::StatementKind::SetDiscriminant {
@@ -97,16 +97,16 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 .codegen_set_discr(bx, *variant_index);
             }
             mir::StatementKind::StorageLive(local) => {
-                if let LocalRef::Place(cg_place) = self.locals[*local] {
+                if let LocalRef::Place(cg_place) = &self.locals[*local] {
                     cg_place.storage_live(bx);
-                } else if let LocalRef::UnsizedPlace(cg_indirect_place) = self.locals[*local] {
+                } else if let LocalRef::UnsizedPlace(cg_indirect_place) = &self.locals[*local] {
                     cg_indirect_place.storage_live(bx);
                 }
             }
             mir::StatementKind::StorageDead(local) => {
-                if let LocalRef::Place(cg_place) = self.locals[*local] {
+                if let LocalRef::Place(cg_place) = &self.locals[*local] {
                     cg_place.storage_dead(bx);
-                } else if let LocalRef::UnsizedPlace(cg_indirect_place) = self.locals[*local] {
+                } else if let LocalRef::UnsizedPlace(cg_indirect_place) = &self.locals[*local] {
                     cg_indirect_place.storage_dead(bx);
                 }
             }

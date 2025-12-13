@@ -89,6 +89,7 @@ pub struct FunctionCx<'a, Bx: BuilderMethods<'a>> {
     locals: locals::Locals<Bx::Value>,
 }
 
+#[derive(Clone)]
 enum LocalRef<V> {
     Place(PlaceRef<V>),
     /// `UnsizedPlace(p)`: `p` itself is a thin pointer (indirect place).
@@ -104,7 +105,7 @@ enum LocalRef<V> {
 
 impl<'tcx, V: CodegenObject> LocalRef<V> {
     fn new_operand(layout: TyAndLayout) -> LocalRef<V> {
-        if layout.layout.shape().is_1zst() {
+        if layout.layout.is_1zst() {
             // Zero-size temporaries aren't always initialized, which
             // doesn't matter because they don't contain data, but
             // we need something sufficiently aligned in the operand.
@@ -202,9 +203,7 @@ pub fn codegen_mir<'a, Bx: BuilderMethods<'a>>(cx: &'a Bx::CodegenCx, instance: 
             let layout = TyAndLayout::expect_from_ty(decl.ty);
 
             if needs_alloca.contains(local_index) {
-                let shape = layout.layout.shape();
-
-                if shape.is_unsized() {
+                if layout.layout.is_unsized() {
                     LocalRef::UnsizedPlace(PlaceRef::alloca_unsized_indirect(&mut start_bx, layout))
                 } else {
                     LocalRef::Place(PlaceRef::alloca(&mut start_bx, layout))
@@ -283,20 +282,17 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                     bug!("spread argument should be a tuple");
                 };
 
-                let layout = arg_ty.layout().expect("must have layout during codegen");
+                let layout = arg_ty
+                    .layout()
+                    .expect("must have layout during codegen")
+                    .shape();
 
                 // FIXME: support unsized params in "rust-call" ABI
-                if layout.shape().is_unsized() {
+                if layout.is_unsized() {
                     bug!("\"rust-call\" ABI does not support unsized params",);
                 }
 
-                let place = PlaceRef::alloca(
-                    bx,
-                    TyAndLayout {
-                        ty: arg_ty,
-                        layout: layout.into(),
-                    },
-                );
+                let place = PlaceRef::alloca(bx, TyAndLayout { ty: arg_ty, layout });
 
                 for i in 0..tupled_arg_tys.len() {
                     let arg = &fx.fn_abi.args[idx];
@@ -305,7 +301,7 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
 
                     let pr_field = place.project_field(bx, i);
 
-                    bx.store_fn_arg(arg, &mut llarg_idx, pr_field);
+                    bx.store_fn_arg(arg, &mut llarg_idx, &pr_field);
                 }
 
                 assert_eq!(
@@ -332,7 +328,7 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                     PassMode::Ignore => {
                         return local(OperandRef::zero_sized(TyAndLayout {
                             ty: arg_ty,
-                            layout: arg.layout.into(),
+                            layout: arg.layout.shape(),
                         }));
                     }
                     PassMode::Direct(_) => {
@@ -345,7 +341,7 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                             llarg,
                             TyAndLayout {
                                 ty: arg_ty,
-                                layout: arg.layout.into(),
+                                layout: arg.layout.shape(),
                             },
                         ));
                     }
@@ -358,7 +354,7 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                             val: OperandValue::Pair(a, b),
                             layout: TyAndLayout {
                                 ty: arg_ty,
-                                layout: arg.layout.into(),
+                                layout: arg.layout.shape(),
                             },
                         });
                     }
@@ -384,11 +380,11 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                         bx,
                         TyAndLayout {
                             ty: arg.ty,
-                            layout: arg.layout.into(),
+                            layout: arg.layout.shape(),
                         },
                     );
 
-                    indirect_operand.store(bx, tmp);
+                    indirect_operand.store(bx, &tmp);
 
                     LocalRef::UnsizedPlace(tmp)
                 }
@@ -402,7 +398,7 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                         llarg,
                         TyAndLayout {
                             ty: arg.ty,
-                            layout: arg.layout.into(),
+                            layout: arg.layout.shape(),
                         },
                     ))
                 }
@@ -412,11 +408,11 @@ fn arg_local_refs<'a, Bx: BuilderMethods<'a>>(
                         bx,
                         TyAndLayout {
                             ty: arg.ty,
-                            layout: arg.layout.into(),
+                            layout: arg.layout.shape(),
                         },
                     );
 
-                    bx.store_fn_arg(arg, &mut llarg_idx, tmp);
+                    bx.store_fn_arg(arg, &mut llarg_idx, &tmp);
 
                     LocalRef::Place(tmp)
                 }

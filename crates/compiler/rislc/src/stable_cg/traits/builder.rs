@@ -134,8 +134,8 @@ pub trait BuilderMethods<'a>:
     fn not(&mut self, v: Self::Value) -> Self::Value;
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value;
-    fn to_immediate(&mut self, val: Self::Value, layout: TyAndLayout) -> Self::Value {
-        if let ValueAbi::Scalar(scalar) = layout.layout.shape().abi {
+    fn to_immediate(&mut self, val: Self::Value, layout: &TyAndLayout) -> Self::Value {
+        if let ValueAbi::Scalar(scalar) = layout.layout.abi {
             self.to_immediate_scalar(val, scalar)
         } else {
             val
@@ -143,7 +143,7 @@ pub trait BuilderMethods<'a>:
     }
     fn to_immediate_scalar(&mut self, val: Self::Value, scalar: Scalar) -> Self::Value;
 
-    fn alloca(&mut self, layout: TyAndLayout) -> Self::Value;
+    fn alloca(&mut self, layout: &TyAndLayout) -> Self::Value;
 
     fn assign(&mut self, local: Self::Local, value: Self::Value);
 
@@ -160,14 +160,14 @@ pub trait BuilderMethods<'a>:
         assert_eq!(place.llextra, None);
         self.load(ty, place.llval, place.align)
     }
-    fn load_operand(&mut self, place: PlaceRef<Self::Value>) -> OperandRef<Self::Value>;
+    fn load_operand(&mut self, place: &PlaceRef<Self::Value>) -> OperandRef<Self::Value>;
 
     /// Called for Rvalue::Repeat when the elem is neither a ZST nor optimizable using memset.
     fn write_operand_repeatedly(
         &mut self,
-        elem: OperandRef<Self::Value>,
+        elem: &OperandRef<Self::Value>,
         count: u64,
-        dest: PlaceRef<Self::Value>,
+        dest: &PlaceRef<Self::Value>,
     );
 
     fn store(&mut self, val: Self::Value, ptr: Self::Value, align: Align) -> Self::Value;
@@ -249,12 +249,10 @@ pub trait BuilderMethods<'a>:
         &mut self,
         dst: PlaceValue<Self::Value>,
         src: PlaceValue<Self::Value>,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) {
-        let layout_shape = layout.layout.shape();
-
         assert!(
-            layout_shape.is_sized(),
+            layout.layout.is_sized(),
             "cannot typed-copy an unsigned type"
         );
         assert!(
@@ -266,12 +264,12 @@ pub trait BuilderMethods<'a>:
             "cannot directly copy into unsized values"
         );
 
-        if self.is_backend_immediate(layout.clone()) {
-            let temp = self.load_operand(src.with_type(layout.clone()));
+        if self.is_backend_immediate(&layout) {
+            let temp = self.load_operand(&src.with_type(layout.clone()));
 
-            temp.val.store(self, dst.with_type(layout));
+            temp.val.store(self, &dst.with_type(layout.clone()));
         } else {
-            let ty = self.backend_type(layout);
+            let ty = self.backend_type(&layout);
             let val = self.load_from_place(ty, src);
 
             self.store_to_place(val, dst);
@@ -289,17 +287,17 @@ pub trait BuilderMethods<'a>:
         &mut self,
         left: PlaceValue<Self::Value>,
         right: PlaceValue<Self::Value>,
-        layout: TyAndLayout,
+        layout: &TyAndLayout,
     ) {
-        let mut temp = self.load_operand(left.with_type(layout.clone()));
+        let mut temp = self.load_operand(&left.with_type(layout.clone()));
         if let OperandValue::Ref(..) = temp.val {
             // The SSA value isn't stand-alone, so we need to copy it elsewhere
             let alloca = PlaceRef::alloca(self, layout.clone());
-            self.typed_place_copy(alloca.val, left, layout.clone());
-            temp = self.load_operand(alloca);
+            self.typed_place_copy(alloca.val, left, layout);
+            temp = self.load_operand(&alloca);
         }
-        self.typed_place_copy(left, right, layout.clone());
-        temp.val.store(self, right.with_type(layout));
+        self.typed_place_copy(left, right, layout);
+        temp.val.store(self, &right.with_type(layout.clone()));
     }
 
     fn select(

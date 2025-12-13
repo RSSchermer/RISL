@@ -80,7 +80,7 @@ fn do_call<'a, Bx: BuilderMethods<'a>>(
 
     if let Some((ret_dest, target)) = destination {
         for tmp in copied_constant_arguments {
-            bx.lifetime_end(tmp.val.llval, tmp.layout.layout.shape().size);
+            bx.lifetime_end(tmp.val.llval, tmp.layout.layout.size);
         }
 
         fx.store_return(bx, ret_dest, &fn_abi.ret, llret);
@@ -102,8 +102,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         targets: &SwitchTargets,
     ) {
         let discr = self.codegen_operand(bx, discr);
-        let discr_value = discr.immediate();
         let switch_ty = discr.layout.ty;
+        let discr_value = discr.immediate();
 
         // If our discriminant is a constant we can branch directly
         if let Some(const_discr) = bx.const_to_opt_u128(discr_value, false) {
@@ -138,7 +138,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     _ => bug!(),
                 }
             } else {
-                let switch_llty = bx.immediate_backend_type(TyAndLayout::expect_from_ty(switch_ty));
+                let switch_llty =
+                    bx.immediate_backend_type(&TyAndLayout::expect_from_ty(switch_ty));
                 let llval = bx.const_uint_big(switch_llty, test_value);
                 let cmp = bx.icmp(IntPredicate::IntEQ, discr_value, llval);
 
@@ -167,7 +168,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 let op = self.codegen_consume(bx, RETURN_PLACE_REF);
 
                 if let Ref(place_val) = op.val {
-                    bx.load_from_place(bx.backend_type(op.layout), place_val)
+                    bx.load_from_place(bx.backend_type(&op.layout), place_val)
                 } else {
                     op.immediate_or_packed_pair(bx)
                 }
@@ -322,10 +323,10 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     &mir::Operand::Copy(_) | &mir::Operand::Constant(_),
                     Ref(PlaceValue { llextra: None, .. }),
                 ) => {
-                    let tmp = PlaceRef::alloca(bx, op.layout);
+                    let tmp = PlaceRef::alloca(bx, op.layout.clone());
 
-                    bx.lifetime_start(tmp.val.llval, tmp.layout.layout.shape().size);
-                    op.val.store(bx, tmp);
+                    bx.lifetime_start(tmp.val.llval, tmp.layout.layout.size);
+                    op.val.store(bx, &tmp);
                     op.val = Ref(tmp.val);
                     copied_constant_arguments.push(tmp);
                 }
@@ -526,13 +527,13 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         let (mut llval, align, by_ref) = match op.val {
             Immediate(_) | Pair(..) => match &arg.mode {
                 PassMode::Indirect { .. } => {
-                    let scratch = PlaceValue::alloca(bx, op.layout);
+                    let scratch = PlaceValue::alloca(bx, &op.layout);
 
                     op.val.store(
                         bx,
-                        scratch.with_type(TyAndLayout {
+                        &scratch.with_type(TyAndLayout {
                             ty: arg.ty,
-                            layout: arg.layout.into(),
+                            layout: arg.layout.shape(),
                         }),
                     );
 
@@ -565,9 +566,9 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             // the load would just produce `OperandValue::Ref` instead
             // of the `OperandValue::Immediate` we need for the call.
             llval = bx.load(
-                bx.backend_type(TyAndLayout {
+                bx.backend_type(&TyAndLayout {
                     ty: arg.ty,
-                    layout: arg.layout.into(),
+                    layout: arg.layout.shape(),
                 }),
                 llval,
                 align,
@@ -589,7 +590,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         args: &[ArgAbi],
     ) {
         let tuple = self.codegen_operand(bx, operand);
-        let count = tuple.layout.layout.shape().fields.count();
+        let count = tuple.layout.layout.fields.count();
 
         // Handle both by-ref and immediate tuples.
         if let Ref(place_val) = tuple.val {
@@ -601,7 +602,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
             for i in 0..count {
                 let field_ptr = tuple_ptr.project_field(bx, i);
-                let field = bx.load_operand(field_ptr);
+                let field = bx.load_operand(&field_ptr);
 
                 self.codegen_argument(bx, field, llargs, &args[i]);
             }
@@ -683,7 +684,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         }
 
         let dest = if dest.projection.is_empty() {
-            match self.locals[dest.local] {
+            match self.locals[dest.local].clone() {
                 LocalRef::Place(dest) => dest,
                 LocalRef::UnsizedPlace(_) => bug!("return type must be sized"),
                 LocalRef::PendingOperand => {
@@ -696,7 +697,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                             bx,
                             TyAndLayout {
                                 ty: fn_ret.ty,
-                                layout: fn_ret.layout.into(),
+                                layout: fn_ret.layout.shape(),
                             },
                         );
                         tmp.storage_live(bx);
@@ -710,7 +711,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                             bx,
                             TyAndLayout {
                                 ty: fn_ret.ty,
-                                layout: fn_ret.layout.into(),
+                                layout: fn_ret.layout.shape(),
                             },
                         );
                         tmp.storage_live(bx);
@@ -734,7 +735,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         };
 
         if matches!(fn_ret.mode, PassMode::Indirect { .. }) {
-            if dest.val.align < dest.layout.layout.shape().abi_align {
+            if dest.val.align < dest.layout.layout.abi_align {
                 // Currently, MIR code generation does not create calls
                 // that store directly to fields of packed structs (in
                 // fact, the calls it creates write only to temps).
@@ -764,9 +765,9 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
         match dest {
             Nothing => (),
-            Store(dst) => bx.store_arg(ret_abi, llval, dst),
+            Store(dst) => bx.store_arg(ret_abi, llval, &dst),
             IndirectOperand(tmp, index) => {
-                let op = bx.load_operand(tmp);
+                let op = bx.load_operand(&tmp);
 
                 tmp.storage_dead(bx);
                 self.overwrite_local(index, LocalRef::Operand(op));
@@ -781,7 +782,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     llval,
                     TyAndLayout {
                         ty: ret_abi.ty,
-                        layout: ret_abi.layout.into(),
+                        layout: ret_abi.layout.shape(),
                     },
                 );
 

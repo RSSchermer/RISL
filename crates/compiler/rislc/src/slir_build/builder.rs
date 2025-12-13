@@ -45,7 +45,7 @@ impl<'a, 'tcx> BackendTypes for Builder<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> ArgAbiBuilderMethods for Builder<'a, 'tcx> {
-    fn store_fn_arg(&mut self, arg_abi: &ArgAbi, idx: &mut usize, dst: PlaceRef<Self::Value>) {
+    fn store_fn_arg(&mut self, arg_abi: &ArgAbi, idx: &mut usize, dst: &PlaceRef<Self::Value>) {
         fn next(bx: &mut Builder<'_, '_>, idx: &mut usize) -> Value {
             let val = bx.get_param(*idx);
 
@@ -89,7 +89,7 @@ impl<'a, 'tcx> ArgAbiBuilderMethods for Builder<'a, 'tcx> {
         }
     }
 
-    fn store_arg(&mut self, arg_abi: &ArgAbi, val: Self::Value, dst: PlaceRef<Self::Value>) {
+    fn store_arg(&mut self, arg_abi: &ArgAbi, val: Self::Value, dst: &PlaceRef<Self::Value>) {
         match &arg_abi.mode {
             PassMode::Ignore => {}
             PassMode::Indirect { .. } => {
@@ -103,7 +103,7 @@ impl<'a, 'tcx> ArgAbiBuilderMethods for Builder<'a, 'tcx> {
                     val,
                     TyAndLayout {
                         ty: arg_abi.ty,
-                        layout: arg_abi.layout.into(),
+                        layout: arg_abi.layout.shape(),
                     },
                 )
                 .val
@@ -490,7 +490,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         val
     }
 
-    fn alloca(&mut self, layout: TyAndLayout) -> Self::Value {
+    fn alloca(&mut self, layout: &TyAndLayout) -> Self::Value {
         let ty = self.cx.ty_and_layout_resolve(layout);
         let (_, result) =
             self.cfg
@@ -533,46 +533,46 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         todo!()
     }
 
-    fn load_operand(&mut self, place: PlaceRef<Self::Value>) -> OperandRef<Self::Value> {
-        let shape = place.layout.layout.shape();
-
-        if shape.is_1zst() {
-            return OperandRef::zero_sized(place.layout);
+    fn load_operand(&mut self, place: &PlaceRef<Self::Value>) -> OperandRef<Self::Value> {
+        if place.layout.layout.is_1zst() {
+            return OperandRef::zero_sized(place.layout.clone());
         }
 
         let val = if place.val.llextra.is_some() || place.layout.ty.kind().is_enum() {
             OperandValue::Ref(place.val)
-        } else if self.is_backend_immediate(place.layout) {
+        } else if self.is_backend_immediate(&place.layout) {
             let llval = self.load(
-                self.cx.ty_and_layout_resolve(place.layout).into(),
+                self.cx.ty_and_layout_resolve(&place.layout).into(),
                 place.val.llval,
                 place.val.align,
             );
 
-            OperandValue::Immediate(self.to_immediate(llval, place.layout))
-        } else if let ValueAbi::ScalarPair(a, b) = shape.abi {
-            return OperandRef::from_immediate_or_packed_pair(self, place.val.llval, place.layout);
+            OperandValue::Immediate(self.to_immediate(llval, &place.layout))
+        } else if let ValueAbi::ScalarPair(a, b) = place.layout.layout.abi {
+            return OperandRef::from_immediate_or_packed_pair(
+                self,
+                place.val.llval,
+                place.layout.clone(),
+            );
         } else {
             OperandValue::Ref(place.val)
         };
 
         OperandRef {
             val,
-            layout: place.layout,
+            layout: place.layout.clone(),
         }
     }
 
     fn write_operand_repeatedly(
         &mut self,
-        elem: OperandRef<Self::Value>,
+        elem: &OperandRef<Self::Value>,
         count: u64,
-        dest: PlaceRef<Self::Value>,
+        dest: &PlaceRef<Self::Value>,
     ) {
-        let elem_ty = self.backend_type(elem.layout);
+        let elem_ty = self.backend_type(&elem.layout);
         let elem = match elem.val {
-            OperandValue::Ref(v) => {
-                self.load(elem_ty, v.llval, elem.layout.layout.shape().abi_align)
-            }
+            OperandValue::Ref(v) => self.load(elem_ty, v.llval, elem.layout.layout.abi_align),
             OperandValue::Immediate(v) => v,
             _ => bug!(),
         };
