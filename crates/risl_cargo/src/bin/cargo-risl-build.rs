@@ -1,7 +1,9 @@
-use cargo::{ops, CliResult, GlobalContext};
-use cargo::core::compiler::UserIntent;
 use cargo::core::Shell;
-use cargo::util::command_prelude::{subcommand, ArgMatches, ArgMatchesExt, Command, CommandExt, ProfileChecking};
+use cargo::core::compiler::UserIntent;
+use cargo::util::command_prelude::{
+    ArgMatches, ArgMatchesExt, Command, CommandExt, ProfileChecking, subcommand,
+};
+use cargo::{CliResult, GlobalContext, ops};
 
 const SUBCOMMAND: &str = "risl-build";
 
@@ -93,9 +95,8 @@ fn main() {
         }
     };
 
-    run_cli(&mut gctx, cli(), SUBCOMMAND).unwrap_or_else(|e|
-        cargo::exit_with_error(e, &mut gctx.shell())
-    );
+    run_cli(&mut gctx, cli(), SUBCOMMAND)
+        .unwrap_or_else(|e| cargo::exit_with_error(e, &mut gctx.shell()));
 }
 
 fn run_cli(gctx: &mut GlobalContext, cli: Command, subcommand: &str) -> CliResult {
