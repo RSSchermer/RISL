@@ -1,11 +1,69 @@
-use cargo::core::Shell;
-use cargo::core::compiler::UserIntent;
+use std::sync::Arc;
+
+use cargo::core::compiler::{CompileMode, Executor, UserIntent};
+use cargo::core::{PackageId, Shell, Target};
 use cargo::util::command_prelude::{
-    ArgMatches, ArgMatchesExt, Command, CommandExt, ProfileChecking, subcommand,
+    Arg, ArgAction, ArgMatches, ArgMatchesExt, Command, CommandExt, ProfileChecking, flag, heading,
+    multi_opt, opt, subcommand,
 };
-use cargo::{CliResult, GlobalContext, ops};
+use cargo::{CargoResult, CliResult, GlobalContext, ops};
+use cargo_util::ProcessBuilder;
 
 const SUBCOMMAND: &str = "risl-build";
+
+pub fn base_cli() -> Command {
+    // Sets up the base cargo command. We don't copy the full set of options of the actual cargo
+    // command here, only the subset of options that are used to set up the GlobalContext properly.
+    Command::new("cargo")
+        .arg(
+            opt(
+                "verbose",
+                "Use verbose output (-vv very verbose/build.rs output)",
+            )
+            .short('v')
+            .action(ArgAction::Count)
+            .global(true),
+        )
+        .arg(
+            flag("quiet", "Do not print cargo log messages")
+                .short('q')
+                .global(true),
+        )
+        .arg(
+            opt("color", "Coloring")
+                .value_name("WHEN")
+                .global(true)
+                .value_parser(["auto", "always", "never"])
+                .ignore_case(true),
+        )
+        .arg(
+            flag("locked", "Assert that `Cargo.lock` will remain unchanged")
+                .help_heading(heading::MANIFEST_OPTIONS)
+                .global(true),
+        )
+        .arg(
+            flag("offline", "Run without accessing the network")
+                .help_heading(heading::MANIFEST_OPTIONS)
+                .global(true),
+        )
+        .arg(
+            flag(
+                "frozen",
+                "Equivalent to specifying both --locked and --offline",
+            )
+            .help_heading(heading::MANIFEST_OPTIONS)
+            .global(true),
+        )
+        .arg(multi_opt("config", "KEY=VALUE|PATH", "Override a configuration value").global(true))
+        .arg(
+            Arg::new("unstable-features")
+                .help("Unstable (nightly-only) flags to Cargo, see 'cargo -Z help' for details")
+                .short('Z')
+                .value_name("FLAG")
+                .action(ArgAction::Append)
+                .global(true),
+        )
+}
 
 pub fn cli() -> Command {
     let subcommand = Command::new(SUBCOMMAND)
@@ -48,7 +106,26 @@ pub fn cli() -> Command {
             "Run `<bright-cyan,bold>cargo help build</>` for more detailed information.\n"
         ));
 
-    Command::new("cargo").subcommand(subcommand)
+    base_cli().subcommand(subcommand)
+}
+
+struct RislExecutor;
+
+impl Executor for RislExecutor {
+    fn exec(
+        &self,
+        cmd: &ProcessBuilder,
+        _id: PackageId,
+        _target: &Target,
+        _mode: CompileMode,
+        on_stdout_line: &mut dyn FnMut(&str) -> CargoResult<()>,
+        on_stderr_line: &mut dyn FnMut(&str) -> CargoResult<()>,
+    ) -> CargoResult<()> {
+        dbg!(cmd);
+
+        cmd.exec_with_streaming(on_stdout_line, on_stderr_line, false)
+            .map(drop)
+    }
 }
 
 pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
@@ -82,7 +159,10 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
             .fail_if_stable_opt("--artifact-dir", 6790)?;
     }
 
-    ops::compile(&ws, &compile_opts)?;
+    let exec = Arc::new(RislExecutor) as Arc<dyn Executor>;
+
+    ops::compile_with_exec(&ws, &compile_opts, &exec)?;
+
     Ok(())
 }
 
