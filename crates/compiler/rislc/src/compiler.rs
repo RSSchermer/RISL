@@ -1,14 +1,19 @@
-use std::env;
 use std::fs::{File, create_dir_all};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::Mutex;
+use std::{env, fs, io};
 
 use ar::{GnuBuilder, Header};
 use rustc_driver::{Callbacks, Compilation, run_compiler};
 use rustc_interface::interface;
+use rustc_interface::interface::Compiler;
 use rustc_metadata::METADATA_FILENAME;
 use rustc_metadata::fs::encode_and_write_metadata;
 use rustc_middle::ty::TyCtxt;
-use rustc_session::config::{CrateType, DebugInfo, ErrorOutputType, PrintKind};
+use rustc_session::config::{
+    CrateType, DebugInfo, ErrorOutputType, OutFileName, OutputType, PrintKind,
+};
 use rustc_session::output::out_filename;
 use rustc_session::search_paths::{PathKind, SearchPath};
 use rustc_session::{EarlyDiagCtxt, Session};
@@ -21,7 +26,6 @@ use crate::context::RislContext;
 
 pub const LIB_MODULE_FILENAME: &str = "lib.slir";
 pub const ATTRIBUTE_NAMESPACE: &'static str = "rislc";
-pub const RISL_INCREMENTAL_SUB_DIR: &'static str = "risl";
 pub const RISL_OUTPUT_SUB_DIR: &'static str = "risl";
 
 pub fn run(args: Vec<String>) {
@@ -61,22 +65,161 @@ pub fn run(args: Vec<String>) {
             true
         }
     }) {
+        let mut risl_args = args.clone();
+
+        // Adjust the --extern arguments to point to a matching RISL-path (if one exists).
+        //
+        // It feels somewhat iffy modifying the raw arguments to achieve this. I would prefer to
+        // adjust this in the `Callbacks::config` hook by adjusting the `config.opts.externs` value
+        // directly, but that does not seem easily adjustable.
+        adjust_extern_args(&mut risl_args);
+
         // Run the first "RISL" pass
-        run_compiler(&args, &mut RislPassCallbacks);
+        run_compiler(&risl_args, &mut RislPassCallbacks);
     }
 
     // TODO: we don't want to run the second pass if there were errors in the first pass.
     // `run_compiler` has no return value, but there has to be an elegant way to check for errors?
 
+    let mut rust_pass_callbacks = RustPassCallbacks {
+        share_proc_macro_lib: None,
+    };
+
     // Run the second "regular Rust" pass.
-    run_compiler(&args, &mut RustPassCallbacks);
+    run_compiler(&args, &mut rust_pass_callbacks);
+
+    if let Some(share_proc_macro_lib) = rust_pass_callbacks.share_proc_macro_lib {
+        if let Err(_) = share_proc_macro_lib.apply() {
+            panic!("{:#?}", share_proc_macro_lib);
+        }
+    }
 }
 
-pub struct RustPassCallbacks;
+fn adjust_extern_args(args: &mut Vec<String>) {
+    for i in 0..args.len() {
+        if &args[i] == "--extern"
+            && let Some(arg) = args.get_mut(i + 1)
+        {
+            let Some((crate_name, path)) = arg.split_once("=") else {
+                continue;
+            };
 
-impl Callbacks for RustPassCallbacks {}
+            let adjusted_path = risl_file(&PathBuf::from(path));
 
-pub struct RislPassCallbacks;
+            if adjusted_path.exists() {
+                let mut adjusted = crate_name.to_string();
+
+                adjusted.push('=');
+                adjusted.push_str(adjusted_path.to_str().unwrap_or_default());
+
+                *arg = adjusted;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OpShareProcMacroLib {
+    pub src: PathBuf,
+    pub dst: PathBuf,
+}
+
+impl OpShareProcMacroLib {
+    fn apply(&self) -> io::Result<()> {
+        // Based on rustc_fs_util::link_or_copy
+
+        let OpShareProcMacroLib { src, dst } = self;
+
+        let err = match fs::hard_link(src, dst) {
+            Ok(()) => return Ok(()),
+            Err(err) => err,
+        };
+
+        if err.kind() == io::ErrorKind::AlreadyExists {
+            fs::remove_file(dst)?;
+
+            if fs::hard_link(src, dst).is_ok() {
+                return Ok(());
+            }
+        }
+
+        fs::copy(src, dst).map(|_| ())
+    }
+}
+
+struct RustPassCallbacks {
+    pub share_proc_macro_lib: Option<OpShareProcMacroLib>,
+}
+
+impl Callbacks for RustPassCallbacks {
+    fn after_analysis<'tcx>(&mut self, _compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
+        let is_proc_macro_crate = tcx
+            .sess
+            .opts
+            .crate_types
+            .iter()
+            .any(|ty| *ty == CrateType::ProcMacro);
+
+        // For proc-macro crates, we need to make the compiled proc-macro library available to the
+        // RISL-pass as well. We cannot simply add the second pass's output dir to the search-paths
+        // of the RISL-pass: transitive dependency proc-macro libraries are only resolved from
+        // `PathKind::Dependency` search-path kinds. This unfortunately messes with the resolution
+        // of non-proc-macro dependencies: in this case the RISL-pass may resolve regular
+        // dependencies from the rustc-pass's output directory, rather than from the RISL-pass's
+        // output directory (and search-path order cannot be used to control this). Therefore, the
+        // solution for the time being is to (hard)link (or copy) the proc-macro library file into
+        // the RISL-pass's output directory.
+        //
+        // However, at the time this hook runs, the proc-macro library file has not been written
+        // yet. Unfortunately, there is currently not a callback hook after all output files have
+        // been written, so instead we'll encode a future operation that we'll apply after the rustc
+        // compilation pass has completed (see the end of the `run` function).
+        //
+        // TODO: it feels like there has to be a cleaner way to do this, but it would need to be
+        // accommodated by the Rust project. Any of the following solutions would be an improvement:
+        //
+        // - Adjust the way rustc uses search-paths for file resolution, by making the search-path
+        //   order relevant. If it finds two identical candidates in different search-paths, it
+        //   would select the one from the search-path that is ordered earlier in the session
+        //   config. We would add both the RISL output directory and the regular Rust output
+        //   directory as "dependency" search-paths for the RISL-pass, the RISL dependency directory
+        //   being the earlier search-path. This would mean `rlib` and `rmeta` artifacts would be
+        //   resolved from the RISL output directory, and proc-macro libs would be resolved from
+        //   the regular Rust output directory.
+        // - Adjust the way rustc uses search paths for file resolution, by adding a extra
+        //   `PathKind::ProcMacro` search-path kind, for paths that are only used for proc-macro
+        //   resolution. We would add the regular Rust output directory as such a "proc-macro"
+        //   search-path for the RISL-pass, and the RISL-output directory as the only "dependency"
+        //   search-path. This would again mean `rlib` and `rmeta` artifacts would be resolved from
+        //   the RISL output directory, and proc-macro libs would be resolved from the regular Rust
+        //   output directory.
+        // - Add an additional hook to the `Callbacks` trait that gets run after all of rustc's
+        //   output has been written (e.g. `after_output`). We'd use the same link/copy mechanism we
+        //   use now, but we would not have to do the song-and-dance of encoding the operation, then
+        //   applying it later, as now we'd have a hook that runs after the proc-macro library file
+        //   has already been written.
+        //
+        if is_proc_macro_crate {
+            let src = out_filename(
+                tcx.sess,
+                CrateType::ProcMacro,
+                tcx.output_filenames(()),
+                tcx.crate_name(LOCAL_CRATE),
+            );
+
+            if let OutFileName::Real(src) = src {
+                let parent = src.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                let dst = risl_dir(&parent).join(src.file_name().unwrap_or_default());
+
+                self.share_proc_macro_lib = Some(OpShareProcMacroLib { src, dst });
+            }
+        }
+
+        Compilation::Continue
+    }
+}
+
+struct RislPassCallbacks;
 
 impl Callbacks for RislPassCallbacks {
     fn config(&mut self, config: &mut interface::Config) {
@@ -89,15 +232,27 @@ impl Callbacks for RislPassCallbacks {
         // the build system once, after the second pass.
         config.opts.json_artifact_notifications = false;
 
-        config.opts.incremental = config.opts.incremental.as_ref().map(risl_incremental_dir);
+        // Since we use a different compiler configuration for the RISL-pass (in particular w.r.t.
+        // MIR generation), we can't share incremental compilation artifacts with the second
+        // "regular rustc" pass. Therefore, if incremental compilation is enabled, use an
+        // RISL-specific output directory.
+        config.opts.incremental = config.opts.incremental.as_ref().map(risl_dir);
 
         // Output RISL artifacts to an RISL-specific output directory.
-        config.output_dir = Some(risl_output_dir(
+        config.output_dir = Some(risl_dir(
             config.output_dir.as_ref().unwrap_or(&PathBuf::new()),
         ));
 
-        // Add RISL-specific search paths.
-        config.opts.search_paths = risl_search_paths(&config.opts.search_paths);
+        // Since we're outputting RISL artifacts to an RISL-specific output directory, we also need
+        // to adjust the search_paths to look for dependencies in that RISL-specific output
+        // directory.
+        for search_path in &mut config.opts.search_paths {
+            if search_path.kind == PathKind::Dependency {
+                let dir = risl_dir(&search_path.dir);
+
+                *search_path = SearchPath::new(PathKind::Dependency, dir);
+            }
+        }
 
         // Add a `rislc` cfg condition. We use this condition on to turn the tool attributes
         // generated by risl_macros.
@@ -149,25 +304,9 @@ impl Callbacks for RislPassCallbacks {
 
 /// Returns a new output path for RISL output artifacts based on the output directory for regular
 /// rustc output artifacts.
-fn risl_incremental_dir(base: &PathBuf) -> PathBuf {
-    let path = base.join(RISL_INCREMENTAL_SUB_DIR);
-
-    ensure_dir(&path);
-
-    path
-}
-
-/// Returns a new output path for RISL output artifacts based on the output directory for regular
-/// rustc output artifacts.
-fn risl_output_dir(base: &PathBuf) -> PathBuf {
+fn risl_dir(base: &PathBuf) -> PathBuf {
     let path = base.join(RISL_OUTPUT_SUB_DIR);
 
-    ensure_dir(&path);
-
-    path
-}
-
-fn ensure_dir(path: &Path) {
     if !path.exists() {
         if let Err(err) = create_dir_all(&path) {
             let dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
@@ -175,31 +314,24 @@ fn ensure_dir(path: &Path) {
             dcx.early_fatal(format!("failed to create directory: {}", err));
         }
     }
+
+    path
 }
 
-/// Returns a new set of [SearchPath]s that includes the RISL-specific search paths.
-fn risl_search_paths(base: &[SearchPath]) -> Vec<SearchPath> {
-    // Creates a new list of search paths that first includes higher priority RISL-specific search
-    // paths, followed by the original search paths.
-    //
-    // Note that the convention here must match the convention used by [risl_output_dir] for RISL
-    // dependency artifacts to resolve correctly.
+/// Returns a file path for an RISL-pass artifact based on the given file path for a Rust-pass
+/// artifact.
+fn risl_file(base: &PathBuf) -> PathBuf {
+    let filename = base.file_name().expect("should be a file");
+    let parent = base.parent().map(|p| p.to_path_buf()).unwrap_or_default();
 
-    let mut risl_search_paths = base
-        .iter()
-        .filter(|p| p.kind == PathKind::Dependency)
-        .map(|p| {
-            let risl_dir = p.dir.clone().join(RISL_OUTPUT_SUB_DIR);
-
-            SearchPath::new(PathKind::Dependency, risl_dir)
-        })
-        .collect::<Vec<_>>();
-
-    risl_search_paths.extend(base.iter().cloned());
-
-    risl_search_paths
+    parent.join(RISL_OUTPUT_SUB_DIR).join(filename)
 }
 
+/// Creates an `rlib` for the current crate that includes the crate metadata, as well as a SLIR
+/// module that contains the SLIR-CFG intermediate representation for all "free items" in the
+/// current crate.
+///
+/// Dependent crates may use the SLIR module for SLIR dependency resolution.
 fn create_rlib(tcx: TyCtxt, lib_module: &(slir::Module, slir::cfg::Cfg)) {
     let filename = out_filename(
         tcx.sess,

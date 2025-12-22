@@ -939,6 +939,7 @@ fn collect_used<'tcx>(
     }
 }
 
+#[derive(Debug)]
 pub struct ShaderModuleCodegenUnit<'tcx> {
     pub name: Symbol,
     pub items: IndexSet<MonoItem<'tcx>>,
