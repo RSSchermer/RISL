@@ -1,7 +1,7 @@
-#![feature(let_chains)]
+#![feature(proc_macro_tracked_path)]
 
 use std::env;
-use std::sync::LazyLock;
+use std::path::PathBuf;
 
 use proc_macro::TokenStream;
 
@@ -12,8 +12,19 @@ mod impl_mat_mul;
 mod resource;
 mod shader_io;
 mod shader_module;
+mod shader_wgsl;
 mod vertex;
 mod workgroup_shared;
+
+fn is_rislc_pass() -> bool {
+    env::var("IS_RISLC_PASS").is_ok()
+}
+
+fn risl_shader_request_lookup() -> PathBuf {
+    let target_dir = env::var("RISL_SHADER_REQUEST_LOOKUP").unwrap_or_default();
+
+    PathBuf::from(target_dir)
+}
 
 #[proc_macro_attribute]
 pub fn compute(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -43,6 +54,11 @@ pub fn shader_io(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn shader_module(attr: TokenStream, item: TokenStream) -> TokenStream {
     shader_module::expand_attribute(attr, item)
+}
+
+#[proc_macro]
+pub fn shader_wgsl(input: TokenStream) -> TokenStream {
+    shader_wgsl::expand_shader_wgsl(input)
 }
 
 #[proc_macro_attribute]

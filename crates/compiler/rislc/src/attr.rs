@@ -1,7 +1,7 @@
 use rustc_ast::{AttrKind, ast};
 use rustc_hir::Target;
 use rustc_middle::ty::TyCtxt;
-use rustc_span::{ErrorGuaranteed, Span};
+use rustc_span::{ErrorGuaranteed, Span, Symbol};
 
 use crate::compiler::ATTRIBUTE_NAMESPACE;
 
@@ -42,6 +42,22 @@ fn expect_u32(tcx: TyCtxt<'_>, item: &ast::MetaItemInner) -> Result<u32, ErrorGu
         tcx.sess
             .dcx()
             .span_err(item.span(), "expected an integer literal")
+    })
+}
+
+fn expect_string(tcx: TyCtxt<'_>, item: &ast::MetaItemInner) -> Result<Symbol, ErrorGuaranteed> {
+    let v = item.lit().and_then(|lit| {
+        if let ast::LitKind::Str(n, _) = &lit.kind {
+            Some(*n)
+        } else {
+            None
+        }
+    });
+
+    v.ok_or_else(|| {
+        tcx.sess
+            .dcx()
+            .span_err(item.span(), "expected a string literal")
     })
 }
 
@@ -95,14 +111,42 @@ macro_rules! impl_attr_from_ast_single_int_arg {
     };
 }
 
-/// Decorates requests for a compiled shader made with the [risl::shader_source] macro.
+macro_rules! impl_attr_from_ast_single_string_arg {
+    ($T:ident, $field:ident, $name:literal) => {
+        fn try_from_ast(
+            tcx: TyCtxt<'_>,
+            attr: &rustc_hir::Attribute,
+        ) -> Result<Option<Self>, ErrorGuaranteed> {
+            if attr_matches_name(attr, $name) {
+                if let Some(meta_item_list) = attr.meta_item_list()
+                    && meta_item_list.len() == 1
+                {
+                    return Ok(Some($T {
+                        $field: expect_string(tcx, &meta_item_list[0])?,
+                        span: Default::default(),
+                    }));
+                }
+
+                Err(tcx.dcx().span_err(
+                    attr.span(),
+                    format!("`{}` attribute expected one argument", $name),
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+    };
+}
+
+/// Decorates requests for a compiled shader made with the [risl::shader_wgsl] macro.
 #[derive(Debug)]
-pub struct AttrShaderSourceRequest {
+pub struct AttrShaderWgsl {
+    pub request_id: Symbol,
     pub span: Span,
 }
 
-impl Attr for AttrShaderSourceRequest {
-    impl_attr_from_ast_no_args!(AttrShaderSourceRequest, "shader_source_request");
+impl Attr for AttrShaderWgsl {
+    impl_attr_from_ast_single_string_arg!(AttrShaderWgsl, request_id, "shader_wgsl");
 
     fn valid_target(&self, target: &Target) -> bool {
         match target {
@@ -713,7 +757,7 @@ macro_rules! register_attributes {
 }
 
 register_attributes!(
-    shader_source_request => AttrShaderSourceRequest,
+    shader_wgsl => AttrShaderWgsl,
     shader_module => AttrShaderModule,
     gpu => AttrGpu,
     resource => AttrResource,

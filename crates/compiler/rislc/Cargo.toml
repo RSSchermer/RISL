@@ -16,7 +16,7 @@ rustc_private = true
 [dependencies]
 ar = { workspace = true }
 arrayvec = { workspace = true }
-bincode = { workspace = true }
+bincode = { workspace = true, features = ["serde", "std"] }
 bit-set = { workspace = true }
 bit-vec = { workspace = true }
 either = { workspace = true }

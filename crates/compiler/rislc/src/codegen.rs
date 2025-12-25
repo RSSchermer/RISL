@@ -76,12 +76,11 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
         // final compilation step (e.g. to WGSL, SPIRV, HLSL, etc.), which is typically done by a macro
         // in the second compilation phase (when the actual non-RISL Rust code gets compiled).
         for shader_module in shader_modules {
-            let name = format!("{}-{}", crate_name, shader_module.name);
-            let name = slir::Symbol::new(name);
+            let name = slir::Symbol::new(cx.shader_module_name(shader_module.def_id.to_def_id()));
             let mut artifact_builder = SlirArtifactBuilder::new(
                 cx,
                 SlirArtifactBuilderConfig {
-                    module_name: name,
+                    module_id: shader_module.def_id,
                     include_rvsdg_initial: true,
                     include_rvsdg_transformed: true,
                     include_wgsl: true,

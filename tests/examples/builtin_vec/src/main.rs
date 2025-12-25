@@ -1,5 +1,6 @@
 #![feature(stmt_expr_attributes)]
 use risl::prelude::*;
+use risl::shader::shader_wgsl;
 
 #[shader_module]
 pub mod shader {
@@ -22,4 +23,8 @@ pub mod shader {
     }
 }
 
-fn main() {}
+const SHADER: &'static str = shader_wgsl!(shader);
+
+fn main() {
+    println!("{}", SHADER);
+}

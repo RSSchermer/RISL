@@ -1,9 +1,12 @@
+use std::path::PathBuf;
+
 use rustc_hash::FxHashMap;
 use rustc_hir::{ItemId, Mod};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::Symbol;
-use rustc_span::def_id::{CrateNum, LocalModDefId};
+use rustc_span::def_id::{CrateNum, DefId, LocalModDefId};
 
+use crate::compiler::RislcConfig;
 use crate::hir_ext::{ExtendedItem, HirExt, ModExt};
 use crate::hir_ext_build;
 
@@ -63,5 +66,26 @@ impl<'tcx> RislContext<'tcx> {
 
             (mod_, ext)
         })
+    }
+
+    pub fn shader_module_name(&self, module_id: DefId) -> String {
+        let crate_name = self.tcx().crate_name(module_id.krate);
+
+        format!("{}-{}", crate_name, self.tcx().def_path_str(module_id))
+    }
+
+    /// Generates a path for the codegen results for the shader module identified by the
+    /// `module_id`.
+    pub fn shader_artifact_file_path(&self, module_id: DefId) -> PathBuf {
+        let output_dir = self
+            .tcx()
+            .sess
+            .io
+            .output_dir
+            .clone()
+            .expect("no output directory specified");
+        let filename = format!("{}.slir", self.shader_module_name(module_id));
+
+        output_dir.join(filename)
     }
 }

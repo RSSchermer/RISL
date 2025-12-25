@@ -871,7 +871,7 @@ fn find_candidate_modules(cx: &Cx) -> IndexSet<LocalModDefId> {
         }
     }
 
-    for shader_source_request in &cx.hir_ext().shader_source_requests {
+    for shader_source_request in &cx.hir_ext().shader_requests {
         if let Some(local_id) = shader_source_request.shader_mod.as_local() {
             modules.insert(LocalModDefId::new_unchecked(local_id));
         }
@@ -941,7 +941,7 @@ fn collect_used<'tcx>(
 
 #[derive(Debug)]
 pub struct ShaderModuleCodegenUnit<'tcx> {
-    pub name: Symbol,
+    pub def_id: LocalModDefId,
     pub items: IndexSet<MonoItem<'tcx>>,
 }
 
@@ -960,7 +960,7 @@ pub fn collect_shader_module_codegen_units<'tcx>(
 
     let mut modules = Vec::new();
 
-    for (id, roots) in modules_roots {
+    for (def_id, roots) in modules_roots {
         let mut items = IndexSet::new();
 
         for root in roots {
@@ -968,9 +968,7 @@ pub fn collect_shader_module_codegen_units<'tcx>(
             collect_used(&root, &usage.used_map, &mut items);
         }
 
-        let name = Symbol::intern(&cx.tcx().def_path_str(id));
-
-        modules.push(ShaderModuleCodegenUnit { name, items });
+        modules.push(ShaderModuleCodegenUnit { def_id, items });
     }
 
     (free_items, modules)

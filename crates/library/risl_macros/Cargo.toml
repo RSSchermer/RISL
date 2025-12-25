@@ -9,8 +9,12 @@ license.workspace = true
 proc-macro = true
 
 [dependencies]
+ar = { workspace = true }
+base64 = { workspace = true }
+bincode = { workspace = true, features = ["serde", "std"] }
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
+rustc-hash = { workspace = true }
 
 [dependencies.syn]
 workspace = true
