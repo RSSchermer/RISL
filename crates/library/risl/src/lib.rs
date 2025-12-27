@@ -17,7 +17,9 @@ pub mod prelude {
 }
 
 pub mod shader {
-    pub use risl_macros::{compute, fragment, shader_io, shader_module, shader_wgsl, vertex};
+    pub use risl_macros::{
+        compute, fragment, shader_io, shader_module, shader_module_interface, shader_wgsl, vertex,
+    };
 }
 
 pub mod smi {

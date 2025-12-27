@@ -451,6 +451,18 @@ impl<'a, 'tcx> Visitor<'tcx> for Locator<'a, 'tcx> {
                     self.hir_ext.shader_requests.push(request);
                 }
             }
+
+            if let Some(attr) = &attrs.shader_module_interface {
+                if let Ok(request) = try_build_shader_request(
+                    self.tcx,
+                    block,
+                    ex.span,
+                    attr.request_id,
+                    ShaderRequestKind::ShaderModuleInterface,
+                ) {
+                    self.hir_ext.shader_requests.push(request);
+                }
+            }
         }
 
         intravisit::walk_expr(self, ex)

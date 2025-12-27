@@ -10,9 +10,9 @@ mod fragment;
 mod gpu;
 mod impl_mat_mul;
 mod resource;
+mod shader_codegen_request;
 mod shader_io;
 mod shader_module;
-mod shader_wgsl;
 mod vertex;
 mod workgroup_shared;
 
@@ -57,8 +57,13 @@ pub fn shader_module(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
+pub fn shader_module_interface(input: TokenStream) -> TokenStream {
+    shader_codegen_request::smi::expand_shader_module_interface(input)
+}
+
+#[proc_macro]
 pub fn shader_wgsl(input: TokenStream) -> TokenStream {
-    shader_wgsl::expand_shader_wgsl(input)
+    shader_codegen_request::wgsl::expand_shader_wgsl(input)
 }
 
 #[proc_macro_attribute]

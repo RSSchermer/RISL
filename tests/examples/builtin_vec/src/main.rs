@@ -1,6 +1,7 @@
 #![feature(stmt_expr_attributes)]
 use risl::prelude::*;
-use risl::shader::shader_wgsl;
+use risl::shader::{shader_module_interface, shader_wgsl};
+use risl::smi::ShaderModuleInterface;
 
 #[shader_module]
 pub mod shader {
@@ -23,8 +24,11 @@ pub mod shader {
     }
 }
 
-const SHADER: &'static str = shader_wgsl!(shader);
+const SHADER: &str = shader_wgsl!(shader);
+
+const SMI: ShaderModuleInterface = shader_module_interface!(shader);
 
 fn main() {
     println!("{}", SHADER);
+    println!("{:#?}", &SMI);
 }

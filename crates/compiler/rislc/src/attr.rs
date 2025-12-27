@@ -138,7 +138,7 @@ macro_rules! impl_attr_from_ast_single_string_arg {
     };
 }
 
-/// Decorates requests for a compiled shader made with the [risl::shader_wgsl] macro.
+/// Decorates requests for a compiled shader made with the [risl::shader::shader_wgsl] macro.
 #[derive(Debug)]
 pub struct AttrShaderWgsl {
     pub request_id: Symbol,
@@ -147,6 +147,29 @@ pub struct AttrShaderWgsl {
 
 impl Attr for AttrShaderWgsl {
     impl_attr_from_ast_single_string_arg!(AttrShaderWgsl, request_id, "shader_wgsl");
+
+    fn valid_target(&self, target: &Target) -> bool {
+        match target {
+            Target::Expression => true,
+            _ => false,
+        }
+    }
+}
+
+/// Decorates requests for a compiled shader made with the [risl::shader::shader_module_interface]
+/// macro.
+#[derive(Debug)]
+pub struct AttrShaderModuleInterface {
+    pub request_id: Symbol,
+    pub span: Span,
+}
+
+impl Attr for AttrShaderModuleInterface {
+    impl_attr_from_ast_single_string_arg!(
+        AttrShaderModuleInterface,
+        request_id,
+        "shader_module_interface"
+    );
 
     fn valid_target(&self, target: &Target) -> bool {
         match target {
@@ -758,6 +781,7 @@ macro_rules! register_attributes {
 
 register_attributes!(
     shader_wgsl => AttrShaderWgsl,
+    shader_module_interface => AttrShaderModuleInterface,
     shader_module => AttrShaderModule,
     gpu => AttrGpu,
     resource => AttrResource,
