@@ -1,0 +1,8 @@
+[package]
+name = "test-example-external-shader-request"
+edition.workspace = true
+publish = false
+
+[dependencies]
+risl = { path = "../../../crates/library/risl" }
+simple-lib = { path = "../simple_lib" }

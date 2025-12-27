@@ -1,30 +1,44 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::{File, create_dir_all};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
-use ar::{GnuBuilder, Header};
+use ar::{Archive, GnuBuilder, Header};
 use rustc_driver::{Callbacks, Compilation, run_compiler};
+use rustc_hash::FxHashMap;
 use rustc_interface::interface::Compiler;
 use rustc_interface::{Config, interface};
 use rustc_metadata::METADATA_FILENAME;
 use rustc_metadata::fs::encode_and_write_metadata;
+use rustc_middle::bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::EarlyDiagCtxt;
 use rustc_session::config::{CrateType, DebugInfo, ErrorOutputType, OutFileName};
 use rustc_session::output::out_filename;
 use rustc_session::search_paths::{PathKind, SearchPath};
-use rustc_span::def_id::LOCAL_CRATE;
+use rustc_span::def_id::{CrateNum, LOCAL_CRATE};
 
 use crate::abi;
 use crate::codegen::codegen_shader_modules;
 use crate::context::RislContext;
 
-pub const LIB_MODULE_FILENAME: &str = "lib.slir";
+/// The header used in an `rlib` archive for the crate's "free items" SLIR-CFG module.
+///
+/// The SLIR-CFG module contains the SLIR control-flow-graph IR for the crate's reachable `gpu`
+/// items that may be used by dependent crates. Such dependent crate's may use this module for
+/// linking.
+pub const LIB_MODULE_HEADER: &str = "lib.slir";
+
+/// The header used in an `rlib` archive for the crate's shader-module-artifact-mapping.
+pub const SMAM_HEADER: &str = "lib.smam";
+
+/// The attribute tool namespace used to attach RISL metadata to Rust nodes.
 pub const ATTRIBUTE_NAMESPACE: &'static str = "rislc";
+
+/// The name of the subdirectory into which the RISLs pass' output artifacts are stored.
 pub const RISL_OUTPUT_SUB_DIR: &'static str = "risl";
-pub const SHADER_REQUEST_DB_NAME: &'static str = "risl-shader-request-db";
 
 pub fn run(args: Vec<String>) {
     // RISL uses a two-pass compilation process.
@@ -39,14 +53,15 @@ pub fn run(args: Vec<String>) {
     // run an additional set of RISL-specific checks to verify that the attributes and the code they
     // annotate adhere to rules of RISL (TODO: the checks are not yet implemented). If there are no
     // errors, it will then fulfill the requests made by the code-generation macros by codegen-ing
-    // the requested output and storing it in the filesystem (in the output directory).
+    // the requested output and storing the resulting artifacts in the filesystem.
     //
     // The second pass is a regular rustc pass. This pass sets no special signal for the various
     // macros. This causes the various metadata macros to not output anything at all. It also causes
     // the code-generation macros to operate in "retrieve" mode, in which they attempt to retrieve
     // the result of their request in the first pass. In the second pass the code-generation macros
     // essentially behave like the `include_str` and `include_bytes` macros in Rust's standard
-    // library and inline the codegen results into the Rust code.
+    // library: they look up the correct artifact file and inline the requested codegen results into
+    // the Rust code.
     //
     // [1]: https://doc.rust-lang.org/beta/unstable-book/language-features/register-tool.htm
 
@@ -93,6 +108,7 @@ pub fn run(args: Vec<String>) {
     }
 }
 
+/// Adjust the --extern arguments to point to a matching RISL-path (if one exists).
 fn adjust_extern_args(args: &mut Vec<String>) {
     for i in 0..args.len() {
         if &args[i] == "--extern"
@@ -145,10 +161,6 @@ impl OpShareProcMacroLib {
     }
 }
 
-pub struct RislcConfig {
-    pub shader_request_db_path: PathBuf,
-}
-
 struct RustPassCallbacks {
     pub share_proc_macro_lib: Option<OpShareProcMacroLib>,
 }
@@ -156,7 +168,7 @@ struct RustPassCallbacks {
 impl Callbacks for RustPassCallbacks {
     fn config(&mut self, config: &mut Config) {
         let risl_output_dir = risl_dir(config.output_dir.as_ref().unwrap_or(&PathBuf::new()));
-        let shader_request_lookup = shader_request_lookup_filename(
+        let shader_request_lookup = shader_request_lookup_path(
             &risl_output_dir,
             config
                 .opts
@@ -169,7 +181,15 @@ impl Callbacks for RustPassCallbacks {
 
         // SAFETY: rustc should not be running concurrent threads during Callbacks::config
         unsafe {
+            // Unset the `IS_RISLC_PASS` variable to signal to RISL's proc-macros that we're in the
+            // second "regular Rust" compiler-pass.
             env::remove_var("IS_RISLC_PASS");
+
+            // Set the `RISL_SHADER_REQUEST_LOOKUP` to the file path of this crate's
+            // shader-request-lookup file. In this second "regular Rust" compiler-pass, RISL's
+            // codegen request macros (e.g. `risl_macros::shader_wgsl`) may load this file and use
+            // to resolve their shader request ID to the compiled shader artifact produced during
+            // the first "RISL" compiler-pass.
             env::set_var(
                 "RISL_SHADER_REQUEST_LOOKUP",
                 shader_request_lookup.as_os_str(),
@@ -198,7 +218,7 @@ impl Callbacks for RustPassCallbacks {
         // However, at the time this hook runs, the proc-macro library file has not been written
         // yet. Unfortunately, there is currently not a callback hook after all output files have
         // been written, so instead we'll encode a future operation that we'll apply after the rustc
-        // compilation pass has completed (see the end of the `run` function).
+        // compilation pass has completed (see the end of the [run] function).
         //
         // TODO: it feels like there has to be a cleaner way to do this, but it would need to be
         // accommodated by the Rust project. Any of the following solutions would be an improvement:
@@ -281,6 +301,8 @@ impl Callbacks for RislPassCallbacks {
 
         // SAFETY: rustc should not be running concurrent threads during Callbacks::config
         unsafe {
+            // Set the `IS_RISLC_PASS` variable to signal to RISL's proc-macros that we're in the
+            // first "RISL" compiler-pass.
             env::set_var("IS_RISLC_PASS", "1");
         }
 
@@ -361,7 +383,10 @@ fn risl_file<P: AsRef<Path>>(base: P) -> PathBuf {
     parent.join(RISL_OUTPUT_SUB_DIR).join(filename)
 }
 
-fn shader_request_lookup_filename<P: AsRef<Path>>(
+/// Generates the file path for this crate's shader-request-lookup (SRL) file.
+///
+/// See also [create_shader_request_lookup].
+fn shader_request_lookup_path<P: AsRef<Path>>(
     risl_output_dir: P,
     crate_name: &str,
     extra_filename: &str,
@@ -371,12 +396,69 @@ fn shader_request_lookup_filename<P: AsRef<Path>>(
     risl_output_dir.as_ref().join(filename)
 }
 
-/// Creates an `rlib` for the current crate that includes the crate metadata, as well as a SLIR
-/// module that contains the SLIR-CFG intermediate representation for all "free items" in the
-/// current crate.
+/// A shader-module-artifact-mapping for a dependency.
 ///
-/// Dependent crates may use the SLIR module for SLIR dependency resolution.
-fn create_rlib(tcx: TyCtxt, lib_module: &(slir::Module, slir::cfg::Cfg)) {
+/// See also [RislContext::shader_module_artifact_mapping].
+#[derive(Debug)]
+struct Smam {
+    krate: CrateNum,
+    mapping: FxHashMap<u32, OsString>,
+}
+
+/// Loads the shader-module-artifact-mapping (SMAM) for the given `dependency`.
+fn load_smam(cx: &RislContext, dependency: CrateNum) -> Smam {
+    let filename = &cx
+        .tcx()
+        .used_crate_source(dependency)
+        .rlib
+        .as_ref()
+        .unwrap()
+        .0;
+
+    let mut archive = Archive::new(File::open(filename).unwrap());
+
+    while let Some(Ok(mut entry)) = archive.next_entry() {
+        if entry.header().identifier() == SMAM_HEADER.as_bytes() {
+            let mut bytes = Vec::with_capacity(entry.header().size() as usize + 1);
+
+            entry.read_to_end(&mut bytes).unwrap();
+
+            let (mapping, _) = bincode::serde::decode_from_slice::<FxHashMap<u32, OsString>, _>(
+                bytes.as_slice(),
+                bincode::config::standard(),
+            )
+            .unwrap();
+
+            return Smam {
+                krate: dependency,
+                mapping,
+            };
+        }
+    }
+
+    bug!(
+        "failed to load shader module artifact mapping for crate `{}`",
+        cx.tcx().crate_name(dependency)
+    );
+}
+
+/// Creates an `rlib` for the current crate that includes additional RISL-specific metadata.
+///
+/// The `rlib` contains.
+///
+/// - The regular `rlib` metadata rustc would generate under the regular archive headers.
+/// - A SLIR module that contains the SLIR-CFG intermediate representation for all "free items" in
+///   the current crate under the header `lib.slir`. Dependent crates may use the SLIR module for
+///   SLIR dependency resolution.
+/// - A mapping for all public shader modules to their compilation artifact under the header
+///   `lib.smam`. Dependent crates may use this mapping to fulfil shader
+///   codegen requests.
+///
+fn create_rlib(
+    tcx: TyCtxt,
+    lib_module: &(slir::Module, slir::cfg::Cfg),
+    smam: FxHashMap<u32, OsString>,
+) {
     let filename = out_filename(
         tcx.sess,
         CrateType::Rlib,
@@ -388,7 +470,7 @@ fn create_rlib(tcx: TyCtxt, lib_module: &(slir::Module, slir::cfg::Cfg)) {
 
     let mut builder = GnuBuilder::new(
         out_file,
-        [METADATA_FILENAME, LIB_MODULE_FILENAME]
+        [METADATA_FILENAME, LIB_MODULE_HEADER, SMAM_HEADER]
             .iter()
             .map(|name| name.as_bytes().to_vec())
             .collect(),
@@ -411,19 +493,31 @@ fn create_rlib(tcx: TyCtxt, lib_module: &(slir::Module, slir::cfg::Cfg)) {
 
     builder
         .append(
-            &Header::new(
-                LIB_MODULE_FILENAME.as_bytes().to_vec(),
-                raw_lib.len() as u64,
-            ),
+            &Header::new(LIB_MODULE_HEADER.as_bytes().to_vec(), raw_lib.len() as u64),
             raw_lib.as_slice(),
+        )
+        .unwrap();
+
+    let raw_smam = bincode::serde::encode_to_vec(smam, bincode::config::standard()).unwrap();
+
+    builder
+        .append(
+            &Header::new(SMAM_HEADER.as_bytes().to_vec(), raw_smam.len() as u64),
+            raw_smam.as_slice(),
         )
         .unwrap();
 
     builder.into_inner().unwrap();
 }
 
+/// Creates a shader-request-lookup (SRL) file in the output directory.
+///
+/// The lookup file maps shader-codegen-request-IDs - generated by shader codegen macros (such as
+/// `risl_macros::shader_wgsl` during the first compiler pass - to artifact file paths. In the
+/// second compiler pass, the shader codegen macro reads this SRL file to look up the path of the
+/// shader artifact it requested.
 fn create_shader_request_lookup(cx: &RislContext) {
-    let filename = shader_request_lookup_filename(
+    let filename = shader_request_lookup_path(
         cx.tcx()
             .sess
             .io
@@ -436,12 +530,34 @@ fn create_shader_request_lookup(cx: &RislContext) {
 
     let mut lookup: HashMap<String, OsString> = HashMap::default();
 
-    for shader_request in &cx.hir_ext().shader_requests {
-        let artifact_file_path = cx.shader_artifact_file_path(shader_request.shader_mod);
+    let mut requests = cx.hir_ext().shader_requests.clone();
+
+    // Sort the requests by crate so that we minimize the number of times we have to load
+    // shader-module-artifact-mappings.
+    requests.sort_by(|a, b| a.shader_mod.krate.cmp(&b.shader_mod.krate));
+
+    let mut active_smam: Option<Smam> = None;
+
+    for shader_request in requests {
+        let artifact_path = if let Some(shader_mod) = shader_request.shader_mod.as_local() {
+            cx.shader_artifact_file_path(shader_mod)
+        } else {
+            if Some(shader_request.shader_mod.krate) != active_smam.as_ref().map(|v| v.krate) {
+                active_smam = Some(load_smam(cx, shader_request.shader_mod.krate));
+            }
+
+            let smam = active_smam.as_ref().unwrap();
+
+            let Some(path) = smam.mapping.get(&shader_request.shader_mod.index.as_u32()) else {
+                bug!("dependency should have an entry");
+            };
+
+            PathBuf::from(path.clone())
+        };
 
         lookup.insert(
             shader_request.request_id.to_string(),
-            artifact_file_path.into_os_string(),
+            artifact_path.into_os_string(),
         );
     }
 
@@ -457,7 +573,8 @@ fn compile_risl(tcx: TyCtxt) {
     cx.build_hir_ext();
 
     let lib_module = codegen_shader_modules(&cx);
+    let smam = cx.local_smam();
 
-    create_rlib(tcx, &lib_module);
+    create_rlib(tcx, &lib_module, smam);
     create_shader_request_lookup(&cx);
 }

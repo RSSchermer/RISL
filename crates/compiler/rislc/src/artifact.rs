@@ -42,7 +42,7 @@ impl SlirArtifactBuilder {
             include_wgsl,
         } = config;
 
-        let filename = cx.shader_artifact_file_path(module_id.to_def_id());
+        let filename = cx.shader_artifact_file_path(module_id.to_local_def_id());
         let file = File::create(filename).expect("failed to create slir artifact file");
 
         let module_identifier = MODULE_IDENTIFIER.as_bytes().to_vec();

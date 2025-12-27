@@ -153,7 +153,7 @@ pub enum ShaderRequestKind {
     ShaderModuleInterface,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ShaderRequest {
     pub shader_mod: DefId,
     pub span: Span,

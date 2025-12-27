@@ -814,6 +814,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
     ) -> Bx::Value {
         let is_float = input_ty.kind().is_float();
         let is_signed = input_ty.kind().is_signed();
+        let is_bool = input_ty.kind().is_bool();
 
         match op {
             mir::BinOp::Add => {
@@ -876,9 +877,21 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     bx.urem(lhs, rhs)
                 }
             }
-            mir::BinOp::BitOr => bx.or(lhs, rhs),
-            mir::BinOp::BitAnd => bx.and(lhs, rhs),
-            mir::BinOp::BitXor => bx.xor(lhs, rhs),
+            mir::BinOp::BitOr => {
+                if is_bool {
+                    bx.or(lhs, rhs)
+                } else {
+                    bx.bit_or(lhs, rhs)
+                }
+            }
+            mir::BinOp::BitAnd => {
+                if is_bool {
+                    bx.and(lhs, rhs)
+                } else {
+                    bx.bit_and(lhs, rhs)
+                }
+            }
+            mir::BinOp::BitXor => bx.bit_xor(lhs, rhs),
             mir::BinOp::Offset => {
                 let pointee_type = input_ty
                     .kind()

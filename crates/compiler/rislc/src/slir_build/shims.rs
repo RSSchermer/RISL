@@ -17,11 +17,13 @@ use thin_vec::thin_vec;
 use crate::slir_build::context::CodegenContext;
 use crate::stable_cg::traits::MiscCodegenMethods;
 
-static PAT_USIZE_SLICE_INDEX_GET: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^<usize as std::slice::SliceIndex<\[[^]]+]>>::get$").unwrap());
+static PAT_USIZE_SLICE_INDEX_GET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^<usize as std::slice::SliceIndex<\[[^]]+]>>::(get|get_mut)$").unwrap()
+});
 
 static PAT_RANGE_USIZE_SLICE_INDEX_GET: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^<std::ops::Range<usize> as std::slice::SliceIndex<\[[^]]+]>>::get$").unwrap()
+    Regex::new(r"^<std::ops::Range<usize> as std::slice::SliceIndex<\[[^]]+]>>::(get|get_mut)$")
+        .unwrap()
 });
 
 pub fn maybe_shim(item: MonoItem, cx: &CodegenContext) -> Option<MonoItem> {

@@ -8,6 +8,7 @@ members = [
     "crates/risl_cargo",
     "crates/slir-explorer",
     "tests/examples/builtin_vec",
+    "tests/examples/external_shader_request",
     "tests/examples/hello_world",
     "tests/examples/simple_enum",
     "tests/examples/simple_lib",

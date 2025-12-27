@@ -384,6 +384,9 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         shl => Shl,
         and => And,
         or => Or,
+        bit_and => BitAnd,
+        bit_or => BitOr,
+        bit_xor => BitXor,
     }
 
     fn fadd_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -475,10 +478,6 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn unchecked_umul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
-    }
-
-    fn xor(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         todo!()
     }
 

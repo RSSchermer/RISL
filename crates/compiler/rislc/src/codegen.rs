@@ -8,7 +8,7 @@ use rustc_span::def_id::LOCAL_CRATE;
 use slir::{rvsdg, scf};
 
 use crate::artifact::{SlirArtifactBuilder, SlirArtifactBuilderConfig};
-use crate::compiler::LIB_MODULE_FILENAME;
+use crate::compiler::LIB_MODULE_HEADER;
 use crate::context::RislContext as Cx;
 use crate::monomorphize::collect_shader_module_codegen_units;
 use crate::slir_build::build_shader_module;
@@ -43,7 +43,7 @@ impl slir::dependencies::DependencyLoader for RlibDependencyLoader<'_, '_> {
         let mut archive = Archive::new(File::open(filename).unwrap());
 
         while let Some(Ok(mut entry)) = archive.next_entry() {
-            if entry.header().identifier() == LIB_MODULE_FILENAME.as_bytes() {
+            if entry.header().identifier() == LIB_MODULE_HEADER.as_bytes() {
                 let mut bytes = Vec::with_capacity(entry.header().size() as usize + 1);
 
                 entry.read_to_end(&mut bytes).unwrap();

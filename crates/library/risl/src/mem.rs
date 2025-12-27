@@ -132,7 +132,7 @@ where
 
     #[gpu]
     #[cfg_attr(rislc, rislc::intrinsic(mem_resource_as_ref))]
-    pub unsafe fn as_mut_unchecked(&mut self) -> &mut T {
+    pub unsafe fn as_mut_unchecked(&self) -> &mut T {
         #[cfg(rislc)]
         core::intrinsics::abort();
 
