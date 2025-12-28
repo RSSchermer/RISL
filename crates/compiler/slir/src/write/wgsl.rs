@@ -1,8 +1,9 @@
 use std::fmt::Write;
 use std::hash::Hash;
+use std::rc::Rc;
 
 use indexmap::IndexSet;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::SecondaryMap;
 
 use crate::scf::analyze::global_use::collect_used_global_bindings;
@@ -18,32 +19,56 @@ use crate::ty::{ScalarKind, Struct, StructField, Type, TypeKind, VectorSize};
 use crate::{
     BinaryOperator, BlendSrc, Constant, ConstantKind, EntryPointKind, Function, Interpolation,
     InterpolationSampling, InterpolationType, Module, OverridableConstantKind, ResourceBinding,
-    ShaderIOBinding, StorageBinding, UnaryOperator, UniformBinding, WorkgroupBinding, ty,
+    ShaderIOBinding, StorageBinding, Symbol, UnaryOperator, UniformBinding, WorkgroupBinding, ty,
 };
 
 const INDENT: &'static str = "    ";
 
 struct IdWriter<K> {
-    mapping: IndexSet<K>,
+    current: u32,
+    mapping: FxHashMap<K, u32>,
     prefix: &'static str,
+    reserved_names: Rc<FxHashSet<String>>,
+    buffer: String,
 }
 
 impl<K> IdWriter<K>
 where
     K: Eq + Hash,
 {
-    fn new(prefix: &'static str) -> Self {
+    fn new(prefix: &'static str, reserved_names: Rc<FxHashSet<String>>) -> Self {
         Self {
+            current: 0,
             mapping: Default::default(),
             prefix,
+            reserved_names,
+            buffer: String::new(),
         }
     }
 
     fn write<W: Write>(&mut self, w: &mut W, key: K) {
-        let (id, _) = self.mapping.insert_full(key);
+        if let Some(id) = self.mapping.get(&key) {
+            w.write_str(self.prefix);
+            write!(w, "{}", id);
+        } else {
+            self.update_buffer();
 
-        w.write_str(self.prefix);
-        write!(w, "{}", id);
+            while self.reserved_names.contains(&self.buffer) {
+                self.current += 1;
+                self.update_buffer();
+            }
+
+            write!(w, "{}", self.buffer).unwrap();
+            self.mapping.insert(key, self.current);
+            self.current += 1;
+        }
+    }
+
+    fn update_buffer(&mut self) {
+        self.buffer.clear();
+
+        self.buffer.push_str(self.prefix);
+        write!(self.buffer, "{}", self.current).unwrap();
     }
 
     fn reset(&mut self) {
@@ -113,16 +138,18 @@ struct WgslModuleWriter {
 }
 
 impl WgslModuleWriter {
-    fn new() -> Self {
+    fn new(reserved_names: FxHashSet<String>) -> Self {
+        let reserved_names = Rc::new(reserved_names);
+
         Self {
             w: String::new(),
-            struct_id_writer: IdWriter::new("S"),
-            uniform_binding_id_writer: IdWriter::new("u"),
-            storage_binding_id_writer: IdWriter::new("s"),
-            workgroup_binding_id_writer: IdWriter::new("w"),
-            constant_id_writer: IdWriter::new("C"),
-            function_id_writer: IdWriter::new("f"),
-            local_binding_id_writer: IdWriter::new("l"),
+            struct_id_writer: IdWriter::new("S", reserved_names.clone()),
+            uniform_binding_id_writer: IdWriter::new("u", reserved_names.clone()),
+            storage_binding_id_writer: IdWriter::new("s", reserved_names.clone()),
+            workgroup_binding_id_writer: IdWriter::new("w", reserved_names.clone()),
+            constant_id_writer: IdWriter::new("C", reserved_names.clone()),
+            function_id_writer: IdWriter::new("f", reserved_names.clone()),
+            local_binding_id_writer: IdWriter::new("l", reserved_names),
             indent_level: 0,
         }
     }
@@ -211,8 +238,12 @@ impl WgslModuleWriter {
         self.constant_id_writer.write(&mut self.w, constant);
     }
 
-    fn write_function_id(&mut self, function: Function) {
-        self.function_id_writer.write(&mut self.w, function);
+    fn write_function_id(&mut self, cx: Context, function: Function) {
+        if let Some(entry_point) = cx.module.entry_points.get(function) {
+            write!(&mut self.w, "{}", entry_point.name).unwrap();
+        } else {
+            self.function_id_writer.write(&mut self.w, function);
+        }
     }
 
     fn write_struct_id(&mut self, struct_ty: Type) {
@@ -241,13 +272,7 @@ impl WgslModuleWriter {
             .iter()
             .enumerate()
         {
-            // TODO: field offsets, but only for ABI compatible types (which notably does not
-            // include booleans, as the size does not match; 1 byte CPU-side, 4 bytes GPU-side)
-            write!(&mut self.w, "_{}:", index).unwrap();
-            self.write_optional_space();
-            self.write_type(cx, field.ty);
-            self.w.push_str(",");
-            self.write_newline();
+            self.write_struct_field(cx, index, field);
         }
 
         self.decrement_indent();
@@ -556,13 +581,13 @@ impl WgslModuleWriter {
             .get_function_body(function)
             .expect("function not registered with SCF");
 
-        if let Some(entry_point_kind) = cx.module.entry_points.get_kind(function) {
-            self.write_entry_point_kind(entry_point_kind);
+        if let Some(entry_point) = cx.module.entry_points.get(function) {
+            self.write_entry_point_kind(&entry_point.kind);
             self.write_newline();
         }
 
         self.w.push_str("fn ");
-        self.write_function_id(function);
+        self.write_function_id(cx, function);
         self.w.push_str("(");
 
         let last_arg_index = sig.args.len() - 1;
@@ -1478,7 +1503,13 @@ pub fn write_wgsl(module: &Module, scf: &Scf) -> String {
         used_constants: &used_globals.constants,
     };
 
-    let mut writer = WgslModuleWriter::new();
+    let reserved_names = module
+        .entry_points
+        .iter()
+        .map(|(_, e)| e.name.to_string())
+        .collect::<FxHashSet<_>>();
+
+    let mut writer = WgslModuleWriter::new(reserved_names);
 
     writer.write_required_language_extensions();
     writer.write_struct_decls(cx);

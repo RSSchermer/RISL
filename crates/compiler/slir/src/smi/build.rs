@@ -369,9 +369,9 @@ pub fn build_smi(module: &Module, cfg: &Cfg) -> smi::ShaderModuleInterface {
 
     let mut entry_points = Vec::new();
 
-    for (entry_point, kind) in module.entry_points.iter() {
-        let deps = dependency_collector.collect(module, cfg, entry_point);
-        let sig = &module.fn_sigs[entry_point];
+    for (function, entry_point) in module.entry_points.iter() {
+        let deps = dependency_collector.collect(module, cfg, function);
+        let sig = &module.fn_sigs[function];
 
         let mut overridable_constants = deps
             .overridable_constants
@@ -388,8 +388,8 @@ pub fn build_smi(module: &Module, cfg: &Cfg) -> smi::ShaderModuleInterface {
         resource_bindings.sort();
 
         entry_points.push(smi::EntryPoint {
-            name: sig.name.to_string().into(),
-            stage: shader_stage(&kind),
+            name: entry_point.name.to_string().into(),
+            stage: shader_stage(&entry_point.kind),
             input_bindings: collect_input_bindings(&module.ty, sig).into(),
             output_bindings: collect_output_bindings(&module.ty, sig).into(),
             overridable_constants: overridable_constants.into(),
@@ -420,7 +420,8 @@ mod tests {
     use crate::cfg::{BlockPosition, ConstPtr, RootIdentifier, Terminator};
     use crate::ty::{Struct, StructField, TY_DUMMY, TY_F32, TY_U32, TY_VEC4_F32};
     use crate::{
-        FnArg, Interpolation, ResourceBinding, StorageBindingData, Symbol, UniformBindingData,
+        EntryPoint, FnArg, Interpolation, ResourceBinding, StorageBindingData, Symbol,
+        UniformBindingData,
     };
 
     #[test]
@@ -520,12 +521,20 @@ mod tests {
             },
         );
 
-        module
-            .entry_points
-            .register(entry_point_0, EntryPointKind::Vertex);
-        module
-            .entry_points
-            .register(entry_point_1, EntryPointKind::Compute(1, 1, 1));
+        module.entry_points.register(
+            entry_point_0,
+            EntryPoint {
+                name: Symbol::from_ref("vertex_main"),
+                kind: EntryPointKind::Vertex,
+            },
+        );
+        module.entry_points.register(
+            entry_point_1,
+            EntryPoint {
+                name: Symbol::from_ref("compute_main"),
+                kind: EntryPointKind::Compute(1, 1, 1),
+            },
+        );
 
         // Used by both entry_point_0 and entry_point_1.
         let overridable_0 = Constant {
@@ -780,10 +789,17 @@ mod tests {
 
         assert_eq!(smi.entry_points.len(), 2);
 
-        assert_eq!(smi.entry_points[0].name, "entry_point_0");
-        assert_eq!(smi.entry_points[0].stage, smi::ShaderStage::Vertex);
+        assert_eq!(smi.entry_points[0].name.as_ref(), "compute_main");
+        assert_eq!(smi.entry_points[0].stage, smi::ShaderStage::Compute);
+        assert_eq!(&smi.entry_points[0].input_bindings.as_ref(), &[]);
+        assert_eq!(&smi.entry_points[0].output_bindings.as_ref(), &[]);
+        assert_eq!(&smi.entry_points[0].overridable_constants.as_ref(), &[0]);
+        assert_eq!(&smi.entry_points[0].resource_bindings.as_ref(), &[0, 3]);
+
+        assert_eq!(smi.entry_points[1].name, "vertex_main");
+        assert_eq!(smi.entry_points[1].stage, smi::ShaderStage::Vertex);
         assert_eq!(
-            smi.entry_points[0].input_bindings.as_ref(),
+            smi.entry_points[1].input_bindings.as_ref(),
             &[
                 IoBinding {
                     location: 0,
@@ -798,7 +814,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            smi.entry_points[0].output_bindings.as_ref(),
+            smi.entry_points[1].output_bindings.as_ref(),
             &[
                 IoBinding {
                     location: 0,
@@ -815,14 +831,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(smi.entry_points[0].overridable_constants.as_ref(), &[0, 1]);
-        assert_eq!(smi.entry_points[0].resource_bindings.as_ref(), &[0, 1, 2]);
-
-        assert_eq!(smi.entry_points[1].name.as_ref(), "entry_point_1");
-        assert_eq!(smi.entry_points[1].stage, smi::ShaderStage::Compute);
-        assert_eq!(&smi.entry_points[1].input_bindings.as_ref(), &[]);
-        assert_eq!(&smi.entry_points[1].output_bindings.as_ref(), &[]);
-        assert_eq!(&smi.entry_points[1].overridable_constants.as_ref(), &[0]);
-        assert_eq!(&smi.entry_points[1].resource_bindings.as_ref(), &[0, 3]);
+        assert_eq!(smi.entry_points[1].overridable_constants.as_ref(), &[0, 1]);
+        assert_eq!(smi.entry_points[1].resource_bindings.as_ref(), &[0, 1, 2]);
     }
 }

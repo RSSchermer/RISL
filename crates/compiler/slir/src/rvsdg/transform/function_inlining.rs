@@ -256,7 +256,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::StateUser;
     use crate::ty::{TY_DUMMY, TY_U32, TypeKind};
-    use crate::{BinaryOperator, EntryPointKind, FnArg, FnSig, Function, Symbol};
+    use crate::{BinaryOperator, EntryPoint, EntryPointKind, FnArg, FnSig, Function, Symbol};
 
     #[test]
     fn test_inline_function() {
@@ -594,9 +594,13 @@ mod tests {
                 ret_ty: Some(TY_U32),
             },
         );
-        module
-            .entry_points
-            .register(entry_point, EntryPointKind::Compute(1, 1, 1));
+        module.entry_points.register(
+            entry_point,
+            EntryPoint {
+                name: Symbol::from_ref("main"),
+                kind: EntryPointKind::Compute(1, 1, 1),
+            },
+        );
 
         let mut rvsdg = Rvsdg::new(module.ty.clone());
 

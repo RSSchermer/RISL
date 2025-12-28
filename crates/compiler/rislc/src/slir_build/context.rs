@@ -16,8 +16,8 @@ use rustc_public_bridge::IndexedVal;
 
 use crate::context::RislContext;
 use crate::hir_ext::{
-    BlendSrc, FnExt, Interpolation, InterpolationSampling, InterpolationType, ResourceBinding,
-    ShaderIOBinding, StaticExt,
+    BlendSrc, EntryPointKind, FnExt, Interpolation, InterpolationSampling, InterpolationType,
+    ResourceBinding, ShaderIOBinding, StaticExt,
 };
 use crate::slir_build::risl_primitive_ty::RislPrimitiveTy;
 use crate::slir_build::ty::Type;
@@ -561,22 +561,22 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
                 }
             }
 
-            match fn_ext {
-                FnExt::Compute(size) => self.module.borrow_mut().entry_points.register(
+            if let FnExt::EntryPoint(ep) = fn_ext {
+                let kind = match &ep.kind {
+                    EntryPointKind::Compute(size) => {
+                        slir::EntryPointKind::Compute(size.x, size.y, size.z)
+                    }
+                    EntryPointKind::Vertex => slir::EntryPointKind::Vertex,
+                    EntryPointKind::Fragment => slir::EntryPointKind::Fragment,
+                };
+
+                self.module.borrow_mut().entry_points.register(
                     function,
-                    slir::EntryPointKind::Compute(size.x, size.y, size.z),
-                ),
-                FnExt::VertexEntryPoint => self
-                    .module
-                    .borrow_mut()
-                    .entry_points
-                    .register(function, slir::EntryPointKind::Vertex),
-                FnExt::FragmentEntryPoint => self
-                    .module
-                    .borrow_mut()
-                    .entry_points
-                    .register(function, slir::EntryPointKind::Fragment),
-                _ => {}
+                    slir::EntryPoint {
+                        name: slir::Symbol::from_ref(ep.name.as_str()),
+                        kind,
+                    },
+                );
             }
         }
 

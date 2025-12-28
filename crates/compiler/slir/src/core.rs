@@ -364,15 +364,15 @@ impl Index<Constant> for ConstantRegistry {
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub struct EntryPointRegistry {
-    data: FxHashMap<Function, EntryPointKind>,
+    data: FxHashMap<Function, EntryPoint>,
 }
 
 impl EntryPointRegistry {
-    pub fn register(&mut self, function: Function, entry_point: EntryPointKind) {
+    pub fn register(&mut self, function: Function, entry_point: EntryPoint) {
         self.data.insert(function, entry_point);
     }
 
-    pub fn get_kind(&self, function: Function) -> Option<&EntryPointKind> {
+    pub fn get(&self, function: Function) -> Option<&EntryPoint> {
         self.data.get(&function)
     }
 
@@ -380,7 +380,7 @@ impl EntryPointRegistry {
         self.data.contains_key(&function)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (Function, EntryPointKind)> + use<'_> {
+    pub fn iter(&self) -> impl Iterator<Item = (Function, EntryPoint)> + use<'_> {
         self.data.iter().map(|(f, e)| (*f, *e))
     }
 }
@@ -424,6 +424,12 @@ pub struct FnSig {
 pub struct FnArg {
     pub ty: Type,
     pub shader_io_binding: Option<ShaderIOBinding>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub struct EntryPoint {
+    pub name: Symbol,
+    pub kind: EntryPointKind,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]

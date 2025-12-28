@@ -391,11 +391,28 @@ pub enum ExtendedItemKind<'hir, 'ext> {
 }
 
 #[derive(Debug)]
+pub struct EntryPoint {
+    pub name: Symbol,
+    pub kind: EntryPointKind,
+}
+
+#[derive(Debug)]
+pub enum EntryPointKind {
+    Compute(WorkgroupSize),
+    Vertex,
+    Fragment,
+}
+
+#[derive(Debug)]
 pub enum FnExt {
     GpuFn,
-    Compute(WorkgroupSize),
-    VertexEntryPoint,
-    FragmentEntryPoint,
+    EntryPoint(EntryPoint),
+}
+
+impl From<EntryPoint> for FnExt {
+    fn from(value: EntryPoint) -> Self {
+        FnExt::EntryPoint(value)
+    }
 }
 
 #[derive(Debug)]

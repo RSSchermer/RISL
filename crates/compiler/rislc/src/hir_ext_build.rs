@@ -18,10 +18,10 @@ use crate::attr::{
     InterpolationTypeName, collect_risl_attributes,
 };
 use crate::hir_ext::{
-    BlendSrc, ConstExt, EnumExt, FieldExt, FnExt, HirExt, ImplExt, Interpolation,
-    InterpolationSampling, InterpolationType, ModExt, OverrideId, ParamExt, ResourceBinding,
-    ShaderIOBinding, ShaderRequest, ShaderRequestKind, StaticExt, StructExt, TraitExt,
-    WorkgroupSize,
+    BlendSrc, ConstExt, EntryPoint, EntryPointKind, EnumExt, FieldExt, FnExt, HirExt, ImplExt,
+    Interpolation, InterpolationSampling, InterpolationType, ModExt, OverrideId, ParamExt,
+    ResourceBinding, ShaderIOBinding, ShaderRequest, ShaderRequestKind, StaticExt, StructExt,
+    TraitExt, WorkgroupSize,
 };
 
 // Borrowed from https://github.com/Rust-GPU/rust-gpu
@@ -345,24 +345,40 @@ impl<'a, 'tcx> Locator<'a, 'tcx> {
         }
 
         if attrs.vertex.is_some() {
-            self.hir_ext.fn_ext.insert(def_id, FnExt::VertexEntryPoint);
+            self.hir_ext.fn_ext.insert(
+                def_id,
+                EntryPoint {
+                    name: item.expect_fn().0.name,
+                    kind: EntryPointKind::Vertex,
+                }
+                .into(),
+            );
         }
 
         if attrs.fragment.is_some() {
-            self.hir_ext
-                .fn_ext
-                .insert(def_id, FnExt::FragmentEntryPoint);
+            self.hir_ext.fn_ext.insert(
+                def_id,
+                EntryPoint {
+                    name: item.expect_fn().0.name,
+                    kind: EntryPointKind::Fragment,
+                }
+                .into(),
+            );
         }
 
         if let Some(attr) = &attrs.compute {
             self.hir_ext.fn_ext.insert(
                 def_id,
-                FnExt::Compute(WorkgroupSize {
-                    x: attr.workgroup_size.0,
-                    y: attr.workgroup_size.1,
-                    z: attr.workgroup_size.2,
-                    span: attr.span,
-                }),
+                EntryPoint {
+                    name: item.expect_fn().0.name,
+                    kind: EntryPointKind::Compute(WorkgroupSize {
+                        x: attr.workgroup_size.0,
+                        y: attr.workgroup_size.1,
+                        z: attr.workgroup_size.2,
+                        span: attr.span,
+                    }),
+                }
+                .into(),
             );
         }
     }

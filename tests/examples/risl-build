@@ -1,4 +1,4 @@
 echo "Recompiling rislc to ensure it is up to date..."
 RUSTFLAGS=-Awarnings cargo build --bin=rislc --release
 echo "Compiling RISL artifacts..."
-RUSTFLAGS=-Awarnings RUST_BACKTRACE=full RUSTC_WRAPPER=target/release/rislc cargo build --package=$1
+RUSTFLAGS=-Awarnings RUST_BACKTRACE=full RUSTC_WRAPPER=target/release/rislc cargo run --package=$1
