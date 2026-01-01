@@ -80,7 +80,7 @@ pub fn workgroup_shared(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// This is a utility macro used to generate `mat * mat`, `mat * vec` and `vec * mat`
 /// implementations of `core::ops::Mul` inside the `risl` crate, as macro-rules based macros don't
-/// allow is to cleanly do this. It is not useful outside of that and not intended for public use.
+/// allow you to cleanly do this. It is not useful outside of that and not intended for public use.
 ///
 /// It expects a token-stream formatted as follows:
 ///
