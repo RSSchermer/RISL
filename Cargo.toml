@@ -21,7 +21,6 @@ default-members = [
     "crates/compiler/slir",
     "crates/library/risl",
     "crates/library/risl_macros",
-    "crates/risl_cargo",
     "crates/slir-explorer",
 ]
 
@@ -31,6 +30,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+anyhow = "1"
 ar = "0.9"
 arrayvec = "0.7"
 base64 = "0.22"

@@ -6,12 +6,12 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-[[bin]]
-name = "rislc"
-
 [package.metadata.rust-analyzer]
 # This package uses rustc crates.
 rustc_private = true
+
+[build-dependencies]
+anyhow = { workspace = true }
 
 [dependencies]
 ar = { workspace = true }

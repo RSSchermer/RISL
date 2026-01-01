@@ -224,20 +224,6 @@ impl Attr for AttrGpu {
 
 /// Decorates "uniform" and "storage" resource bindings on `static` items (that must be owned by a
 /// `mod` with the `#[shader_module]` attribute).
-///
-/// These are initially written as:
-///
-/// ```
-/// #[buffer_bound(group = 0, binding = 0)]
-/// static X: Uniform<u32>;
-/// ```
-///
-/// The `#[buffer_bound]` attribute macro rewrites these to:
-///
-/// ```
-/// #[risl::buffer_bound(0, 0)]
-/// static X: Uniform<u32> = unsafe { core::mem::zeroed() };
-/// ```
 #[derive(Debug)]
 pub struct AttrResource {
     pub group: u32,
@@ -279,19 +265,6 @@ impl Attr for AttrResource {
 
 /// Decorates workgroup-shared `static` items (that must be owned by a `mod` with the
 /// `#[shader_module]` attribute).
-///
-/// These are initially written as:
-///
-/// ```
-/// workgroup x: u32 = 0;
-/// ```
-///
-/// The `#[shader_module]` attribute macro rewrites these to:
-///
-/// ```
-/// #[risl::workgroup]
-/// static x: u32 = 0;
-/// ```
 #[derive(Debug)]
 pub struct AttrWorkgroupShared {
     pub span: Span,
@@ -310,21 +283,6 @@ impl Attr for AttrWorkgroupShared {
 
 /// Decorates `const` items (that must be owned by a `mod` with the `#[shader_module]` attribute) to
 /// indicate that they are specializable/overridable.
-///
-/// These are initially written as:
-///
-/// ```
-/// override X: u32;
-/// ```
-///
-/// The `#[shader_module]` attribute macro rewrites these to:
-///
-/// ```
-/// #[risl::override]
-/// const X: u32 = ...;
-/// ```
-///
-/// (where the initializer in a dummy value).
 #[derive(Debug)]
 pub struct AttrOverride {
     pub span: Span,

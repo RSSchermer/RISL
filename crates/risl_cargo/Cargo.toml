@@ -1,11 +1,17 @@
 [package]
-name = "risl_cargo"
+name = "risl-cargo"
 description = "Command line interface for RISL"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "rislc"
+required-features = ["build-rislc"]
+
+[features]
+default = ["build-rislc"]
+build-rislc = ["dep:rislc"]
+
 [dependencies]
-cargo = { workspace = true }
-cargo-util = { workspace = true }
-color-print = { workspace = true }
+rislc = { version = "0.1.0", path = "../compiler/rislc", optional = true }
