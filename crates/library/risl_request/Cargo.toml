@@ -1,12 +1,9 @@
 [package]
-name = "risl-macros"
-description = "Implements the procedural macros used by the RISL standard library"
+name = "risl-request"
+description = "Proc-macro utility library that allows you to make requests for shader compilation from RISL compiler."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[lib]
-proc-macro = true
 
 [dependencies]
 ar = { workspace = true }
@@ -14,7 +11,7 @@ base64 = { workspace = true }
 bincode = { workspace = true, features = ["serde", "std"] }
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
-risl-request = { workspace = true }
+risl-smi = { workspace = true }
 
 [dependencies.syn]
 workspace = true

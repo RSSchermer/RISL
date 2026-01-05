@@ -5,6 +5,8 @@ members = [
     "crates/compiler/slir",
     "crates/library/risl",
     "crates/library/risl_macros",
+    "crates/library/risl_request",
+    "crates/library/risl_smi",
     "crates/risl_cargo",
     "crates/slir-explorer",
     "tests/examples/builtin_vec",
@@ -42,7 +44,6 @@ cargo-util = "0.2"
 color-print = "0.3"
 delegate = "0.13"
 either = "1"
-empa-smi = "0.1.2"
 indexmap = "2"
 index_vec = "0.1"
 internment = "0.8"
@@ -50,6 +51,8 @@ itertools = "0.14"
 ordered-float = "5"
 proc-macro2 = "1.0"
 regex = "1"
+risl-request = { path = "./crates/library/risl_request", version = "0.1.0" }
+risl-smi = { path = "./crates/library/risl_smi", version = "0.1.0" }
 rustc-hash = "2"
 serde = "1"
 sled = "1.0.0-alpha.124"

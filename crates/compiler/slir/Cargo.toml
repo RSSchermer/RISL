@@ -9,11 +9,11 @@ publish = false
 [dependencies]
 arrayvec = { workspace = true }
 delegate = { workspace = true }
-empa-smi = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 index_vec = { workspace = true, features = ["serde"] }
 internment = { workspace = true, features = ["arena", "serde"] }
 ordered-float = { workspace = true, features = ["serde"] }
+risl-smi = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 slotmap = { workspace = true, features = ["serde"] }

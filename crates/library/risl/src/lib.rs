@@ -3,6 +3,7 @@
 pub mod mem;
 pub mod primitive;
 pub mod resource;
+pub mod smi;
 pub mod workgroup;
 
 pub use risl_macros::gpu;
@@ -19,14 +20,5 @@ pub mod prelude {
 pub mod shader {
     pub use risl_macros::{
         compute, fragment, shader_io, shader_module, shader_module_interface, shader_wgsl, vertex,
-    };
-}
-
-pub mod smi {
-    pub use empa_smi::{
-        ArrayLayout, EntryPoint, Interpolate, InterpolationType, IoBinding, IoBindingType,
-        MemoryUnit, MemoryUnitLayout, OverridableConstant, OverridableConstantType,
-        ResourceBinding, ResourceType, Sampling, ShaderModuleInterface, ShaderStage,
-        SizedBufferLayout, StorageTextureFormat, TexelType, UnsizedBufferLayout, UnsizedTailLayout,
     };
 }

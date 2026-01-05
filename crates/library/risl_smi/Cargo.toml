@@ -1,0 +1,9 @@
+[package]
+name = "risl-smi"
+description = "Contains a collection of types that may be used to describe the interface of a RISL shader module."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }

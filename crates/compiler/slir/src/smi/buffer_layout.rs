@@ -1,4 +1,4 @@
-use empa_smi::{ArrayLayout, MemoryUnit, MemoryUnitLayout, UnsizedTailLayout};
+use risl_smi::{ArrayLayout, MemoryUnit, MemoryUnitLayout, UnsizedTailLayout};
 use rustc_hash::FxHashMap;
 
 use crate::ty;

@@ -1,5 +1,5 @@
-use empa_smi as smi;
 use indexmap::{IndexMap, IndexSet};
+use risl_smi as smi;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::cfg::analyze::item_dependencies::{Item, item_dependencies};
@@ -218,8 +218,7 @@ fn build_overridable_constant_map(
         overridable_constant_map.insert(
             constant,
             smi::OverridableConstant {
-                name: constant.name.to_string().into(),
-                id: Some(data.id() as u16),
+                id: data.id() as u16,
                 constant_type,
                 required,
             },
@@ -411,7 +410,7 @@ pub fn build_smi(module: &Module, cfg: &Cfg) -> smi::ShaderModuleInterface {
 
 #[cfg(test)]
 mod tests {
-    use empa_smi::{
+    use risl_smi::{
         IoBinding, MemoryUnit, MemoryUnitLayout, OverridableConstantType, ResourceType,
         SizedBufferLayout, UnsizedBufferLayout,
     };
@@ -721,14 +720,12 @@ mod tests {
             smi.overridable_constants,
             vec![
                 smi::OverridableConstant {
-                    name: "overridable_0".into(),
-                    id: Some(0),
+                    id: 0,
                     constant_type: OverridableConstantType::UnsignedInteger,
                     required: false,
                 },
                 smi::OverridableConstant {
-                    name: "overridable_1".into(),
-                    id: Some(10),
+                    id: 10,
                     constant_type: OverridableConstantType::UnsignedInteger,
                     required: true,
                 }
@@ -789,17 +786,17 @@ mod tests {
 
         assert_eq!(smi.entry_points.len(), 2);
 
-        assert_eq!(smi.entry_points[0].name.as_ref(), "compute_main");
+        assert_eq!(&smi.entry_points[0].name, "compute_main");
         assert_eq!(smi.entry_points[0].stage, smi::ShaderStage::Compute);
-        assert_eq!(&smi.entry_points[0].input_bindings.as_ref(), &[]);
-        assert_eq!(&smi.entry_points[0].output_bindings.as_ref(), &[]);
-        assert_eq!(&smi.entry_points[0].overridable_constants.as_ref(), &[0]);
-        assert_eq!(&smi.entry_points[0].resource_bindings.as_ref(), &[0, 3]);
+        assert_eq!(&smi.entry_points[0].input_bindings, &[]);
+        assert_eq!(&smi.entry_points[0].output_bindings, &[]);
+        assert_eq!(&smi.entry_points[0].overridable_constants, &[0]);
+        assert_eq!(&smi.entry_points[0].resource_bindings, &[0, 3]);
 
         assert_eq!(smi.entry_points[1].name, "vertex_main");
         assert_eq!(smi.entry_points[1].stage, smi::ShaderStage::Vertex);
         assert_eq!(
-            smi.entry_points[1].input_bindings.as_ref(),
+            &smi.entry_points[1].input_bindings,
             &[
                 IoBinding {
                     location: 0,
@@ -814,7 +811,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            smi.entry_points[1].output_bindings.as_ref(),
+            &smi.entry_points[1].output_bindings,
             &[
                 IoBinding {
                     location: 0,
@@ -831,7 +828,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(smi.entry_points[1].overridable_constants.as_ref(), &[0, 1]);
-        assert_eq!(smi.entry_points[1].resource_bindings.as_ref(), &[0, 1, 2]);
+        assert_eq!(&smi.entry_points[1].overridable_constants, &[0, 1]);
+        assert_eq!(&smi.entry_points[1].resource_bindings, &[0, 1, 2]);
     }
 }
