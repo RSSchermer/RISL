@@ -10,7 +10,22 @@ use risl_request::{Request, request_shader_module_interface};
 
 pub fn expand_shader_module_interface(input: TokenStream) -> TokenStream {
     match request_shader_module_interface(input) {
-        Ok(Request::TokenStream(tokens)) => tokens,
+        Ok(Request::TokenStream(request)) => {
+            let request = proc_macro2::TokenStream::from(request);
+
+            quote! {
+                const {
+                    #request;
+
+                    risl::smi::ShaderModuleInterface {
+                        resource_bindings: &[],
+                        overridable_constants: &[],
+                        entry_points: &[],
+                    }
+                }
+            }
+            .into()
+        }
         Ok(Request::Resolution(smi)) => smi_to_token_stream(&smi, &quote!(risl::smi)).into(),
         Err(err) => err.into_compile_error().into(),
     }

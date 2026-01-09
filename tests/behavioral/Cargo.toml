@@ -1,0 +1,15 @@
+[package]
+name = "behavioral-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+empa = { workspace = true, features = ["risl", "dx12", "metal"] }
+futures = { workspace = true }
+pollster = { workspace = true }
+risl = { workspace = true }

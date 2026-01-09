@@ -16,11 +16,9 @@ pub fn request_wgsl(mod_path: TokenStream) -> crate::Result<String> {
         let request_id = LitStr::new(&request_id, Span::call_site());
 
         let request_expr = quote! {
-            #[rislc::shader_wgsl(#request_id)]
             const {
+                #[rislc::shader_wgsl(#request_id)]
                 use #mod_path;
-
-                ""
             }
         };
 

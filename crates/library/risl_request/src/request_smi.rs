@@ -16,15 +16,9 @@ pub fn request_shader_module_interface(
         let request_id = LitStr::new(&request_id, Span::call_site());
 
         let request_expr = quote! {
-            #[rislc::shader_module_interface(#request_id)]
             const {
+                #[rislc::shader_module_interface(#request_id)]
                 use #mod_path;
-
-                risl::smi::ShaderModuleInterface {
-                    overridable_constants: &[],
-                    resource_bindings: &[],
-                    entry_points: &[],
-                }
             }
         };
 

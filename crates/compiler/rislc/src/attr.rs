@@ -150,7 +150,7 @@ impl Attr for AttrShaderWgsl {
 
     fn valid_target(&self, target: &Target) -> bool {
         match target {
-            Target::Expression => true,
+            Target::Use => true,
             _ => false,
         }
     }
@@ -173,7 +173,7 @@ impl Attr for AttrShaderModuleInterface {
 
     fn valid_target(&self, target: &Target) -> bool {
         match target {
-            Target::Expression => true,
+            Target::Use => true,
             _ => false,
         }
     }

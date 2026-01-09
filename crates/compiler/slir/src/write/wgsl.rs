@@ -156,7 +156,7 @@ impl WgslModuleWriter {
 
     fn write_required_language_extensions(&mut self) {
         // TODO: add 'uniform_buffer_standard_layout' when both naga and tint support it
-        self.w.push_str("requires 'pointer_composite_access';");
+        self.w.push_str("requires pointer_composite_access;");
         self.write_newline();
         self.write_newline();
     }

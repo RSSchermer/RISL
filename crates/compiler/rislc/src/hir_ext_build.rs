@@ -3,9 +3,9 @@ use std::convert::identity;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::{
-    Arm, ConstBlock, Expr, ExprField, ExprKind, FieldDef, ForeignItem, GenericParam, Impl,
+    Arm, ConstBlock, Expr, ExprField, ExprKind, FieldDef, ForeignItem, GenericParam, HirId, Impl,
     ImplItem, ImplItemKind, Item, ItemKind, MethodKind, Param, PatField, QPath, Stmt, StmtKind,
-    Target, TyKind, UseKind, Variant, intravisit,
+    Target, TyKind, UseKind, UsePath, Variant, intravisit,
 };
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::TyCtxt;
@@ -45,15 +45,12 @@ fn target_from_impl_item(tcx: TyCtxt<'_>, impl_item: &ImplItem<'_>) -> Target {
     }
 }
 
-fn try_resolve_stmt_to_mod_id(tcx: TyCtxt<'_>, stmt: &Stmt) -> Result<DefId, ErrorGuaranteed> {
-    if let StmtKind::Item(item_id) = &stmt.kind {
-        let item = tcx.hir_item(*item_id);
-
-        if let ItemKind::Use(path, UseKind::Single(_)) = &item.kind {
-            if let Some(Res::Def(DefKind::Mod, id)) = path.res.type_ns {
-                return Ok(id);
-            }
-        }
+fn try_resolve_use_path_to_mod_id<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    path: &'tcx UsePath<'tcx>,
+) -> Result<DefId, ErrorGuaranteed> {
+    if let Some(Res::Def(DefKind::Mod, id)) = path.res.type_ns {
+        return Ok(id);
     }
 
     Err(tcx
@@ -62,37 +59,20 @@ fn try_resolve_stmt_to_mod_id(tcx: TyCtxt<'_>, stmt: &Stmt) -> Result<DefId, Err
         .err("expected a `use` statement that points to a shader module"))
 }
 
-fn try_build_shader_request(
-    tcx: TyCtxt<'_>,
-    block: &ConstBlock,
-    span: Span,
+fn try_build_shader_request<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    path: &'tcx UsePath<'tcx>,
     request_id: Symbol,
     kind: ShaderRequestKind,
 ) -> Result<ShaderRequest, ErrorGuaranteed> {
-    let body = tcx.hir_body(block.body);
+    let shader_mod = try_resolve_use_path_to_mod_id(tcx, path)?;
 
-    if let ExprKind::Block(e, _) = body.value.kind {
-        if let Some(stmt) = e.stmts.first() {
-            let shader_mod = try_resolve_stmt_to_mod_id(tcx, stmt)?;
-
-            Ok(ShaderRequest {
-                shader_mod,
-                span,
-                request_id,
-                kind,
-            })
-        } else {
-            Err(tcx.dcx().span_err(
-                body.value.span,
-                "expected a `use` statement that points to a shader module",
-            ))
-        }
-    } else {
-        Err(tcx.dcx().span_err(
-            body.value.span,
-            "expected a block expression for a shader source request",
-        ))
-    }
+    Ok(ShaderRequest {
+        shader_mod,
+        span: path.span,
+        request_id,
+        kind,
+    })
 }
 
 fn try_blend_src_from_attr(
@@ -449,39 +429,32 @@ impl<'a, 'tcx> Visitor<'tcx> for Locator<'a, 'tcx> {
         intravisit::walk_item(self, item)
     }
 
-    fn visit_expr(&mut self, ex: &'tcx Expr<'tcx>) {
-        let attrs = self.tcx.hir_attrs(ex.hir_id);
+    fn visit_use(&mut self, path: &'tcx UsePath<'tcx>, hir_id: HirId) -> Self::Result {
+        let attrs = self.tcx.hir_attrs(hir_id);
         let attrs = collect_risl_attributes(self.tcx, attrs);
 
-        attrs.check_target(self.tcx, &Target::Expression);
+        attrs.check_target(self.tcx, &Target::Use);
 
-        if let ExprKind::ConstBlock(block) = &ex.kind {
-            if let Some(attr) = &attrs.shader_wgsl {
-                if let Ok(request) = try_build_shader_request(
-                    self.tcx,
-                    block,
-                    ex.span,
-                    attr.request_id,
-                    ShaderRequestKind::Wgsl,
-                ) {
-                    self.hir_ext.shader_requests.push(request);
-                }
-            }
-
-            if let Some(attr) = &attrs.shader_module_interface {
-                if let Ok(request) = try_build_shader_request(
-                    self.tcx,
-                    block,
-                    ex.span,
-                    attr.request_id,
-                    ShaderRequestKind::ShaderModuleInterface,
-                ) {
-                    self.hir_ext.shader_requests.push(request);
-                }
+        if let Some(attr) = &attrs.shader_wgsl {
+            if let Ok(request) =
+                try_build_shader_request(self.tcx, path, attr.request_id, ShaderRequestKind::Wgsl)
+            {
+                self.hir_ext.shader_requests.push(request);
             }
         }
 
-        intravisit::walk_expr(self, ex)
+        if let Some(attr) = &attrs.shader_module_interface {
+            if let Ok(request) = try_build_shader_request(
+                self.tcx,
+                path,
+                attr.request_id,
+                ShaderRequestKind::ShaderModuleInterface,
+            ) {
+                self.hir_ext.shader_requests.push(request);
+            }
+        }
+
+        intravisit::walk_use(self, path, hir_id)
     }
 
     fn visit_param(&mut self, param: &'tcx Param<'tcx>) {
