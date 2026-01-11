@@ -184,6 +184,50 @@ impl OpMatrix {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct OpConvertToU32 {
+    value: LocalBinding,
+}
+
+impl OpConvertToU32 {
+    pub fn value(&self) -> LocalBinding {
+        self.value
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct OpConvertToI32 {
+    value: LocalBinding,
+}
+
+impl OpConvertToI32 {
+    pub fn value(&self) -> LocalBinding {
+        self.value
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct OpConvertToF32 {
+    value: LocalBinding,
+}
+
+impl OpConvertToF32 {
+    pub fn value(&self) -> LocalBinding {
+        self.value
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct OpConvertToBool {
+    value: LocalBinding,
+}
+
+impl OpConvertToBool {
+    pub fn value(&self) -> LocalBinding {
+        self.value
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct OpPtrElementPtr {
     pointer: LocalBinding,
     indices: Vec<LocalBinding>,
@@ -251,6 +295,10 @@ pub enum ExpressionKind {
     OpBinary(OpBinary),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
+    OpConvertToU32(OpConvertToU32),
+    OpConvertToI32(OpConvertToI32),
+    OpConvertToF32(OpConvertToF32),
+    OpConvertToBool(OpConvertToBool),
     OpPtrElementPtr(OpPtrElementPtr),
     OpExtractElement(OpExtractElement),
     OpLoad(LocalBinding),
@@ -337,6 +385,38 @@ impl ExpressionKind {
             op
         } else {
             panic!("expected a matrix operation expression");
+        }
+    }
+
+    pub fn expect_op_convert_to_u32(&self) -> &OpConvertToU32 {
+        if let ExpressionKind::OpConvertToU32(op) = self {
+            op
+        } else {
+            panic!("expected an convert-to-u32 operation expression");
+        }
+    }
+
+    pub fn expect_op_convert_to_i32(&self) -> &OpConvertToI32 {
+        if let ExpressionKind::OpConvertToI32(op) = self {
+            op
+        } else {
+            panic!("expected an convert-to-i32 operation expression");
+        }
+    }
+
+    pub fn expect_op_convert_to_f32(&self) -> &OpConvertToF32 {
+        if let ExpressionKind::OpConvertToF32(op) = self {
+            op
+        } else {
+            panic!("expected an convert-to-f32 operation expression");
+        }
+    }
+
+    pub fn expect_op_convert_to_bool(&self) -> &OpConvertToBool {
+        if let ExpressionKind::OpConvertToBool(op) = self {
+            op
+        } else {
+            panic!("expected an convert-to-bool operation expression");
         }
     }
 
@@ -1413,6 +1493,138 @@ impl Scf {
                         matrix_ty,
                         columns: collected_columns,
                     }),
+                },
+            }),
+        });
+
+        self.blocks[block].add_statement(position, statement);
+
+        // Adjust the temporary value we set above to the actual statement.
+        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
+
+        (statement, binding)
+    }
+
+    pub fn add_bind_op_convert_to_u32(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        let ty = self.local_bindings[value].ty();
+
+        let binding = self.local_bindings.insert(LocalBindingData {
+            ty,
+            // Initialize with a temporary value, remember to adjust after statement initialization.
+            kind: LocalBindingKind::ExprBinding(Statement::default()),
+        });
+
+        let statement = self.statements.insert(StatementData {
+            block,
+            kind: StatementKind::ExprBinding(ExprBinding {
+                binding,
+                expression: Expression {
+                    ty,
+                    kind: ExpressionKind::OpConvertToU32(OpConvertToU32 { value }),
+                },
+            }),
+        });
+
+        self.blocks[block].add_statement(position, statement);
+
+        // Adjust the temporary value we set above to the actual statement.
+        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
+
+        (statement, binding)
+    }
+
+    pub fn add_bind_op_convert_to_i32(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        let ty = self.local_bindings[value].ty();
+
+        let binding = self.local_bindings.insert(LocalBindingData {
+            ty,
+            // Initialize with a temporary value, remember to adjust after statement initialization.
+            kind: LocalBindingKind::ExprBinding(Statement::default()),
+        });
+
+        let statement = self.statements.insert(StatementData {
+            block,
+            kind: StatementKind::ExprBinding(ExprBinding {
+                binding,
+                expression: Expression {
+                    ty,
+                    kind: ExpressionKind::OpConvertToI32(OpConvertToI32 { value }),
+                },
+            }),
+        });
+
+        self.blocks[block].add_statement(position, statement);
+
+        // Adjust the temporary value we set above to the actual statement.
+        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
+
+        (statement, binding)
+    }
+
+    pub fn add_bind_op_convert_to_f32(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        let ty = self.local_bindings[value].ty();
+
+        let binding = self.local_bindings.insert(LocalBindingData {
+            ty,
+            // Initialize with a temporary value, remember to adjust after statement initialization.
+            kind: LocalBindingKind::ExprBinding(Statement::default()),
+        });
+
+        let statement = self.statements.insert(StatementData {
+            block,
+            kind: StatementKind::ExprBinding(ExprBinding {
+                binding,
+                expression: Expression {
+                    ty,
+                    kind: ExpressionKind::OpConvertToF32(OpConvertToF32 { value }),
+                },
+            }),
+        });
+
+        self.blocks[block].add_statement(position, statement);
+
+        // Adjust the temporary value we set above to the actual statement.
+        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
+
+        (statement, binding)
+    }
+
+    pub fn add_bind_op_convert_to_bool(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        let ty = self.local_bindings[value].ty();
+
+        let binding = self.local_bindings.insert(LocalBindingData {
+            ty,
+            // Initialize with a temporary value, remember to adjust after statement initialization.
+            kind: LocalBindingKind::ExprBinding(Statement::default()),
+        });
+
+        let statement = self.statements.insert(StatementData {
+            block,
+            kind: StatementKind::ExprBinding(ExprBinding {
+                binding,
+                expression: Expression {
+                    ty,
+                    kind: ExpressionKind::OpConvertToBool(OpConvertToBool { value }),
                 },
             }),
         });

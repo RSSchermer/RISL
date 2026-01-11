@@ -92,6 +92,10 @@ impl UseCounter {
                     self.increment(*column);
                 }
             }
+            ExpressionKind::OpConvertToU32(op) => self.increment(op.value()),
+            ExpressionKind::OpConvertToI32(op) => self.increment(op.value()),
+            ExpressionKind::OpConvertToF32(op) => self.increment(op.value()),
+            ExpressionKind::OpConvertToBool(op) => self.increment(op.value()),
             ExpressionKind::OpPtrElementPtr(op) => {
                 self.increment(op.pointer());
 

@@ -6,10 +6,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::cfg::analyze::item_dependencies::{Item, ItemDependencies, item_dependencies};
 use crate::cfg::{
     Assign, BasicBlock, Bind, Cfg, InlineConst, LocalBinding, OpAlloca, OpBinary,
-    OpBoolToBranchPredicate, OpCall, OpCallBuiltin, OpCaseToBranchPredicate, OpExtractValue,
-    OpGetDiscriminant, OpLoad, OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr,
-    OpSetDiscriminant, OpStore, OpUnary, RootIdentifier, StatementData, Terminator, Uninitialized,
-    Value,
+    OpBoolToBranchPredicate, OpCall, OpCallBuiltin, OpCaseToBranchPredicate, OpConvertToBool,
+    OpConvertToF32, OpConvertToI32, OpConvertToU32, OpExtractValue, OpGetDiscriminant, OpLoad,
+    OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary,
+    RootIdentifier, StatementData, Terminator, Uninitialized, Value,
 };
 use crate::cfg_to_rvsdg::control_flow_restructuring::{
     Graph, restructure_branches, restructure_loops,
@@ -326,6 +326,10 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpBoolToBranchPredicate(op) => {
                 self.visit_op_bool_to_branch_predicate(op)
             }
+            StatementData::OpConvertToU32(op) => self.visit_op_convert_to_u32(op),
+            StatementData::OpConvertToI32(op) => self.visit_op_convert_to_i32(op),
+            StatementData::OpConvertToF32(op) => self.visit_op_convert_to_f32(op),
+            StatementData::OpConvertToBool(op) => self.visit_op_convert_to_bool(op),
         }
     }
 
@@ -538,6 +542,38 @@ impl<'a> RegionBuilder<'a> {
         let node = self
             .rvsdg
             .add_op_bool_to_switch_predicate(self.region, input);
+
+        self.input_state_tracker
+            .insert_value_node(self.cfg, op.result(), node, 0);
+    }
+
+    fn visit_op_convert_to_u32(&mut self, op: &OpConvertToU32) {
+        let input = self.resolve_value(op.value());
+        let node = self.rvsdg.add_op_convert_to_u32(self.region, input);
+
+        self.input_state_tracker
+            .insert_value_node(self.cfg, op.result(), node, 0);
+    }
+
+    fn visit_op_convert_to_i32(&mut self, op: &OpConvertToI32) {
+        let input = self.resolve_value(op.value());
+        let node = self.rvsdg.add_op_convert_to_i32(self.region, input);
+
+        self.input_state_tracker
+            .insert_value_node(self.cfg, op.result(), node, 0);
+    }
+
+    fn visit_op_convert_to_f32(&mut self, op: &OpConvertToF32) {
+        let input = self.resolve_value(op.value());
+        let node = self.rvsdg.add_op_convert_to_f32(self.region, input);
+
+        self.input_state_tracker
+            .insert_value_node(self.cfg, op.result(), node, 0);
+    }
+
+    fn visit_op_convert_to_bool(&mut self, op: &OpConvertToBool) {
+        let input = self.resolve_value(op.value());
+        let node = self.rvsdg.add_op_convert_to_bool(self.region, input);
 
         self.input_state_tracker
             .insert_value_node(self.cfg, op.result(), node, 0);

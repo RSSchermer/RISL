@@ -13,6 +13,8 @@ use thaw::*;
 use thaw_utils::Model;
 use urlencoding::{decode as urldecode, encode as urlencode};
 
+use crate::module::url::function_url;
+
 pub fn use_module_data() -> StoredValue<ModuleData> {
     use_context::<StoredValue<ModuleData>>().expect("should be used inside a module context")
 }
@@ -249,8 +251,8 @@ pub fn ModuleNav(module_data: StoredValue<ModuleData>) -> impl IntoView {
                 </NavCategoryItem>
                 {move || functions().into_iter().map(|f| view! {
                     <NavSubItem
-                        value=format!("f{}-{}", f.module, f.name)
-                        href=format!("/{}/functions/{}", urlencode(&module_name.as_str()), urlencode(f.name.as_str()))
+                        value=format!("f{}--{}", f.module, f.name)
+                        href=function_url(module_name, f)
                     >
                         {f.name.to_string()}
                     </NavSubItem>

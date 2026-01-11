@@ -1,6 +1,6 @@
 [package]
 name = "rislc"
-description = "Compiler for the Rust Embedded Shading Language"
+description = "Compiler for the Rust-Integrated Shading Language"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -22,7 +22,6 @@ bit-vec = { workspace = true }
 either = { workspace = true }
 indexmap = { workspace = true }
 index_vec = { workspace = true }
-internment = { workspace = true }
 itertools = { workspace = true }
 regex = { workspace = true }
 rustc-hash = { workspace = true }

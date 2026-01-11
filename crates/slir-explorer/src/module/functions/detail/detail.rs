@@ -54,9 +54,8 @@ pub fn Detail() -> impl IntoView {
     let module_data = use_module_data();
     let params = use_params::<FunctionParams>();
     let query = use_query::<FunctionQuery>();
-    let module_name = move || module_data.read_value().module.name;
 
-    let function_name = move || {
+    let function_string = move || {
         let param = params
             .read()
             .as_ref()
@@ -65,13 +64,16 @@ pub fn Detail() -> impl IntoView {
             .unwrap_or_default();
         let decoded = urldecode(&param).unwrap_or_default();
 
-        Symbol::new(decoded.to_string())
+        decoded.to_string()
     };
 
     let function = move || {
+        let function_string = function_string();
+        let (module, name) = function_string.split_once("--")?;
+
         let function = Function {
-            module: module_name(),
-            name: function_name(),
+            module: Symbol::from_ref(module),
+            name: Symbol::from_ref(name),
         };
 
         module_data
@@ -130,8 +132,8 @@ pub fn Detail() -> impl IntoView {
 
                     <p>
                         {format!(
-                            "No function name `{}` found in the current module.",
-                            function_name()
+                            "No function `{}` found in the current module.",
+                            function_string()
                         )}
                     </p>
                 }.into_any()

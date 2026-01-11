@@ -217,6 +217,30 @@ impl FunctionImporter {
                     dst_bb,
                     src_stmt,
                 ),
+            StatementData::OpConvertToU32(_) => self.import_stmt_op_convert_to_u32(
+                (src_mod, src_cfg),
+                (dst_mod, dst_cfg),
+                dst_bb,
+                src_stmt,
+            ),
+            StatementData::OpConvertToI32(_) => self.import_stmt_op_convert_to_i32(
+                (src_mod, src_cfg),
+                (dst_mod, dst_cfg),
+                dst_bb,
+                src_stmt,
+            ),
+            StatementData::OpConvertToF32(_) => self.import_stmt_op_convert_to_f32(
+                (src_mod, src_cfg),
+                (dst_mod, dst_cfg),
+                dst_bb,
+                src_stmt,
+            ),
+            StatementData::OpConvertToBool(_) => self.import_stmt_op_convert_to_f32(
+                (src_mod, src_cfg),
+                (dst_mod, dst_cfg),
+                dst_bb,
+                src_stmt,
+            ),
         }
     }
 
@@ -564,6 +588,70 @@ impl FunctionImporter {
 
         let (_, result) =
             dst_cfg.add_stmt_op_bool_to_branch_predicate(dst_bb, BlockPosition::Append, dst_value);
+
+        self.local_value_mapping.insert(src_data.result(), result);
+    }
+
+    fn import_stmt_op_convert_to_u32(
+        &mut self,
+        (src_mod, src_cfg): (&Module, &Cfg),
+        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
+        dst_bb: BasicBlock,
+        src_stmt: Statement,
+    ) {
+        let src_data = src_cfg[src_stmt].expect_op_convert_to_u32();
+        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
+
+        let (_, result) =
+            dst_cfg.add_stmt_op_convert_to_u32(dst_bb, BlockPosition::Append, dst_operand);
+
+        self.local_value_mapping.insert(src_data.result(), result);
+    }
+
+    fn import_stmt_op_convert_to_i32(
+        &mut self,
+        (src_mod, src_cfg): (&Module, &Cfg),
+        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
+        dst_bb: BasicBlock,
+        src_stmt: Statement,
+    ) {
+        let src_data = src_cfg[src_stmt].expect_op_convert_to_i32();
+        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
+
+        let (_, result) =
+            dst_cfg.add_stmt_op_convert_to_i32(dst_bb, BlockPosition::Append, dst_operand);
+
+        self.local_value_mapping.insert(src_data.result(), result);
+    }
+
+    fn import_stmt_op_convert_to_f32(
+        &mut self,
+        (src_mod, src_cfg): (&Module, &Cfg),
+        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
+        dst_bb: BasicBlock,
+        src_stmt: Statement,
+    ) {
+        let src_data = src_cfg[src_stmt].expect_op_convert_to_f32();
+        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
+
+        let (_, result) =
+            dst_cfg.add_stmt_op_convert_to_f32(dst_bb, BlockPosition::Append, dst_operand);
+
+        self.local_value_mapping.insert(src_data.result(), result);
+    }
+
+    fn import_stmt_op_convert_to_bool(
+        &mut self,
+        (src_mod, src_cfg): (&Module, &Cfg),
+        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
+        dst_bb: BasicBlock,
+        src_stmt: Statement,
+    ) {
+        let src_data = src_cfg[src_stmt].expect_op_convert_to_bool();
+        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
+
+        let (_, result) =
+            dst_cfg.add_stmt_op_convert_to_bool(dst_bb, BlockPosition::Append, dst_operand);
 
         self.local_value_mapping.insert(src_data.result(), result);
     }

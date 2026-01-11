@@ -725,6 +725,54 @@ impl NodeData {
         }
     }
 
+    pub fn is_op_convert_to_u32(&self) -> bool {
+        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToU32(_)))
+    }
+
+    pub fn expect_op_convert_to_u32(&self) -> &OpConvertToU32 {
+        if let NodeKind::Simple(SimpleNode::OpConvertToU32(op)) = &self.kind {
+            op
+        } else {
+            panic!("expected node to be a `convert-to-u32` operation")
+        }
+    }
+
+    pub fn is_op_convert_to_i32(&self) -> bool {
+        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToI32(_)))
+    }
+
+    pub fn expect_op_convert_to_i32(&self) -> &OpConvertToI32 {
+        if let NodeKind::Simple(SimpleNode::OpConvertToI32(op)) = &self.kind {
+            op
+        } else {
+            panic!("expected node to be a `convert-to-i32` operation")
+        }
+    }
+
+    pub fn is_op_convert_to_f32(&self) -> bool {
+        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToF32(_)))
+    }
+
+    pub fn expect_op_convert_to_f32(&self) -> &OpConvertToF32 {
+        if let NodeKind::Simple(SimpleNode::OpConvertToF32(op)) = &self.kind {
+            op
+        } else {
+            panic!("expected node to be a `convert-to-f32` operation")
+        }
+    }
+
+    pub fn is_op_convert_to_bool(&self) -> bool {
+        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToBool(_)))
+    }
+
+    pub fn expect_op_convert_to_bool(&self) -> &OpConvertToBool {
+        if let NodeKind::Simple(SimpleNode::OpConvertToBool(op)) = &self.kind {
+            op
+        } else {
+            panic!("expected node to be a `convert-to-bool` operation")
+        }
+    }
+
     pub fn is_value_proxy(&self) -> bool {
         matches!(self.kind, NodeKind::Simple(SimpleNode::ValueProxy(_)))
     }
@@ -2225,6 +2273,61 @@ impl Connectivity for OpSwitchPredicateToCase {
     }
 }
 
+macro_rules! gen_conversion_nodes {
+    ($($name:ident),*) => {
+        $(
+            #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+            pub struct $name {
+                input: ValueInput,
+                output: ValueOutput,
+            }
+
+            impl $name {
+                pub fn input(&self) -> &ValueInput {
+                    &self.input
+                }
+
+                pub fn output(&self) -> &ValueOutput {
+                    &self.output
+                }
+            }
+
+            impl Connectivity for $name {
+                fn value_inputs(&self) -> &[ValueInput] {
+                    slice::from_ref(&self.input)
+                }
+
+                fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
+                    slice::from_mut(&mut self.input)
+                }
+
+                fn value_outputs(&self) -> &[ValueOutput] {
+                    slice::from_ref(&self.output)
+                }
+
+                fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
+                    slice::from_mut(&mut self.output)
+                }
+
+                fn state(&self) -> Option<&State> {
+                    None
+                }
+
+                fn state_mut(&mut self) -> Option<&mut State> {
+                    None
+                }
+            }
+        )*
+    };
+}
+
+gen_conversion_nodes!(
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool
+);
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Debug)]
 pub enum ProxyKind {
     #[default]
@@ -2424,6 +2527,10 @@ gen_simple_node! {
     OpBoolToSwitchPredicate,
     OpU32ToSwitchPredicate,
     OpSwitchPredicateToCase,
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool,
     ValueProxy,
     Reaggregation,
 }
@@ -3852,6 +3959,114 @@ impl Rvsdg {
                     cases: cases.into_iter().collect(),
                     input,
                     output: ValueOutput::new(TY_U32),
+                }
+                .into(),
+            ),
+            region: Some(region),
+        });
+
+        self.regions[region].nodes.insert(node);
+        self.connect_node_value_inputs(node);
+
+        node
+    }
+
+    pub fn add_op_convert_to_u32(&mut self, region: Region, input: ValueInput) -> Node {
+        self.validate_node_value_input(region, &input);
+
+        if !input.ty.is_scalar() {
+            panic!(
+                "expected input to be a `u32`, `i32`, `f32` or `bool` value, but found `{}`",
+                input.ty.to_string(self.ty())
+            );
+        }
+
+        let node = self.nodes.insert(NodeData {
+            kind: NodeKind::Simple(
+                OpConvertToU32 {
+                    input,
+                    output: ValueOutput::new(input.ty),
+                }
+                .into(),
+            ),
+            region: Some(region),
+        });
+
+        self.regions[region].nodes.insert(node);
+        self.connect_node_value_inputs(node);
+
+        node
+    }
+
+    pub fn add_op_convert_to_i32(&mut self, region: Region, input: ValueInput) -> Node {
+        self.validate_node_value_input(region, &input);
+
+        if !input.ty.is_scalar() {
+            panic!(
+                "expected input to be a `u32`, `i32`, `f32` or `bool` value, but found `{}`",
+                input.ty.to_string(self.ty())
+            );
+        }
+
+        let node = self.nodes.insert(NodeData {
+            kind: NodeKind::Simple(
+                OpConvertToI32 {
+                    input,
+                    output: ValueOutput::new(input.ty),
+                }
+                .into(),
+            ),
+            region: Some(region),
+        });
+
+        self.regions[region].nodes.insert(node);
+        self.connect_node_value_inputs(node);
+
+        node
+    }
+
+    pub fn add_op_convert_to_f32(&mut self, region: Region, input: ValueInput) -> Node {
+        self.validate_node_value_input(region, &input);
+
+        if !input.ty.is_numeric_scalar() {
+            panic!(
+                "expected input to be a `u32`, `i32`, or `f32` value, but found `{}`",
+                input.ty.to_string(self.ty())
+            );
+        }
+
+        let node = self.nodes.insert(NodeData {
+            kind: NodeKind::Simple(
+                OpConvertToF32 {
+                    input,
+                    output: ValueOutput::new(input.ty),
+                }
+                .into(),
+            ),
+            region: Some(region),
+        });
+
+        self.regions[region].nodes.insert(node);
+        self.connect_node_value_inputs(node);
+
+        node
+    }
+
+    pub fn add_op_convert_to_bool(&mut self, region: Region, input: ValueInput) -> Node {
+        self.validate_node_value_input(region, &input);
+
+        if !input.ty.is_scalar() {
+            panic!(
+                "expected input to be a `u32`, `i32`, `f32` or `bool` value, but found `{}`",
+                input.ty.to_string(self.ty())
+            );
+        }
+
+        let node = self.nodes.insert(NodeData {
+            kind: NodeKind::Simple(
+                OpConvertToBool {
+                    input,
+                    output: ValueOutput::new(input.ty),
                 }
                 .into(),
             ),

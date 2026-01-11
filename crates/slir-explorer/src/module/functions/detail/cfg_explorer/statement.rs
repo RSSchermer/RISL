@@ -47,6 +47,18 @@ pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
         slir::cfg::StatementData::OpBoolToBranchPredicate(_) => {
             view! { <OpBoolToBranchPredicate statement/> }.into_any()
         }
+        slir::cfg::StatementData::OpConvertToU32(_) => {
+            view! { <OpConvertToU32 statement/> }.into_any()
+        }
+        slir::cfg::StatementData::OpConvertToI32(_) => {
+            view! { <OpConvertToI32 statement/> }.into_any()
+        }
+        slir::cfg::StatementData::OpConvertToF32(_) => {
+            view! { <OpConvertToF32 statement/> }.into_any()
+        }
+        slir::cfg::StatementData::OpConvertToBool(_) => {
+            view! { <OpConvertToBool statement/> }.into_any()
+        }
     };
 
     view! {
@@ -244,6 +256,7 @@ pub fn OpBinary(statement: slir::cfg::Statement) -> impl IntoView {
 #[component]
 pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
+    let module_name = data.module.name;
     let stmt = data.cfg[statement].expect_op_call();
     let callee = stmt.callee();
     let binding = stmt.result();
@@ -266,7 +279,7 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
             <Value value=binding.into()/>" = "
         })}}
 
-        <a href=function_url(callee)>
+        <a href=function_url(module_name, callee)>
             {callee.name.to_string()}
         </a>
         "("{arg_views}")"
@@ -329,5 +342,53 @@ pub fn OpBoolToBranchPredicate(statement: slir::cfg::Statement) -> impl IntoView
 
     view! {
         <Value value=binding.into()/>" = predicate-from-bool "<Value value/>
+    }
+}
+
+#[component]
+pub fn OpConvertToU32(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_convert_to_u32();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = u32("<Value value/>")"
+    }
+}
+
+#[component]
+pub fn OpConvertToI32(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_convert_to_i32();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = i32("<Value value/>")"
+    }
+}
+
+#[component]
+pub fn OpConvertToF32(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_convert_to_f32();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = f32("<Value value/>")"
+    }
+}
+
+#[component]
+pub fn OpConvertToBool(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_convert_to_bool();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = bool("<Value value/>")"
     }
 }

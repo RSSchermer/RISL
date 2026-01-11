@@ -168,6 +168,10 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(OpSwitchPredicateToCase(_)) => {
                 self.replicate_op_switch_predicate_to_case_node(node)
             }
+            Simple(OpConvertToU32(_)) => self.replicate_op_convert_to_u32_node(node),
+            Simple(OpConvertToI32(_)) => self.replicate_op_convert_to_i32_node(node),
+            Simple(OpConvertToF32(_)) => self.replicate_op_convert_to_f32_node(node),
+            Simple(OpConvertToBool(_)) => self.replicate_op_convert_to_bool_node(node),
             Simple(ValueProxy(_)) => self.replicate_value_proxy_node(node),
             Simple(Reaggregation(_)) => self.replicate_reaggregation_node(node),
             Function(_) | UniformBinding(_) | StorageBinding(_) | WorkgroupBinding(_)
@@ -525,6 +529,34 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
 
         self.rvsdg
             .add_op_switch_predicate_to_case(self.dst_region, input, cases)
+    }
+
+    fn replicate_op_convert_to_u32_node(&mut self, node: Node) -> Node {
+        let data = self.rvsdg[node].expect_op_convert_to_u32();
+        let input = self.mapped_value_input(data.input());
+
+        self.rvsdg.add_op_convert_to_u32(self.dst_region, input)
+    }
+
+    fn replicate_op_convert_to_i32_node(&mut self, node: Node) -> Node {
+        let data = self.rvsdg[node].expect_op_convert_to_i32();
+        let input = self.mapped_value_input(data.input());
+
+        self.rvsdg.add_op_convert_to_i32(self.dst_region, input)
+    }
+
+    fn replicate_op_convert_to_f32_node(&mut self, node: Node) -> Node {
+        let data = self.rvsdg[node].expect_op_convert_to_f32();
+        let input = self.mapped_value_input(data.input());
+
+        self.rvsdg.add_op_convert_to_f32(self.dst_region, input)
+    }
+
+    fn replicate_op_convert_to_bool_node(&mut self, node: Node) -> Node {
+        let data = self.rvsdg[node].expect_op_convert_to_bool();
+        let input = self.mapped_value_input(data.input());
+
+        self.rvsdg.add_op_convert_to_bool(self.dst_region, input)
     }
 
     fn replicate_value_proxy_node(&mut self, node: Node) -> Node {

@@ -12,8 +12,9 @@ use crate::scf::analyze::local_binding_use::count_local_binding_use;
 use crate::scf::analyze::struct_use::collect_used_structs;
 use crate::scf::{
     Alloca, Block, ExprBinding, Expression, ExpressionKind, GlobalPtr, If, LocalBinding,
-    LocalBindingKind, Loop, LoopControl, OpBinary, OpCallBuiltin, OpExtractElement, OpMatrix,
-    OpPtrElementPtr, OpUnary, OpVector, Return, Scf, Statement, StatementKind, Store, Switch,
+    LocalBindingKind, Loop, LoopControl, OpBinary, OpCallBuiltin, OpConvertToBool, OpConvertToF32,
+    OpConvertToI32, OpConvertToU32, OpExtractElement, OpMatrix, OpPtrElementPtr, OpUnary, OpVector,
+    Return, Scf, Statement, StatementKind, Store, Switch,
 };
 use crate::ty::{ScalarKind, Struct, StructField, Type, TypeKind, VectorSize};
 use crate::{
@@ -965,6 +966,10 @@ impl WgslModuleWriter {
             ExpressionKind::OpBinary(op) => self.write_expr_op_binary(cx, op, inline_cx),
             ExpressionKind::OpVector(op) => self.write_expr_op_vector(cx, op),
             ExpressionKind::OpMatrix(op) => self.write_expr_op_matrix(cx, op),
+            ExpressionKind::OpConvertToU32(op) => self.write_expr_op_convert_to_u32(cx, op),
+            ExpressionKind::OpConvertToI32(op) => self.write_expr_op_convert_to_i32(cx, op),
+            ExpressionKind::OpConvertToF32(op) => self.write_expr_op_convert_to_f32(cx, op),
+            ExpressionKind::OpConvertToBool(op) => self.write_expr_op_convert_to_bool(cx, op),
             ExpressionKind::OpPtrElementPtr(op) => {
                 self.write_expr_op_ptr_element_ptr(cx, op, inline_cx)
             }
@@ -1087,6 +1092,30 @@ impl WgslModuleWriter {
             }
         }
 
+        self.w.push_str(")");
+    }
+
+    fn write_expr_op_convert_to_u32(&mut self, cx: Context, op: &OpConvertToU32) {
+        self.w.push_str("u32(");
+        self.write_local_value(cx, op.value(), InlineContext::None);
+        self.w.push_str(")");
+    }
+
+    fn write_expr_op_convert_to_i32(&mut self, cx: Context, op: &OpConvertToI32) {
+        self.w.push_str("i32(");
+        self.write_local_value(cx, op.value(), InlineContext::None);
+        self.w.push_str(")");
+    }
+
+    fn write_expr_op_convert_to_f32(&mut self, cx: Context, op: &OpConvertToF32) {
+        self.w.push_str("f32(");
+        self.write_local_value(cx, op.value(), InlineContext::None);
+        self.w.push_str(")");
+    }
+
+    fn write_expr_op_convert_to_bool(&mut self, cx: Context, op: &OpConvertToBool) {
+        self.w.push_str("bool(");
+        self.write_local_value(cx, op.value(), InlineContext::None);
         self.w.push_str(")");
     }
 

@@ -90,6 +90,8 @@ impl DependencyImporter {
     }
 
     fn enqueue_function_dependency(&mut self, function: Function) {
+        println!("{:?}", function);
+
         let module_deps = self
             .queue
             .entry(function.module)

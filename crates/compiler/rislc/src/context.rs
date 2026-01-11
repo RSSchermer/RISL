@@ -6,20 +6,29 @@ use rustc_hir::{ItemId, Mod};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::ty::layout::MaybeResult;
 use rustc_span::Symbol;
-use rustc_span::def_id::{CrateNum, DefId, DefIndex, LocalDefId, LocalModDefId};
+use rustc_span::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE, LocalDefId, LocalModDefId};
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::hir_ext::{ExtendedItem, HirExt, ModExt};
 use crate::hir_ext_build;
 
-pub fn generate_crate_name_to_num(tcx: TyCtxt) -> FxHashMap<Symbol, CrateNum> {
+pub fn crate_slir_module_name(tcx: TyCtxt, crate_num: CrateNum) -> String {
+    let crate_name = tcx.crate_name(crate_num);
+    let extra = if crate_num == LOCAL_CRATE {
+        &tcx.sess.opts.cg.extra_filename
+    } else {
+        tcx.extra_filename(crate_num)
+    };
+
+    format!("{}{}", crate_name, extra)
+}
+
+pub fn generate_crate_slir_module_name_to_crate_num(tcx: TyCtxt) -> FxHashMap<String, CrateNum> {
     let mut crate_name_to_num = FxHashMap::default();
 
     for crate_num in tcx.crates(()) {
-        let crate_name = tcx.crate_name(*crate_num);
-
-        crate_name_to_num.insert(crate_name, *crate_num);
+        crate_name_to_num.insert(crate_slir_module_name(tcx, *crate_num), *crate_num);
     }
 
     crate_name_to_num
@@ -28,7 +37,7 @@ pub fn generate_crate_name_to_num(tcx: TyCtxt) -> FxHashMap<Symbol, CrateNum> {
 pub struct RislContext<'tcx> {
     tcx: TyCtxt<'tcx>,
     hir_ext: HirExt,
-    crate_name_to_num: FxHashMap<Symbol, CrateNum>,
+    crate_slir_module_name_to_crate_num: FxHashMap<String, CrateNum>,
 }
 
 impl<'tcx> RislContext<'tcx> {
@@ -36,7 +45,7 @@ impl<'tcx> RislContext<'tcx> {
         RislContext {
             tcx,
             hir_ext: HirExt::new(),
-            crate_name_to_num: generate_crate_name_to_num(tcx),
+            crate_slir_module_name_to_crate_num: generate_crate_slir_module_name_to_crate_num(tcx),
         }
     }
 
@@ -44,8 +53,15 @@ impl<'tcx> RislContext<'tcx> {
         self.tcx
     }
 
-    pub fn crate_num_for_name(&self, name: Symbol) -> CrateNum {
-        *self.crate_name_to_num.get(&name).expect("crate not found")
+    pub fn crate_slir_module_name(&self, crate_num: CrateNum) -> String {
+        crate_slir_module_name(self.tcx, crate_num)
+    }
+
+    pub fn crate_num_for_crate_slir_module_name(&self, name: &str) -> CrateNum {
+        *self
+            .crate_slir_module_name_to_crate_num
+            .get(name)
+            .expect("crate not found")
     }
 
     pub fn build_hir_ext(&mut self) {
@@ -73,8 +89,18 @@ impl<'tcx> RislContext<'tcx> {
 
     pub fn shader_module_name(&self, module_id: DefId) -> String {
         let crate_name = self.tcx().crate_name(module_id.krate);
+        let extra = if module_id.is_local() {
+            self.tcx().sess.opts.cg.extra_filename.clone()
+        } else {
+            self.tcx().extra_filename(module_id.krate).clone()
+        };
 
-        format!("{}-{}", crate_name, self.tcx().def_path_str(module_id))
+        format!(
+            "{}-{}{}",
+            crate_name,
+            self.tcx().def_path_str(module_id),
+            extra
+        )
     }
 
     /// Generates a path for the codegen results for the shader module identified by the
@@ -87,11 +113,7 @@ impl<'tcx> RislContext<'tcx> {
             .output_dir
             .clone()
             .expect("no output directory specified");
-        let filename = format!(
-            "{}{}.slir",
-            self.shader_module_name(module_id.to_def_id()),
-            &self.tcx.sess.opts.cg.extra_filename
-        );
+        let filename = format!("{}.slir", self.shader_module_name(module_id.to_def_id()));
 
         output_dir.join(filename)
     }

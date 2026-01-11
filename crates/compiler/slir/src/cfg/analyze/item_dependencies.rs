@@ -3,9 +3,10 @@ use rustc_hash::FxHashMap;
 
 use crate::cfg::{
     Assign, Bind, Cfg, InlineConst, OpAlloca, OpBinary, OpBoolToBranchPredicate, OpCall,
-    OpCallBuiltin, OpCaseToBranchPredicate, OpExtractValue, OpGetDiscriminant, OpLoad,
-    OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary,
-    RootIdentifier, StatementData, Uninitialized, Value,
+    OpCallBuiltin, OpCaseToBranchPredicate, OpConvertToBool, OpConvertToF32, OpConvertToI32,
+    OpConvertToU32, OpExtractValue, OpGetDiscriminant, OpLoad, OpOffsetSlicePtr, OpPtrElementPtr,
+    OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary, RootIdentifier, StatementData,
+    Uninitialized, Value,
 };
 use crate::ty::Type;
 use crate::{Constant, Function, Module, StorageBinding, UniformBinding, WorkgroupBinding};
@@ -244,6 +245,42 @@ impl WithItemDependencies for OpBoolToBranchPredicate {
     }
 }
 
+impl WithItemDependencies for OpConvertToU32 {
+    fn with_item_dependencies<F>(&self, mut f: F)
+    where
+        F: FnMut(Item),
+    {
+        self.value().with_item_dependencies(&mut f);
+    }
+}
+
+impl WithItemDependencies for OpConvertToI32 {
+    fn with_item_dependencies<F>(&self, mut f: F)
+    where
+        F: FnMut(Item),
+    {
+        self.value().with_item_dependencies(&mut f);
+    }
+}
+
+impl WithItemDependencies for OpConvertToF32 {
+    fn with_item_dependencies<F>(&self, mut f: F)
+    where
+        F: FnMut(Item),
+    {
+        self.value().with_item_dependencies(&mut f);
+    }
+}
+
+impl WithItemDependencies for OpConvertToBool {
+    fn with_item_dependencies<F>(&self, mut f: F)
+    where
+        F: FnMut(Item),
+    {
+        self.value().with_item_dependencies(&mut f);
+    }
+}
+
 macro_rules! impl_collect_dependencies_statement {
     ($($op:ident,)*) => {
         impl WithItemDependencies for StatementData {
@@ -275,6 +312,10 @@ impl_collect_dependencies_statement! {
     OpCallBuiltin,
     OpCaseToBranchPredicate,
     OpBoolToBranchPredicate,
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool,
 }
 
 fn collect_body_dependencies(cfg: &Cfg, function: Function) -> IndexSet<Item> {

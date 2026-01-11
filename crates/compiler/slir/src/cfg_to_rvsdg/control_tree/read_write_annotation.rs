@@ -2,9 +2,10 @@ use indexmap::IndexSet;
 
 use crate::cfg::{
     Assign, BasicBlock, Bind, Cfg, FunctionBody, LocalBinding, OpAlloca, OpBinary,
-    OpBoolToBranchPredicate, OpCall, OpCallBuiltin, OpCaseToBranchPredicate, OpExtractValue,
-    OpGetDiscriminant, OpLoad, OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr,
-    OpSetDiscriminant, OpStore, OpUnary, StatementData, Terminator, Uninitialized, Value,
+    OpBoolToBranchPredicate, OpCall, OpCallBuiltin, OpCaseToBranchPredicate, OpConvertToBool,
+    OpConvertToF32, OpConvertToI32, OpConvertToU32, OpExtractValue, OpGetDiscriminant, OpLoad,
+    OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary,
+    StatementData, Terminator, Uninitialized, Value,
 };
 use crate::cfg_to_rvsdg::control_tree::control_tree::{
     BranchingNode, ControlTree, ControlTreeNode, ControlTreeNodeKind, LinearNode, LoopNode,
@@ -182,6 +183,42 @@ impl WithReadValues for OpBoolToBranchPredicate {
     }
 }
 
+impl WithReadValues for OpConvertToU32 {
+    fn with_read_values<F>(&self, mut f: F)
+    where
+        F: FnMut(&Value),
+    {
+        f(&self.value());
+    }
+}
+
+impl WithReadValues for OpConvertToI32 {
+    fn with_read_values<F>(&self, mut f: F)
+    where
+        F: FnMut(&Value),
+    {
+        f(&self.value());
+    }
+}
+
+impl WithReadValues for OpConvertToF32 {
+    fn with_read_values<F>(&self, mut f: F)
+    where
+        F: FnMut(&Value),
+    {
+        f(&self.value());
+    }
+}
+
+impl WithReadValues for OpConvertToBool {
+    fn with_read_values<F>(&self, mut f: F)
+    where
+        F: FnMut(&Value),
+    {
+        f(&self.value());
+    }
+}
+
 macro_rules! impl_with_read_values_statement {
     ($($op:ident,)*) => {
         impl WithReadValues for StatementData {
@@ -216,6 +253,10 @@ impl_with_read_values_statement! {
     OpCallBuiltin,
     OpCaseToBranchPredicate,
     OpBoolToBranchPredicate,
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool,
 }
 
 pub trait WithWrittenValues {
@@ -315,6 +356,10 @@ impl_with_written_values_op! {
     OpBinary,
     OpCaseToBranchPredicate,
     OpBoolToBranchPredicate,
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool,
 }
 
 macro_rules! impl_with_written_values_statement {
@@ -351,6 +396,10 @@ impl_with_written_values_statement! {
     OpCallBuiltin,
     OpCaseToBranchPredicate,
     OpBoolToBranchPredicate,
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool,
 }
 
 pub struct ReadWriteAnnotationVisitor<'a> {

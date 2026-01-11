@@ -63,7 +63,9 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                 }}
 
                 {move || {
-                    match node.read_value().content() {
+                    let node = node.read_value();
+
+                    match node.content() {
                         NodeContent::PlainText(text) => {
                             let [x, y] = text.translation();
                             let tooltip = text.tooltip().map(|t| t.to_string());
@@ -97,7 +99,7 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
 
                             view! {
                                 <g>
-                                    <a href=function_url(*f)>
+                                    <a href=function_url(node.module_name(), *f)>
                                         <text x=x y=y+TEXT_ADJUST>
                                             {text.text().to_owned()}
                                         </text>

@@ -62,6 +62,22 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             }")"
         }
         .into_any(),
+        ExpressionKind::OpConvertToU32(op) => view! {
+            "u32("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpConvertToI32(op) => view! {
+            "i32("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpConvertToF32(op) => view! {
+            "f32("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpConvertToBool(op) => view! {
+            "bool("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpPtrElementPtr(op) => view! {
             "&"<LocalBinding binding=op.pointer()/>
 

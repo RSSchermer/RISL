@@ -709,7 +709,26 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn intcast(&mut self, val: Self::Value, dest_ty: Self::Type, is_signed: bool) -> Self::Value {
-        todo!()
+        let val = val.expect_value();
+        let mut cfg = self.cfg.borrow_mut();
+
+        let (_, result) = match dest_ty.expect_slir_type() {
+            slir::ty::TY_U32 => {
+                cfg.add_stmt_op_convert_to_u32(self.basic_block, BlockPosition::Append, val)
+            }
+            slir::ty::TY_I32 => {
+                cfg.add_stmt_op_convert_to_i32(self.basic_block, BlockPosition::Append, val)
+            }
+            slir::ty::TY_F32 => {
+                cfg.add_stmt_op_convert_to_f32(self.basic_block, BlockPosition::Append, val)
+            }
+            slir::ty::TY_BOOL => {
+                cfg.add_stmt_op_convert_to_bool(self.basic_block, BlockPosition::Append, val)
+            }
+            _ => bug!("unsupported intcast destination type `{:?}`", dest_ty),
+        };
+
+        result.into()
     }
 
     fn icmp(&mut self, op: IntPredicate, lhs: Self::Value, rhs: Self::Value) -> Self::Value {

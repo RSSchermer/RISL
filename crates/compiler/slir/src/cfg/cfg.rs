@@ -559,6 +559,74 @@ impl OpBoolToBranchPredicate {
     }
 }
 
+/// Converts a `u32`, `i32`, `f32`, or `bool` value into a `u32` value.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub struct OpConvertToU32 {
+    value: Value,
+    result: LocalBinding,
+}
+
+impl OpConvertToU32 {
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    pub fn result(&self) -> LocalBinding {
+        self.result
+    }
+}
+
+/// Converts a `u32`, `i32`, `f32`, or `bool` value into a `i32` value.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub struct OpConvertToI32 {
+    value: Value,
+    result: LocalBinding,
+}
+
+impl OpConvertToI32 {
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    pub fn result(&self) -> LocalBinding {
+        self.result
+    }
+}
+
+/// Converts a `u32`, `i32`, or `f32` value into a `f32` value.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub struct OpConvertToF32 {
+    value: Value,
+    result: LocalBinding,
+}
+
+impl OpConvertToF32 {
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    pub fn result(&self) -> LocalBinding {
+        self.result
+    }
+}
+
+/// Converts a `u32`, `i32`, `f32`, or `bool` value into a `bool` value.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub struct OpConvertToBool {
+    value: Value,
+    result: LocalBinding,
+}
+
+impl OpConvertToBool {
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    pub fn result(&self) -> LocalBinding {
+        self.result
+    }
+}
+
 macro_rules! gen_statement {
     ($($op:ident,)*) => {
         #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
@@ -593,6 +661,10 @@ gen_statement! {
     OpCallBuiltin,
     OpCaseToBranchPredicate,
     OpBoolToBranchPredicate,
+    OpConvertToU32,
+    OpConvertToI32,
+    OpConvertToF32,
+    OpConvertToBool,
 }
 
 impl StatementData {
@@ -737,6 +809,38 @@ impl StatementData {
             op
         } else {
             panic!("expected statement to be a bool-to-branch-predicate operation")
+        }
+    }
+
+    pub fn expect_op_convert_to_u32(&self) -> &OpConvertToU32 {
+        if let StatementData::OpConvertToU32(op) = self {
+            op
+        } else {
+            panic!("expected statement to be a `convert-to-u32` operation")
+        }
+    }
+
+    pub fn expect_op_convert_to_i32(&self) -> &OpConvertToI32 {
+        if let StatementData::OpConvertToI32(op) = self {
+            op
+        } else {
+            panic!("expected statement to be a `convert-to-i32` operation")
+        }
+    }
+
+    pub fn expect_op_convert_to_f32(&self) -> &OpConvertToF32 {
+        if let StatementData::OpConvertToF32(op) = self {
+            op
+        } else {
+            panic!("expected statement to be a `convert-to-f32` operation")
+        }
+    }
+
+    pub fn expect_op_convert_to_bool(&self) -> &OpConvertToBool {
+        if let StatementData::OpConvertToBool(op) = self {
+            op
+        } else {
+            panic!("expected statement to be a `convert-to-bool` operation")
         }
     }
 }
@@ -1776,6 +1880,118 @@ impl Cfg {
         let stmt = self
             .statements
             .insert(OpBoolToBranchPredicate { value, result }.into());
+
+        self.basic_blocks[bb].add_statement(position, stmt);
+
+        (stmt, result)
+    }
+
+    pub fn add_stmt_op_convert_to_u32(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let owner = self.basic_blocks[bb].owner;
+
+        self.validate_value(owner, &value, "value");
+
+        if !self.value_ty(&value).is_scalar() {
+            panic!(
+                "expected value to be a `u32`, `i32`, `f32`, or `bool`; found `{}`",
+                self.value_ty(&value).to_string(self.ty())
+            );
+        }
+
+        let result = self.add_local_binding(owner, TY_U32);
+
+        let stmt = self
+            .statements
+            .insert(OpConvertToU32 { value, result }.into());
+
+        self.basic_blocks[bb].add_statement(position, stmt);
+
+        (stmt, result)
+    }
+
+    pub fn add_stmt_op_convert_to_i32(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let owner = self.basic_blocks[bb].owner;
+
+        self.validate_value(owner, &value, "value");
+
+        if !self.value_ty(&value).is_scalar() {
+            panic!(
+                "expected value to be a `u32`, `i32`, `f32`, or `bool`; found `{}`",
+                self.value_ty(&value).to_string(self.ty())
+            );
+        }
+
+        let result = self.add_local_binding(owner, TY_I32);
+
+        let stmt = self
+            .statements
+            .insert(OpConvertToI32 { value, result }.into());
+
+        self.basic_blocks[bb].add_statement(position, stmt);
+
+        (stmt, result)
+    }
+
+    pub fn add_stmt_op_convert_to_f32(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let owner = self.basic_blocks[bb].owner;
+
+        self.validate_value(owner, &value, "value");
+
+        if !self.value_ty(&value).is_numeric_scalar() {
+            panic!(
+                "expected value to be a `u32`, `i32`, or `f32`; found `{}`",
+                self.value_ty(&value).to_string(self.ty())
+            );
+        }
+
+        let result = self.add_local_binding(owner, TY_F32);
+
+        let stmt = self
+            .statements
+            .insert(OpConvertToF32 { value, result }.into());
+
+        self.basic_blocks[bb].add_statement(position, stmt);
+
+        (stmt, result)
+    }
+
+    pub fn add_stmt_op_convert_to_bool(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let owner = self.basic_blocks[bb].owner;
+
+        self.validate_value(owner, &value, "value");
+
+        if !self.value_ty(&value).is_scalar() {
+            panic!(
+                "expected value to be a `u32`, `i32`, `f32`, or `bool`; found `{}`",
+                self.value_ty(&value).to_string(self.ty())
+            );
+        }
+
+        let result = self.add_local_binding(owner, TY_BOOL);
+
+        let stmt = self
+            .statements
+            .insert(OpConvertToBool { value, result }.into());
 
         self.basic_blocks[bb].add_statement(position, stmt);
 

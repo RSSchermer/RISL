@@ -935,7 +935,9 @@ impl<'a, 'tcx> MiscCodegenMethods for CodegenContext<'a, 'tcx> {
             let module_name = if krate.is_local {
                 self.module_name
             } else {
-                slir::Symbol::from_ref(krate.name.as_str())
+                let crate_num = internal(self.rcx.tcx(), krate.id);
+
+                slir::Symbol::new(self.rcx.crate_slir_module_name(crate_num))
             };
 
             slir::Function {

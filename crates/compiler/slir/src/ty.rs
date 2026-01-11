@@ -28,6 +28,14 @@ impl Type {
     pub fn to_string(&self, ty_registry: &TypeRegistry) -> String {
         ty_registry.kind(*self).to_string(ty_registry)
     }
+
+    pub fn is_scalar(&self) -> bool {
+        matches!(*self, TY_U32 | TY_I32 | TY_F32 | TY_BOOL)
+    }
+
+    pub fn is_numeric_scalar(&self) -> bool {
+        matches!(*self, TY_U32 | TY_I32 | TY_F32)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]

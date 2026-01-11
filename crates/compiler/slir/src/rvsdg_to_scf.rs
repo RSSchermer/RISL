@@ -294,6 +294,10 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpBoolToSwitchPredicate(_) => self.visit_op_bool_to_switch_predicate(node),
             OpU32ToSwitchPredicate(_) => self.visit_op_u32_to_switch_predicate(node),
             OpCallBuiltin(_) => self.visit_op_call_builtin(node),
+            OpConvertToU32(_) => self.visit_op_convert_to_u32(node),
+            OpConvertToI32(_) => self.visit_op_convert_to_i32(node),
+            OpConvertToF32(_) => self.visit_op_convert_to_f32(node),
+            OpConvertToBool(_) => self.visit_op_convert_to_bool(node),
             _ => {
                 panic!("node kind not currently supported by SLIR's structured control-flow format")
             }
@@ -587,6 +591,58 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             self.scf
                 .add_call_builtin(self.dst_block, BlockPosition::Append, callee, arguments);
         }
+    }
+
+    fn visit_op_convert_to_u32(&mut self, node: rvsdg::Node) {
+        let data = self.rvsdg[node].expect_op_convert_to_u32();
+        let value = self
+            .value_mapping
+            .mapping(data.input().origin)
+            .expect_local();
+        let (_, binding) =
+            self.scf
+                .add_bind_op_convert_to_u32(self.dst_block, BlockPosition::Append, value);
+
+        self.value_mapping.map_output(node, 0, binding);
+    }
+
+    fn visit_op_convert_to_i32(&mut self, node: rvsdg::Node) {
+        let data = self.rvsdg[node].expect_op_convert_to_i32();
+        let value = self
+            .value_mapping
+            .mapping(data.input().origin)
+            .expect_local();
+        let (_, binding) =
+            self.scf
+                .add_bind_op_convert_to_i32(self.dst_block, BlockPosition::Append, value);
+
+        self.value_mapping.map_output(node, 0, binding);
+    }
+
+    fn visit_op_convert_to_f32(&mut self, node: rvsdg::Node) {
+        let data = self.rvsdg[node].expect_op_convert_to_f32();
+        let value = self
+            .value_mapping
+            .mapping(data.input().origin)
+            .expect_local();
+        let (_, binding) =
+            self.scf
+                .add_bind_op_convert_to_f32(self.dst_block, BlockPosition::Append, value);
+
+        self.value_mapping.map_output(node, 0, binding);
+    }
+
+    fn visit_op_convert_to_bool(&mut self, node: rvsdg::Node) {
+        let data = self.rvsdg[node].expect_op_convert_to_bool();
+        let value = self
+            .value_mapping
+            .mapping(data.input().origin)
+            .expect_local();
+        let (_, binding) =
+            self.scf
+                .add_bind_op_convert_to_bool(self.dst_block, BlockPosition::Append, value);
+
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_sub_region(

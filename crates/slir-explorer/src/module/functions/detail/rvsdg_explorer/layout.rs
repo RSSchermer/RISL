@@ -9,7 +9,7 @@ use slir::rvsdg::{
     ValueUser,
 };
 use slir::ty::Type;
-use slir::{Function, Module};
+use slir::{Function, Module, Symbol};
 use smallvec::SmallVec;
 
 pub struct Config {
@@ -944,6 +944,7 @@ impl Stratum {
 #[derive(Clone, PartialEq, Debug)]
 pub struct NodeLayout {
     node: Node,
+    module_name: Symbol,
     content: NodeContent,
     input_connectors: Vec<ConnectorElement>,
     output_connectors: Vec<ConnectorElement>,
@@ -1032,6 +1033,10 @@ impl NodeLayout {
 
                     NodeContent::PlainText(TextElement::from("case-pred").with_tooltip(tooltip))
                 }
+                SimpleNode::OpConvertToU32(_) => NodeContent::PlainText("to-u32".into()),
+                SimpleNode::OpConvertToI32(_) => NodeContent::PlainText("to-i32".into()),
+                SimpleNode::OpConvertToF32(_) => NodeContent::PlainText("to-f32".into()),
+                SimpleNode::OpConvertToBool(_) => NodeContent::PlainText("to-bool".into()),
                 SimpleNode::ValueProxy(_) => NodeContent::PlainText("proxy".into()),
                 SimpleNode::Reaggregation(_) => NodeContent::PlainText("reaggregation".into()),
             },
@@ -1063,6 +1068,7 @@ impl NodeLayout {
 
         let mut layout = NodeLayout {
             node,
+            module_name: module.name,
             content,
             input_connectors,
             output_connectors,
@@ -1076,6 +1082,10 @@ impl NodeLayout {
         layout.update_height(config);
 
         layout
+    }
+
+    pub fn module_name(&self) -> Symbol {
+        self.module_name
     }
 
     pub fn width(&self) -> f32 {

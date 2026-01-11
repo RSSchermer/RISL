@@ -28,9 +28,9 @@ impl slir::dependencies::DependencyLoader for RlibDependencyLoader<'_, '_> {
         Self: 'a;
 
     fn load<'a>(&'a mut self, module: slir::Symbol) -> (Self::ModuleData<'a>, Self::CfgData<'a>) {
-        // We're currently using stable crate names as module names
-        let crate_name = Symbol::intern(module.as_str());
-        let crate_num = self.rcx.crate_num_for_name(crate_name);
+        let crate_num = self
+            .rcx
+            .crate_num_for_crate_slir_module_name(module.as_str());
         let filename = &self
             .rcx
             .tcx()
@@ -67,7 +67,6 @@ impl slir::dependencies::DependencyLoader for RlibDependencyLoader<'_, '_> {
 
 pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
     let (free_items, shader_modules) = collect_shader_module_codegen_units(cx);
-    let crate_name = cx.tcx().crate_name(LOCAL_CRATE);
     let mut dependency_loader = RlibDependencyLoader { rcx: cx };
 
     run(cx.tcx(), || {
@@ -123,7 +122,7 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
         // (functions that are not part of a `mod` item with a `#[risl::shader_module]` attribute). This
         // will get stored as part of the crates `rlib`; it is used by `rislc` when compiling dependent
         // crates to import dependencies.
-        let lib_name = slir::Symbol::from_ref(crate_name.as_str());
+        let lib_name = slir::Symbol::new(cx.crate_slir_module_name(LOCAL_CRATE));
 
         build_shader_module(cx, lib_name, &free_items)
     })

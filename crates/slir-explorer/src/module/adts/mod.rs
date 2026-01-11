@@ -17,27 +17,30 @@ struct AdtParams {
 pub fn Adt() -> impl IntoView {
     let module_data = use_module_data();
     let params = use_params::<AdtParams>();
-    let ty_id = params
-        .read()
-        .as_ref()
-        .ok()
-        .and_then(|params| params.ty_id)
-        .unwrap_or_default();
-    let ty = slir::ty::Type::from_registration_id(ty_id);
+    let ty = move || {
+        let ty_id = params
+            .read()
+            .as_ref()
+            .ok()
+            .and_then(|params| params.ty_id)
+            .unwrap_or_default();
+        slir::ty::Type::from_registration_id(ty_id)
+    };
 
-    match *module_data.read_value().module.ty.kind(ty) {
-        TypeKind::Struct(_) => view! {
-            <Struct ty/>
-        }
-        .into_any(),
-        TypeKind::Enum(_) => view! {
-            <Enum ty/>
-        }
-        .into_any(),
-        _ => view! {
-            <p>"Type is not an ADT"</p>
-        }
-        .into_any(),
+    view! {
+        {move || {
+            match *module_data.read_value().module.ty.kind(ty()) {
+                TypeKind::Struct(_) => view! {
+                    <Struct ty=ty()/>
+                }.into_any(),
+                TypeKind::Enum(_) => view! {
+                    <Enum ty=ty()/>
+                }.into_any(),
+                _ => view! {
+                    <p>"Type is not an ADT"</p>
+                }.into_any(),
+            }
+        }}
     }
 }
 
