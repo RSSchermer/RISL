@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_BOOL, TY_PREDICATE, Type, TypeRegistry};
 
@@ -5,6 +7,7 @@ use crate::ty::{TY_BOOL, TY_PREDICATE, Type, TypeRegistry};
 ///
 /// If the boolean value is `true`, then the predicate will select branch `0`. If the boolean value
 /// is `false` then the predicate will select branch `1`.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpBoolToBranchSelector;
 
 impl Intrinsic for OpBoolToBranchSelector {

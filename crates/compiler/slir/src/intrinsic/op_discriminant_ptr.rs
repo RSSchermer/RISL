@@ -1,9 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_PTR_U32, Type, TypeKind};
 
 /// Operation that takes a pointer to an enum and returns a pointer to its discriminant.
 ///
 /// An enum value's discriminant dynamically represents the enum value's active variant.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpDiscriminantPtr;
 
 impl Intrinsic for OpDiscriminantPtr {

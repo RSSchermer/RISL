@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::Intrinsic;
 use crate::ty::{Type, TypeKind, TypeRegistry, Vector};
 
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpVector {
     pub ty: Vector,
 }

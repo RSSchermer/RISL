@@ -1,9 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 
 /// Converts a `u32` value into a branch selector predicate.
 ///
 /// The branch selected is the `u32` value clamped to the range `0..branch_count`.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpU32ToBranchSelector {
     pub branch_count: u32,
 }

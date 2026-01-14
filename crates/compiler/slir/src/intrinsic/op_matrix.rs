@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::Intrinsic;
 use crate::ty::{Matrix, Type, TypeKind, TypeRegistry};
 
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpMatrix {
     pub ty: Matrix,
 }

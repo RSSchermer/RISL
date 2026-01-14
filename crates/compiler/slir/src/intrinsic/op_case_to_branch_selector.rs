@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 
@@ -7,6 +9,7 @@ use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 /// branch `n`. If it matches multiple cases, then `n` will be the index of the first case matched
 /// in list-order. If it matches none of the cases, then the predicate will select branch
 /// [cases.len()].
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpCaseToBranchSelector {
     pub cases: Vec<u32>,
 }

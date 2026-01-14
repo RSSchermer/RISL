@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_F32, Type, TypeRegistry};
 
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpConvertToF32;
 
 impl Intrinsic for OpConvertToF32 {

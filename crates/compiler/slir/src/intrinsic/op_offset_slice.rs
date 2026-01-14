@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg, expect_two_args};
 use crate::ty::{TY_U32, Type, TypeKind};
 
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpOffsetSlice;
 
 impl Intrinsic for OpOffsetSlice {

@@ -1,7 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use crate::UnaryOperator;
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, Type, TypeRegistry};
 
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpUnary {
     pub operator: UnaryOperator,
 }

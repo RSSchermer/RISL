@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 
@@ -28,6 +30,7 @@ use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 /// [0]: crate::rvsdg::transform::pred_to_case_extraction
 /// [1]: crate::rvsdg::transform::pred_to_case_to_pred_merging
 /// [2]: crate::rvsdg::transform::switch_merging
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpBranchSelectorToCase {
     pub cases: Vec<u32>,
 }
