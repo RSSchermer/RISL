@@ -32,4 +32,8 @@ impl Intrinsic for OpGetDiscriminant {
 
         Ok(Some(TY_U32))
     }
+
+    fn affects_state(&self) -> bool {
+        true
+    }
 }

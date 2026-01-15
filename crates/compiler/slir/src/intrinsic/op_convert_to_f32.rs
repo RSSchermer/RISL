@@ -24,4 +24,8 @@ impl Intrinsic for OpConvertToF32 {
 
         Ok(Some(TY_F32))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

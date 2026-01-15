@@ -33,4 +33,8 @@ impl Intrinsic for OpArrayLength {
 
         Ok(Some(TY_U32))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

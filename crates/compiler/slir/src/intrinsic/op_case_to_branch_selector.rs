@@ -31,4 +31,8 @@ impl Intrinsic for OpCaseToBranchSelector {
 
         Ok(Some(TY_PREDICATE))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

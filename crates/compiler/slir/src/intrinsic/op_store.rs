@@ -32,4 +32,8 @@ impl Intrinsic for OpStore {
 
         Ok(None)
     }
+
+    fn affects_state(&self) -> bool {
+        true
+    }
 }

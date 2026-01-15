@@ -71,7 +71,7 @@ fn define_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
         len.into(),
     );
     let (_, predicate) =
-        cfg.add_stmt_op_bool_to_branch_predicate(bb0, BlockPosition::Append, in_bounds.into());
+        cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, in_bounds.into());
     cfg.set_terminator(
         bb0,
         Terminator::branch_multiple(predicate.into(), [bb1, bb2]),
@@ -150,7 +150,7 @@ fn define_range_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
         end_in_bounds.into(),
     );
     let (_, predicate) =
-        cfg.add_stmt_op_bool_to_branch_predicate(bb0, BlockPosition::Append, condition.into());
+        cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, condition.into());
     cfg.set_terminator(
         bb0,
         Terminator::branch_multiple(predicate.into(), [bb_some, bb_none]),
@@ -160,7 +160,7 @@ fn define_range_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
     let (_, some_variant_ptr) =
         cfg.add_stmt_op_ptr_variant_ptr(bb_some, BlockPosition::Append, ret.into(), 1);
     // Compute the new slice pointer
-    let (_, out_slice_ptr) = cfg.add_stmt_op_offset_slice_pointer(
+    let (_, out_slice_ptr) = cfg.add_stmt_op_offset_slice(
         bb_some,
         BlockPosition::Append,
         in_slice_ptr.into(),

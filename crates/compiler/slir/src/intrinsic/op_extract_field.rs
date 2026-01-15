@@ -34,4 +34,8 @@ impl Intrinsic for OpExtractField {
 
         Ok(Some(field.ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

@@ -44,4 +44,8 @@ impl Intrinsic for OpElementPtr {
 
         Ok(Some(element_ptr_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

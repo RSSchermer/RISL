@@ -457,7 +457,7 @@ impl FunctionImporter {
         let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
         let dst_offset = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.offset());
 
-        let (_, result) = dst_cfg.add_stmt_op_offset_slice_pointer(
+        let (_, result) = dst_cfg.add_stmt_op_offset_slice(
             dst_bb,
             BlockPosition::Append,
             dst_pointer,
@@ -511,7 +511,7 @@ impl FunctionImporter {
     ) {
         let src_data = src_cfg[src_stmt].expect_op_call();
         let callee = src_data.callee();
-        let ret_ty = src_data.result().map(|v| {
+        let ret_ty = src_data.maybe_result().map(|v| {
             let src_ty = src_cfg[v].ty();
 
             dst_cfg.ty().import(src_cfg.ty(), src_ty)
@@ -527,7 +527,7 @@ impl FunctionImporter {
 
         if let Some(result) = result {
             self.local_value_mapping
-                .insert(src_data.result().unwrap(), result);
+                .insert(src_data.maybe_result().unwrap(), result);
         }
     }
 
@@ -566,7 +566,7 @@ impl FunctionImporter {
         let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
         let cases = src_data.cases().iter().copied();
 
-        let (_, result) = dst_cfg.add_stmt_op_case_to_branch_predicate(
+        let (_, result) = dst_cfg.add_stmt_op_case_to_branch_selector(
             dst_bb,
             BlockPosition::Append,
             dst_value,
@@ -587,7 +587,7 @@ impl FunctionImporter {
         let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
 
         let (_, result) =
-            dst_cfg.add_stmt_op_bool_to_branch_predicate(dst_bb, BlockPosition::Append, dst_value);
+            dst_cfg.add_stmt_op_bool_to_branch_selector(dst_bb, BlockPosition::Append, dst_value);
 
         self.local_value_mapping.insert(src_data.result(), result);
     }

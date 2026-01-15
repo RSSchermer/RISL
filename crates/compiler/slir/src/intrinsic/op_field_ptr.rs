@@ -41,4 +41,8 @@ impl Intrinsic for OpFieldPtr {
 
         Ok(Some(field_ptr_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

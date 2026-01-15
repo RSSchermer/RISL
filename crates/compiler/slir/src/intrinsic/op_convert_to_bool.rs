@@ -24,4 +24,8 @@ impl Intrinsic for OpConvertToBool {
 
         Ok(Some(TY_BOOL))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

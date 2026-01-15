@@ -43,4 +43,8 @@ impl Intrinsic for OpVector {
 
         Ok(Some(ty_registry.register(TypeKind::Vector(self.ty))))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

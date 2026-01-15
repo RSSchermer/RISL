@@ -259,7 +259,7 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
     let module_name = data.module.name;
     let stmt = data.cfg[statement].expect_op_call();
     let callee = stmt.callee();
-    let binding = stmt.result();
+    let binding = stmt.maybe_result();
 
     let mut arg_views = Vec::new();
     let mut is_first = true;

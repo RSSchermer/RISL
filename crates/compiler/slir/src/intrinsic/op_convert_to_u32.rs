@@ -24,4 +24,8 @@ impl Intrinsic for OpConvertToU32 {
 
         Ok(Some(TY_U32))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

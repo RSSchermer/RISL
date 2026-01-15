@@ -48,6 +48,10 @@ impl Intrinsic for OpBinary {
 
         Ok(Some(return_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }
 
 fn check_logic_op(

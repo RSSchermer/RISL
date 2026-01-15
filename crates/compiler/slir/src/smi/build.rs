@@ -637,7 +637,7 @@ mod tests {
             None,
             [],
         );
-        let (_, entry_point_0_bb0_predicate) = cfg.add_stmt_op_bool_to_branch_predicate(
+        let (_, entry_point_0_bb0_predicate) = cfg.add_stmt_op_bool_to_branch_selector(
             entry_point_0_bb0,
             BlockPosition::Append,
             false.into(),

@@ -114,4 +114,6 @@ pub trait Intrinsic {
         ty_registry: &TypeRegistry,
         args: impl IntoIterator<Item = Type>,
     ) -> Result<Option<Type>, String>;
+
+    fn affects_state(&self) -> bool;
 }

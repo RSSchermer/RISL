@@ -467,11 +467,8 @@ mod tests {
             add_result.into(),
             10u32.into(),
         );
-        let (_, predicate) = cfg.add_stmt_op_bool_to_branch_predicate(
-            bb0,
-            BlockPosition::Append,
-            test_result.into(),
-        );
+        let (_, predicate) =
+            cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, test_result.into());
         cfg.set_terminator(
             bb0,
             Terminator::branch_multiple(predicate.into(), [bb1, bb0]),

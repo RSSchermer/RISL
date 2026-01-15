@@ -41,4 +41,8 @@ impl Intrinsic for OpVariantPtr {
 
         Ok(Some(variant_ptr_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

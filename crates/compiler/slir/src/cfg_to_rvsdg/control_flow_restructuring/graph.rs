@@ -254,7 +254,7 @@ mod tests {
         let exit = cfg.add_basic_block(function);
 
         let (_, selector) =
-            cfg.add_stmt_op_bool_to_branch_predicate(entry, BlockPosition::Append, arg_0.into());
+            cfg.add_stmt_op_bool_to_branch_selector(entry, BlockPosition::Append, arg_0.into());
 
         cfg.set_terminator(entry, Terminator::branch_multiple(selector, [bb0, bb1]));
         cfg.set_terminator(bb0, Terminator::branch_single(bb2));
@@ -315,7 +315,7 @@ mod tests {
         let exit = cfg.add_basic_block(function);
 
         let (_, selector) =
-            cfg.add_stmt_op_bool_to_branch_predicate(entry, BlockPosition::Append, arg_0.into());
+            cfg.add_stmt_op_bool_to_branch_selector(entry, BlockPosition::Append, arg_0.into());
 
         cfg.set_terminator(entry, Terminator::branch_multiple(selector, [bb0, bb1]));
         cfg.set_terminator(bb0, Terminator::branch_single(bb2));

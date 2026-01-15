@@ -28,4 +28,8 @@ impl Intrinsic for OpU32ToBranchSelector {
 
         Ok(Some(TY_PREDICATE))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

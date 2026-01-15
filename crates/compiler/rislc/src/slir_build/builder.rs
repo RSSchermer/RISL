@@ -286,7 +286,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     ) {
         let mut cfg = self.cfg.borrow_mut();
 
-        let (_, predicate) = cfg.add_stmt_op_bool_to_branch_predicate(
+        let (_, predicate) = cfg.add_stmt_op_bool_to_branch_selector(
             self.basic_block,
             BlockPosition::Append,
             cond.expect_value(),
@@ -326,7 +326,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
 
         let mut cfg = self.cfg.borrow_mut();
 
-        let (_, predicate) = cfg.add_stmt_op_case_to_branch_predicate(
+        let (_, predicate) = cfg.add_stmt_op_case_to_branch_selector(
             self.basic_block,
             BlockPosition::Append,
             v.expect_value(),
@@ -662,7 +662,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         let ptr = ptr.expect_value();
         let offset = offset.expect_value();
 
-        let (_, result) = self.cfg.borrow_mut().add_stmt_op_offset_slice_pointer(
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_offset_slice(
             self.basic_block,
             BlockPosition::Append,
             ptr,

@@ -39,4 +39,8 @@ impl Intrinsic for OpUnary {
 
         Ok(Some(arg))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

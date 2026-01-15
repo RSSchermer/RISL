@@ -22,4 +22,8 @@ impl Intrinsic for OpAlloca {
 
         Ok(Some(ptr_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

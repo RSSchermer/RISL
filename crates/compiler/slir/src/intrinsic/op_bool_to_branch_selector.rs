@@ -27,4 +27,8 @@ impl Intrinsic for OpBoolToBranchSelector {
 
         Ok(Some(TY_PREDICATE))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

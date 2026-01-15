@@ -37,4 +37,8 @@ impl Intrinsic for OpExtractElement {
 
         Ok(Some(element_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

@@ -23,4 +23,8 @@ impl Intrinsic for OpLoad {
 
         Ok(Some(pointee_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        true
+    }
 }

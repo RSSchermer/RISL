@@ -47,4 +47,8 @@ impl Intrinsic for OpOffsetSlice {
 
         Ok(Some(slice_ptr_ty))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }

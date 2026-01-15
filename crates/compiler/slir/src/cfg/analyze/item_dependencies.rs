@@ -1,13 +1,7 @@
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 
-use crate::cfg::{
-    Assign, Bind, Cfg, InlineConst, OpAlloca, OpBinary, OpBoolToBranchPredicate, OpCall,
-    OpCallBuiltin, OpCaseToBranchPredicate, OpConvertToBool, OpConvertToF32, OpConvertToI32,
-    OpConvertToU32, OpExtractValue, OpGetDiscriminant, OpLoad, OpOffsetSlicePtr, OpPtrElementPtr,
-    OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary, RootIdentifier, StatementData,
-    Uninitialized, Value,
-};
+use crate::cfg::{Assign, Bind, Cfg, InlineConst, IntrinsicOp, OpCall, RootIdentifier, StatementData, Uninitialized, Value};
 use crate::ty::Type;
 use crate::{Constant, Function, Module, StorageBinding, UniformBinding, WorkgroupBinding};
 
@@ -94,112 +88,14 @@ impl WithItemDependencies for Assign {
     }
 }
 
-impl WithItemDependencies for OpAlloca {
-    fn with_item_dependencies<F>(&self, _: F)
-    where
-        F: FnMut(Item),
-    {
-    }
-}
-
-impl WithItemDependencies for OpLoad {
+impl<T> WithItemDependencies for IntrinsicOp<T> {
     fn with_item_dependencies<F>(&self, mut f: F)
     where
         F: FnMut(Item),
     {
-        self.pointer().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpStore {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.pointer().with_item_dependencies(&mut f);
-        self.value().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpExtractValue {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.aggregate().with_item_dependencies(&mut f);
-
-        for index in self.indices() {
-            index.with_item_dependencies(&mut f);
+        for arg in self.arguments() {
+            arg.with_item_dependencies(&mut f);
         }
-    }
-}
-
-impl WithItemDependencies for OpPtrElementPtr {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.pointer().with_item_dependencies(&mut f);
-
-        for index in self.indices() {
-            index.with_item_dependencies(&mut f);
-        }
-    }
-}
-
-impl WithItemDependencies for OpPtrVariantPtr {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.pointer().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpGetDiscriminant {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.pointer().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpSetDiscriminant {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.pointer().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpOffsetSlicePtr {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.pointer().with_item_dependencies(&mut f);
-        self.offset().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpUnary {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.operand().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpBinary {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.lhs().with_item_dependencies(&mut f);
-        self.rhs().with_item_dependencies(&mut f);
     }
 }
 
@@ -213,71 +109,6 @@ impl WithItemDependencies for OpCall {
         }
 
         f(Item::Function(self.callee()));
-    }
-}
-
-impl WithItemDependencies for OpCallBuiltin {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        for arg in self.arguments() {
-            arg.with_item_dependencies(&mut f);
-        }
-    }
-}
-
-impl WithItemDependencies for OpCaseToBranchPredicate {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.value().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpBoolToBranchPredicate {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.value().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpConvertToU32 {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.value().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpConvertToI32 {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.value().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpConvertToF32 {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.value().with_item_dependencies(&mut f);
-    }
-}
-
-impl WithItemDependencies for OpConvertToBool {
-    fn with_item_dependencies<F>(&self, mut f: F)
-    where
-        F: FnMut(Item),
-    {
-        self.value().with_item_dependencies(&mut f);
     }
 }
 
@@ -300,18 +131,19 @@ impl_collect_dependencies_statement! {
     OpAlloca,
     OpLoad,
     OpStore,
-    OpExtractValue,
-    OpPtrElementPtr,
-    OpPtrVariantPtr,
+    OpExtractField,
+    OpExtractElement,
+    OpFieldPtr,
+    OpElementPtr,
+    OpVariantPtr,
     OpGetDiscriminant,
     OpSetDiscriminant,
-    OpOffsetSlicePtr,
+    OpOffsetSlice,
     OpUnary,
     OpBinary,
     OpCall,
-    OpCallBuiltin,
-    OpCaseToBranchPredicate,
-    OpBoolToBranchPredicate,
+    OpCaseToBranchSelector,
+    OpBoolToBranchSelector,
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,

@@ -500,7 +500,7 @@ impl<'a> RegionBuilder<'a> {
             self.state_origin,
         );
 
-        if let Some(result) = op.result() {
+        if let Some(result) = op.maybe_result() {
             self.input_state_tracker
                 .insert_value_node(self.cfg, result, node, 0);
         }
@@ -906,7 +906,7 @@ mod tests {
         // BB0
         let (_, res) = cfg.add_stmt_uninitialized(bb0, BlockPosition::Append, TY_U32);
         let (_, predicate) =
-            cfg.add_stmt_op_case_to_branch_predicate(bb0, BlockPosition::Append, a0.into(), [0, 1]);
+            cfg.add_stmt_op_case_to_branch_selector(bb0, BlockPosition::Append, a0.into(), [0, 1]);
         cfg.set_terminator(bb0, Terminator::branch_multiple(predicate, [bb1, bb2]));
 
         // BB1
@@ -1042,7 +1042,7 @@ mod tests {
             10u32.into(),
         );
         let (_, predicate) =
-            cfg.add_stmt_op_bool_to_branch_predicate(bb0, BlockPosition::Append, cmp.into());
+            cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, cmp.into());
         cfg.set_terminator(bb0, Terminator::branch_multiple(predicate, [bb1, bb0]));
 
         // BB1

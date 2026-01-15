@@ -1,12 +1,6 @@
 use indexmap::IndexSet;
 
-use crate::cfg::{
-    Assign, BasicBlock, Bind, Cfg, FunctionBody, LocalBinding, OpAlloca, OpBinary,
-    OpBoolToBranchPredicate, OpCall, OpCallBuiltin, OpCaseToBranchPredicate, OpConvertToBool,
-    OpConvertToF32, OpConvertToI32, OpConvertToU32, OpExtractValue, OpGetDiscriminant, OpLoad,
-    OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary,
-    StatementData, Terminator, Uninitialized, Value,
-};
+use crate::cfg::{Assign, BasicBlock, Bind, Cfg, IntrinsicOp, LocalBinding, OpCall, StatementData, Terminator, Uninitialized, Value};
 use crate::cfg_to_rvsdg::control_tree::control_tree::{
     BranchingNode, ControlTree, ControlTreeNode, ControlTreeNodeKind, LinearNode, LoopNode,
 };
@@ -44,106 +38,14 @@ impl WithReadValues for Uninitialized {
     }
 }
 
-impl WithReadValues for OpAlloca {
-    fn with_read_values<F>(&self, _: F)
-    where
-        F: FnMut(&Value),
-    {
-    }
-}
-
-impl WithReadValues for OpLoad {
+impl<T> WithReadValues for IntrinsicOp<T> {
     fn with_read_values<F>(&self, mut f: F)
     where
         F: FnMut(&Value),
     {
-        f(&self.pointer());
-    }
-}
-
-impl WithReadValues for OpStore {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.pointer());
-        f(&self.value());
-    }
-}
-
-impl WithReadValues for OpExtractValue {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.aggregate());
-        self.indices().iter().for_each(f);
-    }
-}
-
-impl WithReadValues for OpPtrElementPtr {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.pointer());
-        self.indices().iter().for_each(f);
-    }
-}
-
-impl WithReadValues for OpPtrVariantPtr {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.pointer());
-    }
-}
-
-impl WithReadValues for OpGetDiscriminant {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.pointer());
-    }
-}
-
-impl WithReadValues for OpSetDiscriminant {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.pointer());
-    }
-}
-
-impl WithReadValues for OpOffsetSlicePtr {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.pointer());
-        f(&self.offset());
-    }
-}
-
-impl WithReadValues for OpUnary {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.operand());
-    }
-}
-
-impl WithReadValues for OpBinary {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.lhs());
-        f(&self.rhs());
+        for arg in self.arguments() {
+            f(arg)
+        }
     }
 }
 
@@ -153,69 +55,6 @@ impl WithReadValues for OpCall {
         F: FnMut(&Value),
     {
         self.arguments().iter().for_each(f);
-    }
-}
-
-impl WithReadValues for OpCallBuiltin {
-    fn with_read_values<F>(&self, f: F)
-    where
-        F: FnMut(&Value),
-    {
-        self.arguments().iter().for_each(f);
-    }
-}
-
-impl WithReadValues for OpCaseToBranchPredicate {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.value());
-    }
-}
-
-impl WithReadValues for OpBoolToBranchPredicate {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.value());
-    }
-}
-
-impl WithReadValues for OpConvertToU32 {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.value());
-    }
-}
-
-impl WithReadValues for OpConvertToI32 {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.value());
-    }
-}
-
-impl WithReadValues for OpConvertToF32 {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.value());
-    }
-}
-
-impl WithReadValues for OpConvertToBool {
-    fn with_read_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&Value),
-    {
-        f(&self.value());
     }
 }
 
@@ -235,24 +74,25 @@ macro_rules! impl_with_read_values_statement {
 }
 
 impl_with_read_values_statement! {
-    Assign,
     Bind,
     Uninitialized,
+    Assign,
     OpAlloca,
     OpLoad,
     OpStore,
-    OpExtractValue,
-    OpPtrElementPtr,
-    OpPtrVariantPtr,
+    OpExtractField,
+    OpExtractElement,
+    OpFieldPtr,
+    OpElementPtr,
+    OpVariantPtr,
     OpGetDiscriminant,
     OpSetDiscriminant,
-    OpOffsetSlicePtr,
+    OpOffsetSlice,
     OpUnary,
     OpBinary,
     OpCall,
-    OpCallBuiltin,
-    OpCaseToBranchPredicate,
-    OpBoolToBranchPredicate,
+    OpCaseToBranchSelector,
+    OpBoolToBranchSelector,
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,
@@ -291,19 +131,12 @@ impl WithWrittenValues for Uninitialized {
     }
 }
 
-impl WithWrittenValues for OpStore {
-    fn with_written_values<F>(&self, _: F)
+impl<T> WithWrittenValues for IntrinsicOp<T> {
+    fn with_written_values<F>(&self, f: F)
     where
-        F: FnMut(&LocalBinding),
+        F: FnMut(&LocalBinding)
     {
-    }
-}
-
-impl WithWrittenValues for OpSetDiscriminant {
-    fn with_written_values<F>(&self, _: F)
-    where
-        F: FnMut(&LocalBinding),
-    {
+        self.maybe_result().as_ref().map(f);
     }
 }
 
@@ -312,54 +145,8 @@ impl WithWrittenValues for OpCall {
     where
         F: FnMut(&LocalBinding),
     {
-        if let Some(result) = &self.result() {
-            f(result);
-        }
+        self.maybe_result().as_ref().map(f);
     }
-}
-
-impl WithWrittenValues for OpCallBuiltin {
-    fn with_written_values<F>(&self, mut f: F)
-    where
-        F: FnMut(&LocalBinding),
-    {
-        if let Some(result) = &self.result() {
-            f(result);
-        }
-    }
-}
-
-macro_rules! impl_with_written_values_op {
-    ($($op:ident,)*) => {
-        $(
-            impl WithWrittenValues for $op {
-                fn with_written_values<F>(&self, mut f: F)
-                where
-                    F: FnMut(&LocalBinding),
-                {
-                    f(&self.result());
-                }
-            }
-        )*
-    };
-}
-
-impl_with_written_values_op! {
-    OpAlloca,
-    OpLoad,
-    OpExtractValue,
-    OpPtrElementPtr,
-    OpPtrVariantPtr,
-    OpGetDiscriminant,
-    OpOffsetSlicePtr,
-    OpUnary,
-    OpBinary,
-    OpCaseToBranchPredicate,
-    OpBoolToBranchPredicate,
-    OpConvertToU32,
-    OpConvertToI32,
-    OpConvertToF32,
-    OpConvertToBool,
 }
 
 macro_rules! impl_with_written_values_statement {
@@ -378,24 +165,25 @@ macro_rules! impl_with_written_values_statement {
 }
 
 impl_with_written_values_statement! {
-    Assign,
     Bind,
     Uninitialized,
+    Assign,
     OpAlloca,
     OpLoad,
     OpStore,
-    OpExtractValue,
-    OpPtrElementPtr,
-    OpPtrVariantPtr,
+    OpExtractField,
+    OpExtractElement,
+    OpFieldPtr,
+    OpElementPtr,
+    OpVariantPtr,
     OpGetDiscriminant,
     OpSetDiscriminant,
-    OpOffsetSlicePtr,
+    OpOffsetSlice,
     OpUnary,
     OpBinary,
     OpCall,
-    OpCallBuiltin,
-    OpCaseToBranchPredicate,
-    OpBoolToBranchPredicate,
+    OpCaseToBranchSelector,
+    OpBoolToBranchSelector,
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,

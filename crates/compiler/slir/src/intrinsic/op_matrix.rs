@@ -43,4 +43,8 @@ impl Intrinsic for OpMatrix {
 
         Ok(Some(ty_registry.register(TypeKind::Matrix(self.ty))))
     }
+
+    fn affects_state(&self) -> bool {
+        false
+    }
 }
