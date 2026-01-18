@@ -20,7 +20,7 @@ use crate::stable_cg::traits::{
 };
 use crate::stable_cg::{
     AtomicOrdering, AtomicRmwBinOp, IntPredicate, OperandRef, OperandValue, PlaceRef, PlaceValue,
-    RealPredicate, Scalar, SynchronizationScope, TyAndLayout, TypeKind,
+    RealPredicate, Scalar, SynchronizationScope, TyAndLayout,
 };
 
 pub struct Builder<'a, 'tcx> {
@@ -583,12 +583,8 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
 
         for i in 0..count {
             let index = self.const_usize(i).expect_value();
-            let (_, elem_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-                self.basic_block,
-                BlockPosition::Append,
-                dest,
-                [index],
-            );
+            let (_, elem_ptr) =
+                cfg.add_stmt_op_element_ptr(self.basic_block, BlockPosition::Append, dest, index);
 
             cfg.add_stmt_op_store(
                 self.basic_block,
@@ -623,27 +619,64 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         todo!()
     }
 
+    // TODO: replace with separate `field_ptr` and `element_ptr` methods that only take a single
+    // index. From current inspection of how codegen actually calls these methods, it seems that
+    // this can be done without much issue.
     fn ptr_element_ptr(
         &mut self,
         _ty: Self::Type,
         ptr: Self::Value,
         indices: &[Self::Value],
     ) -> Self::Value {
-        let (_, result) = self.cfg.borrow_mut().add_stmt_op_ptr_element_ptr(
-            self.basic_block,
-            BlockPosition::Append,
-            ptr.expect_value(),
-            indices.iter().map(|i| i.expect_value()),
-        );
+        let mut cfg = self.cfg.borrow_mut();
+        let mut ptr = ptr.expect_value();
 
-        result.into()
+        for index in indices {
+            let index = index.expect_value();
+            let ty = cfg.value_ty(&ptr);
+            let slir::ty::TypeKind::Ptr(pointee_ty) = *cfg.ty().kind(ty) else {
+                panic!("expected pointer type, got {:?}", ty.to_string(cfg.ty()));
+            };
+
+            ptr = match &*cfg.ty().kind(pointee_ty) {
+                slir::ty::TypeKind::Struct(def) => {
+                    // Struct field indices must be constant; this is something SLIR expects and
+                    // should always be true in rust.
+                    let field_index = index.expect_inline_const().expect_u32();
+
+                    let (_, result) = cfg.add_stmt_op_field_ptr(
+                        self.basic_block,
+                        BlockPosition::Append,
+                        ptr,
+                        field_index,
+                    );
+
+                    result.into()
+                }
+                _ => {
+                    // Should be an array, a slice, a vector or a matrix. The
+                    // `add_stmt_op_element_ptr` call will verify this, so we don't check that here.
+
+                    let (_, result) = cfg.add_stmt_op_element_ptr(
+                        self.basic_block,
+                        BlockPosition::Append,
+                        ptr,
+                        index,
+                    );
+
+                    result.into()
+                }
+            };
+        }
+
+        ptr.into()
     }
 
     fn ptr_variant_ptr(&mut self, ptr: Self::Value, variant_idx: VariantIdx) -> Self::Value {
         let ptr = ptr.expect_value();
         let variant_index = variant_idx.to_index();
 
-        let (_, result) = self.cfg.borrow_mut().add_stmt_op_ptr_variant_ptr(
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_variant_ptr(
             self.basic_block,
             BlockPosition::Append,
             ptr,
@@ -819,24 +852,35 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
 
         let index = slir::cfg::InlineConst::U32(idx as u32);
 
-        if let slir::ty::TypeKind::Ptr(pointee_ty) = *agg_ty_kind {
-            let pointee_ty_kind = cfg.ty().kind(pointee_ty);
+        match *agg_ty_kind {
+            slir::ty::TypeKind::Ptr(pointee_ty) => {
+                mem::drop(cfg);
 
-            mem::drop(cfg);
+                let val_ptr =
+                    self.ptr_element_ptr(pointee_ty.into(), agg_val.into(), &[index.into()]);
 
-            let val_ptr =
-                self.ptr_element_ptr(slir::ty::TY_DUMMY.into(), agg_val.into(), &[index.into()]);
+                self.load(slir::ty::TY_DUMMY.into(), val_ptr, 0)
+            }
+            slir::ty::TypeKind::Struct(_) => {
+                let (_, result) = cfg.add_stmt_op_extract_field(
+                    self.basic_block,
+                    BlockPosition::Append,
+                    agg_val,
+                    idx as u32,
+                );
 
-            self.load(slir::ty::TY_DUMMY.into(), val_ptr, 0)
-        } else {
-            let (_, result) = cfg.add_stmt_op_extract_value(
-                self.basic_block,
-                BlockPosition::Append,
-                agg_val,
-                [index.into()],
-            );
+                result.into()
+            }
+            _ => {
+                let (_, result) = cfg.add_stmt_op_extract_element(
+                    self.basic_block,
+                    BlockPosition::Append,
+                    agg_val,
+                    index.into(),
+                );
 
-            result.into()
+                result.into()
+            }
         }
     }
 

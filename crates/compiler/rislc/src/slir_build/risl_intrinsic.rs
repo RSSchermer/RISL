@@ -153,27 +153,13 @@ fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {
         // consisting of the pointer and the length of the array or the unsized tail value.
         let (_, alloca_ptr) = cfg.add_stmt_op_alloca(bb, BlockPosition::Append, ret_ty);
 
-        let (_, ptr_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-            bb,
-            BlockPosition::Append,
-            alloca_ptr.into(),
-            [0u32.into()],
-        );
+        let (_, ptr_ptr) =
+            cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, alloca_ptr.into(), 0);
         cfg.add_stmt_op_store(bb, BlockPosition::Append, ptr_ptr.into(), ptr_arg.into());
 
-        let (_, len_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-            bb,
-            BlockPosition::Append,
-            alloca_ptr.into(),
-            [1u32.into()],
-        );
-        let array_len_builtin = BuiltinFunction::array_len(ptr_ty);
-        let (_, len) = cfg.add_stmt_op_call_builtin(
-            bb,
-            BlockPosition::Append,
-            array_len_builtin,
-            [ptr_arg.into()],
-        );
+        let (_, len_ptr) =
+            cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, alloca_ptr.into(), 1);
+        let (_, len) = cfg.add_stmt_op_array_length(bb, BlockPosition::Append, ptr_arg.into());
         cfg.add_stmt_op_store(
             bb,
             BlockPosition::Append,

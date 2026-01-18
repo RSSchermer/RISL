@@ -1,20 +1,36 @@
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use crate::Module;
-use crate::rvsdg::NodeKind::{
-    Function, Loop, Simple, StorageBinding, Switch, UniformBinding, WorkgroupBinding,
-};
-use crate::rvsdg::SimpleNode::{
-    ConstBool, ConstF32, ConstFallback, ConstI32, ConstPredicate, ConstPtr, ConstU32,
-    OpAddPtrOffset, OpAlloca, OpBinary, OpBoolToSwitchPredicate, OpCall, OpCaseToSwitchPredicate,
-    OpExtractElement, OpGetDiscriminant, OpGetPtrOffset, OpLoad, OpPtrDiscriminantPtr,
-    OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpSwitchPredicateToCase,
-    OpU32ToSwitchPredicate, OpUnary, Reaggregation, ValueProxy,
-};
+use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{
-    Connectivity, Node, OpMatrix, OpVector, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin,
-    ValueOutput,
+    Connectivity, IntrinsicNode, Node, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput,
+    ValueOrigin, ValueOutput,
 };
+
+struct IntrinsicNodeReplication<T> {
+    dst_region: Region,
+    intrinsic: T,
+    value_inputs: SmallVec<[ValueInput; 6]>,
+    state_origin: Option<StateOrigin>,
+}
+
+impl<T> IntrinsicNodeReplication<T>
+where
+    T: Intrinsic,
+    SimpleNode: From<IntrinsicNode<T>>,
+{
+    fn apply(self, rvsdg: &mut Rvsdg) -> Node {
+        let IntrinsicNodeReplication {
+            dst_region,
+            intrinsic,
+            value_inputs,
+            state_origin,
+        } = self;
+
+        rvsdg.add_intrinsic_op(dst_region, intrinsic, value_inputs, state_origin)
+    }
+}
 
 struct RegionReplicator<'a, 'b> {
     module: &'a mut Module,
@@ -139,39 +155,85 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(ConstPredicate(_)) => self.replicate_const_predicate_node(node),
             Simple(ConstPtr(_)) => self.replicate_const_ptr_node(node),
             Simple(ConstFallback(_)) => self.replicate_const_fallback_node(node),
-            Simple(OpAlloca(_)) => self.replicate_op_alloca_node(node),
-            Simple(OpLoad(_)) => self.replicate_op_load_node(node),
-            Simple(OpStore(_)) => self.replicate_op_store_node(node),
-            Simple(OpPtrElementPtr(_)) => self.replicate_op_ptr_element_ptr_node(node),
-            Simple(OpPtrDiscriminantPtr(_)) => self.replicate_op_ptr_discriminant_ptr_node(node),
-            Simple(OpPtrVariantPtr(_)) => self.replicate_op_ptr_variant_ptr_node(node),
-            Simple(OpExtractElement(_)) => self.replicate_op_extract_element(node),
-            Simple(OpGetDiscriminant(_)) => self.replicate_op_get_discriminant_node(node),
-            Simple(OpSetDiscriminant(_)) => self.replicate_op_set_discriminant_node(node),
-            Simple(OpAddPtrOffset(_)) => self.replicate_op_add_ptr_offset_node(node),
-            Simple(OpGetPtrOffset(_)) => self.replicate_op_get_ptr_offset_node(node),
+            Simple(OpAlloca(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpLoad(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpStore(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpExtractField(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpExtractElement(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpFieldPtr(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpElementPtr(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpDiscriminantPtr(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpVariantPtr(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpGetDiscriminant(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpSetDiscriminant(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpOffsetSlice(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpGetSliceOffset(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpUnary(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpBinary(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpVector(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpMatrix(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpCaseToBranchSelector(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpBoolToBranchSelector(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpU32ToBranchSelector(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpBranchSelectorToCase(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpConvertToU32(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpConvertToI32(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpConvertToF32(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpConvertToBool(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpArrayLength(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
             Simple(OpCall(_)) => self.replicate_op_call_node(node),
-            Simple(OpCallBuiltin(_)) => self.replicate_op_call_builtin_node(node),
-            Simple(OpUnary(_)) => self.replicate_op_unary_node(node),
-            Simple(OpBinary(_)) => self.replicate_op_binary_node(node),
-            Simple(OpVector(_)) => self.replicate_op_vector_node(node),
-            Simple(OpMatrix(_)) => self.replicate_op_matrix_node(node),
-            Simple(OpCaseToSwitchPredicate(_)) => {
-                self.replicate_op_case_to_switch_predicate_node(node)
-            }
-            Simple(OpBoolToSwitchPredicate(_)) => {
-                self.replicate_op_bool_to_switch_predicate_node(node)
-            }
-            Simple(OpU32ToSwitchPredicate(_)) => {
-                self.replicate_op_u32_to_switch_predicate_node(node)
-            }
-            Simple(OpSwitchPredicateToCase(_)) => {
-                self.replicate_op_switch_predicate_to_case_node(node)
-            }
-            Simple(OpConvertToU32(_)) => self.replicate_op_convert_to_u32_node(node),
-            Simple(OpConvertToI32(_)) => self.replicate_op_convert_to_i32_node(node),
-            Simple(OpConvertToF32(_)) => self.replicate_op_convert_to_f32_node(node),
-            Simple(OpConvertToBool(_)) => self.replicate_op_convert_to_bool_node(node),
             Simple(ValueProxy(_)) => self.replicate_value_proxy_node(node),
             Simple(Reaggregation(_)) => self.replicate_reaggregation_node(node),
             Function(_) | UniformBinding(_) | StorageBinding(_) | WorkgroupBinding(_)
@@ -315,107 +377,35 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
         self.rvsdg.add_const_fallback(self.dst_region, ty)
     }
 
-    fn replicate_op_alloca_node(&mut self, node: Node) -> Node {
-        let ty = self.rvsdg[node].expect_op_alloca().ty();
-
-        self.rvsdg.add_op_alloca(self.dst_region, ty)
-    }
-
-    fn replicate_op_load_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_load();
-        let ptr_input = self.mapped_value_input(data.ptr_input());
-        let state_origin = self.mapped_state_origin(&data.state().unwrap().origin);
-
-        self.rvsdg
-            .add_op_load(self.dst_region, ptr_input, state_origin)
-    }
-
-    fn replicate_op_store_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_store();
-        let ptr_input = self.mapped_value_input(data.ptr_input());
-        let value_input = self.mapped_value_input(data.value_input());
-        let state_origin = self.mapped_state_origin(&data.state().unwrap().origin);
-
-        self.rvsdg
-            .add_op_store(self.dst_region, ptr_input, value_input, state_origin)
-    }
-
-    fn replicate_op_ptr_element_ptr_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_ptr_element_ptr();
-        let ptr_input = self.mapped_value_input(data.ptr_input());
-        let index_inputs = data
-            .index_inputs()
+    /// Prepares a replication operation for an [IntrinsicNode], but does not yet apply it to the
+    /// RVSDG.
+    ///
+    /// The replication can subsequently be applied to the RVSDG by calling
+    /// [IntrinsicNodeReplication::apply].
+    ///
+    /// Splitting the replication into two steps allows us to side-step borrow issues.
+    fn prepare_replicate_intrinsic_node<T>(
+        &self,
+        node: &IntrinsicNode<T>,
+    ) -> IntrinsicNodeReplication<T>
+    where
+        T: Intrinsic + Clone,
+    {
+        let value_inputs: SmallVec<[ValueInput; 6]> = node
+            .value_inputs()
             .iter()
-            .map(|input| self.mapped_value_input(input))
-            .collect::<Vec<_>>();
+            .map(|i| self.mapped_value_input(i))
+            .collect();
+        let state_origin = node
+            .state()
+            .map(|state| self.mapped_state_origin(&state.origin));
 
-        self.rvsdg
-            .add_op_ptr_element_ptr(self.dst_region, ptr_input, index_inputs)
-    }
-
-    fn replicate_op_ptr_discriminant_ptr_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_ptr_discriminant_ptr();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg
-            .add_op_ptr_discriminant_ptr(self.dst_region, input)
-    }
-
-    fn replicate_op_ptr_variant_ptr_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_ptr_variant_ptr();
-        let input = self.mapped_value_input(data.input());
-        let variant_index = data.variant_index();
-
-        self.rvsdg
-            .add_op_ptr_variant_ptr(self.dst_region, input, variant_index)
-    }
-
-    fn replicate_op_extract_element(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_extract_element();
-        let aggregate_input = self.mapped_value_input(data.aggregate());
-        let index_inputs = data
-            .indices()
-            .iter()
-            .map(|input| self.mapped_value_input(input))
-            .collect::<Vec<_>>();
-
-        self.rvsdg
-            .add_op_extract_element(self.dst_region, aggregate_input, index_inputs)
-    }
-
-    fn replicate_op_get_discriminant_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_get_discriminant();
-        let ptr_input = self.mapped_value_input(data.input());
-        let state_origin = self.mapped_state_origin(&data.state().unwrap().origin);
-
-        self.rvsdg
-            .add_op_get_discriminant(self.dst_region, ptr_input, state_origin)
-    }
-
-    fn replicate_op_set_discriminant_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_set_discriminant();
-        let ptr_input = self.mapped_value_input(data.input());
-        let variant_index = data.variant_index();
-        let state_origin = self.mapped_state_origin(&data.state().unwrap().origin);
-
-        self.rvsdg
-            .add_op_set_discriminant(self.dst_region, ptr_input, variant_index, state_origin)
-    }
-
-    fn replicate_op_add_ptr_offset_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_add_ptr_offset();
-        let slice_ptr = self.mapped_value_input(data.slice_ptr());
-        let offset = self.mapped_value_input(data.offset());
-
-        self.rvsdg
-            .add_op_add_ptr_offset(self.dst_region, slice_ptr, offset)
-    }
-
-    fn replicate_op_get_ptr_offset_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_get_ptr_offset();
-        let slice_ptr = self.mapped_value_input(data.ptr());
-
-        self.rvsdg.add_op_get_ptr_offset(self.dst_region, slice_ptr)
+        IntrinsicNodeReplication {
+            dst_region: self.dst_region,
+            intrinsic: node.intrinsic().clone(),
+            value_inputs,
+            state_origin,
+        }
     }
 
     fn replicate_op_call_node(&mut self, node: Node) -> Node {
@@ -435,128 +425,6 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             argument_inputs,
             state_origin,
         )
-    }
-
-    fn replicate_op_call_builtin_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_call_builtin();
-        let builtin_function = data.callee().clone();
-        let argument_inputs = data
-            .argument_inputs()
-            .iter()
-            .map(|input| self.mapped_value_input(input))
-            .collect::<Vec<_>>();
-
-        self.rvsdg.add_op_call_builtin(
-            self.module,
-            self.dst_region,
-            builtin_function,
-            argument_inputs,
-        )
-    }
-
-    fn replicate_op_unary_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_unary();
-        let operator = data.operator();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg.add_op_unary(self.dst_region, operator, input)
-    }
-
-    fn replicate_op_binary_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_binary();
-        let operator = data.operator();
-        let lhs_input = self.mapped_value_input(data.lhs_input());
-        let rhs_input = self.mapped_value_input(data.rhs_input());
-
-        self.rvsdg
-            .add_op_binary(self.dst_region, operator, lhs_input, rhs_input)
-    }
-
-    fn replicate_op_vector_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_vector();
-        let vector_ty = *data.vector_ty();
-        let inputs = data
-            .value_inputs()
-            .iter()
-            .map(|input| self.mapped_value_input(input))
-            .collect::<Vec<_>>();
-
-        self.rvsdg.add_op_vector(self.dst_region, vector_ty, inputs)
-    }
-
-    fn replicate_op_matrix_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_matrix();
-        let matrix_ty = *data.matrix_ty();
-        let inputs = data
-            .value_inputs()
-            .iter()
-            .map(|input| self.mapped_value_input(input))
-            .collect::<Vec<_>>();
-
-        self.rvsdg.add_op_matrix(self.dst_region, matrix_ty, inputs)
-    }
-
-    fn replicate_op_case_to_switch_predicate_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_case_to_switch_predicate();
-        let input = self.mapped_value_input(data.input());
-        let cases = data.cases().to_vec();
-
-        self.rvsdg
-            .add_op_case_to_switch_predicate(self.dst_region, input, cases)
-    }
-
-    fn replicate_op_bool_to_switch_predicate_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_bool_to_switch_predicate();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg
-            .add_op_bool_to_switch_predicate(self.dst_region, input)
-    }
-
-    fn replicate_op_u32_to_switch_predicate_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_u32_to_switch_predicate();
-        let branch_count = data.branch_count();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg
-            .add_op_u32_to_switch_predicate(self.dst_region, branch_count, input)
-    }
-
-    fn replicate_op_switch_predicate_to_case_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_switch_predicate_to_case();
-        let input = self.mapped_value_input(data.input());
-        let cases = data.cases().to_vec();
-
-        self.rvsdg
-            .add_op_switch_predicate_to_case(self.dst_region, input, cases)
-    }
-
-    fn replicate_op_convert_to_u32_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_convert_to_u32();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg.add_op_convert_to_u32(self.dst_region, input)
-    }
-
-    fn replicate_op_convert_to_i32_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_convert_to_i32();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg.add_op_convert_to_i32(self.dst_region, input)
-    }
-
-    fn replicate_op_convert_to_f32_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_convert_to_f32();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg.add_op_convert_to_f32(self.dst_region, input)
-    }
-
-    fn replicate_op_convert_to_bool_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_op_convert_to_bool();
-        let input = self.mapped_value_input(data.input());
-
-        self.rvsdg.add_op_convert_to_bool(self.dst_region, input)
     }
 
     fn replicate_value_proxy_node(&mut self, node: Node) -> Node {

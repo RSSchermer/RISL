@@ -44,8 +44,8 @@ impl AggregateAnalyzer {
                 // or passed through switch or loop nodes. Since we may end up analyzing the same
                 // alloca node multiple times, and this is a relatively expensive operation, we
                 // cache the result. Note that the memory-promotion pass is iterative and each
-                // subsequent will invalidate the cache, so the cache must be cleared at the start
-                // of each iteration.
+                // subsequent iteration will invalidate the cache, so the cache must be cleared at
+                // the start of each iteration.
 
                 if let Some(cached) = self.cache.get(&alloca_node).copied() {
                     return cached;
@@ -216,16 +216,16 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
                 self.promotion_candidate = Some(node);
                 self.can_promote &= !self.aggregate_analyzer.is_aggregate(rvsdg, node);
             }
-            Simple(OpPtrElementPtr(_)) => {
+            Simple(OpFieldPtr(_)) | Simple(OpElementPtr(_)) => {
                 self.can_promote = false;
 
                 visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
             }
-            Simple(OpLoad(_) | OpPtrVariantPtr(_) | OpPtrDiscriminantPtr(_)) => {
+            Simple(OpLoad(_) | OpVariantPtr(_) | OpDiscriminantPtr(_)) => {
                 self.can_promote = false;
                 self.can_emulate = false;
             }
-            Simple(OpAddPtrOffset(_) | ValueProxy(_)) => {
+            Simple(OpOffsetSlice(_) | ValueProxy(_)) => {
                 visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
             }
             Simple(ConstPtr(_) | ConstFallback(_)) => (),
@@ -1102,10 +1102,10 @@ mod tests {
             StateOrigin::Node(store_node),
         );
         let element_index_node = rvsdg.add_const_u32(region, 0);
-        let element_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, element_index_node, 0)],
+            ValueInput::output(TY_U32, element_index_node, 0),
         );
         let element_value_node = rvsdg.add_const_f32(region, 1.0);
         let element_store_node = rvsdg.add_op_store(

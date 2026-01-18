@@ -2,7 +2,6 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::SecondaryMap;
 
@@ -11,10 +10,10 @@ use crate::scf::analyze::local_binding_use;
 use crate::scf::analyze::local_binding_use::count_local_binding_use;
 use crate::scf::analyze::struct_use::collect_used_structs;
 use crate::scf::{
-    Alloca, Block, ExprBinding, Expression, ExpressionKind, GlobalPtr, If, LocalBinding,
-    LocalBindingKind, Loop, LoopControl, OpBinary, OpCallBuiltin, OpConvertToBool, OpConvertToF32,
-    OpConvertToI32, OpConvertToU32, OpExtractElement, OpMatrix, OpPtrElementPtr, OpUnary, OpVector,
-    Return, Scf, Statement, StatementKind, Store, Switch,
+    Alloca, Block, ExprBinding, Expression, ExpressionKind, GlobalPtr, If, IntrinsicOp,
+    LocalBinding, LocalBindingKind, Loop, LoopControl, OpBinary, OpConvertToBool, OpConvertToF32,
+    OpConvertToI32, OpConvertToU32, OpElementPtr, OpExtractElement, OpExtractField, OpFieldPtr,
+    OpLoad, OpMatrix, OpStore, OpUnary, OpVector, Return, Scf, Statement, StatementKind, Switch,
 };
 use crate::ty::{ScalarKind, Struct, StructField, Type, TypeKind, VectorSize};
 use crate::{
@@ -97,7 +96,7 @@ enum InlineContext {
     BinOp(BinOpSide, BinaryOperator),
 
     /// We're inlining the result of an [OpLoad] expression, or we're inlining into the place
-    /// expression of a [Store] statement.
+    /// expression of a [OpStore] statement.
     Deref {
         /// Whether the dereferencing operation needs parentheses.
         ///
@@ -696,8 +695,7 @@ impl WgslModuleWriter {
             StatementKind::Return(stmt) => self.write_stmt_return(cx, stmt),
             StatementKind::ExprBinding(stmt) => self.write_stmt_expr_binding(cx, stmt),
             StatementKind::Alloca(stmt) => self.write_stmt_alloca(cx, stmt),
-            StatementKind::Store(stmt) => self.write_stmt_store(cx, stmt),
-            StatementKind::CallBuiltin(stmt) => self.write_stmt_call_builtin(cx, stmt),
+            StatementKind::OpStore(stmt) => self.write_stmt_store(cx, stmt),
         }
     }
 
@@ -864,10 +862,10 @@ impl WgslModuleWriter {
         self.write_newline();
     }
 
-    fn write_stmt_store(&mut self, cx: Context, store_stmt: &Store) {
+    fn write_stmt_store(&mut self, cx: Context, store_stmt: &OpStore) {
         self.write_local_value(
             cx,
-            store_stmt.pointer(),
+            store_stmt.ptr(),
             InlineContext::Deref {
                 needs_parens: false,
             },
@@ -878,30 +876,6 @@ impl WgslModuleWriter {
         self.write_local_value(cx, store_stmt.value(), InlineContext::None);
         self.w.push_str(";");
         self.write_newline();
-    }
-
-    fn write_stmt_call_builtin(&mut self, cx: Context, op_call_builtin: &OpCallBuiltin) {
-        self.write_op_call_builtin(cx, op_call_builtin);
-        self.w.push_str(";");
-        self.write_newline();
-    }
-
-    fn write_op_call_builtin(&mut self, cx: Context, op_call_builtin: &OpCallBuiltin) {
-        self.w.push_str(op_call_builtin.callee().ident().as_str());
-        self.w.push_str("(");
-
-        let last_arg_index = op_call_builtin.arguments().len() - 1;
-
-        for (i, arg) in op_call_builtin.arguments().iter().enumerate() {
-            self.write_local_value(cx, *arg, InlineContext::None);
-
-            if i != last_arg_index {
-                self.w.push_str(",");
-                self.write_optional_space();
-            }
-        }
-
-        self.w.push_str(")");
     }
 
     fn write_local_value(
@@ -966,16 +940,18 @@ impl WgslModuleWriter {
             ExpressionKind::OpBinary(op) => self.write_expr_op_binary(cx, op, inline_cx),
             ExpressionKind::OpVector(op) => self.write_expr_op_vector(cx, op),
             ExpressionKind::OpMatrix(op) => self.write_expr_op_matrix(cx, op),
-            ExpressionKind::OpConvertToU32(op) => self.write_expr_op_convert_to_u32(cx, op),
-            ExpressionKind::OpConvertToI32(op) => self.write_expr_op_convert_to_i32(cx, op),
-            ExpressionKind::OpConvertToF32(op) => self.write_expr_op_convert_to_f32(cx, op),
-            ExpressionKind::OpConvertToBool(op) => self.write_expr_op_convert_to_bool(cx, op),
-            ExpressionKind::OpPtrElementPtr(op) => {
-                self.write_expr_op_ptr_element_ptr(cx, op, inline_cx)
+            ExpressionKind::OpConvertToU32(op) => self.write_fn_like_intrinsic(cx, op, "u32"),
+            ExpressionKind::OpConvertToI32(op) => self.write_fn_like_intrinsic(cx, op, "i32"),
+            ExpressionKind::OpConvertToF32(op) => self.write_fn_like_intrinsic(cx, op, "f32"),
+            ExpressionKind::OpConvertToBool(op) => self.write_fn_like_intrinsic(cx, op, "bool"),
+            ExpressionKind::OpFieldPtr(op) => self.write_expr_op_field_ptr(cx, op, inline_cx),
+            ExpressionKind::OpElementPtr(op) => self.write_expr_op_element_ptr(cx, op, inline_cx),
+            ExpressionKind::OpExtractField(op) => self.write_expr_op_extract_field(cx, op),
+            ExpressionKind::OpExtractElement(op) => self.write_expr_op_extract_element(cx, op),
+            ExpressionKind::OpLoad(op) => self.write_expr_op_load(cx, op, inline_cx),
+            ExpressionKind::OpArrayLength(op) => {
+                self.write_fn_like_intrinsic(cx, op, "arrayLength")
             }
-            ExpressionKind::OpExtractElement(op) => self.write_expr_op_extract_value(cx, op),
-            ExpressionKind::OpLoad(b) => self.write_expr_op_load(cx, *b, inline_cx),
-            ExpressionKind::OpCallBuiltin(op) => self.write_op_call_builtin(cx, op),
         }
     }
 
@@ -1095,36 +1071,49 @@ impl WgslModuleWriter {
         self.w.push_str(")");
     }
 
-    fn write_expr_op_convert_to_u32(&mut self, cx: Context, op: &OpConvertToU32) {
-        self.w.push_str("u32(");
-        self.write_local_value(cx, op.value(), InlineContext::None);
+    fn write_fn_like_intrinsic<T>(&mut self, cx: Context, op: &IntrinsicOp<T>, ident: &str) {
+        self.w.push_str(ident);
+        self.w.push_str("(");
+
+        let last_arg_index = op.arguments().len() - 1;
+
+        for (i, arg) in op.arguments().iter().enumerate() {
+            self.write_local_value(cx, *arg, InlineContext::None);
+
+            if i != last_arg_index {
+                self.w.push_str(",");
+                self.write_optional_space();
+            }
+        }
+
         self.w.push_str(")");
     }
 
-    fn write_expr_op_convert_to_i32(&mut self, cx: Context, op: &OpConvertToI32) {
-        self.w.push_str("i32(");
-        self.write_local_value(cx, op.value(), InlineContext::None);
-        self.w.push_str(")");
-    }
-
-    fn write_expr_op_convert_to_f32(&mut self, cx: Context, op: &OpConvertToF32) {
-        self.w.push_str("f32(");
-        self.write_local_value(cx, op.value(), InlineContext::None);
-        self.w.push_str(")");
-    }
-
-    fn write_expr_op_convert_to_bool(&mut self, cx: Context, op: &OpConvertToBool) {
-        self.w.push_str("bool(");
-        self.write_local_value(cx, op.value(), InlineContext::None);
-        self.w.push_str(")");
-    }
-
-    fn write_expr_op_ptr_element_ptr(
+    fn write_expr_op_field_ptr(
         &mut self,
         cx: Context,
-        expr: &OpPtrElementPtr,
+        expr: &OpFieldPtr,
         inline_cx: InlineContext,
     ) {
+        self.maybe_write_ref_op(inline_cx);
+        self.write_local_value(cx, expr.ptr(), InlineContext::Reref);
+        self.write_field_access(expr.field_index());
+    }
+
+    fn write_expr_op_element_ptr(
+        &mut self,
+        cx: Context,
+        expr: &OpElementPtr,
+        inline_cx: InlineContext,
+    ) {
+        self.maybe_write_ref_op(inline_cx);
+        self.write_local_value(cx, expr.ptr(), InlineContext::Reref);
+        self.write_array_like_access(cx, expr.index());
+    }
+
+    /// Helper function for [write_expr_op_field_ptr] and [write_expr_op_element_ptr] that may write
+    /// a `&` reference operator depending on the [InlineContext].
+    fn maybe_write_ref_op(&mut self, inline_cx: InlineContext) {
         match inline_cx {
             InlineContext::None => self.w.push_str("&"),
             InlineContext::Deref { .. } | InlineContext::Reref => (),
@@ -1132,71 +1121,32 @@ impl WgslModuleWriter {
                 panic!("cannot not be used without dereferencing")
             }
         }
-
-        let ptr = expr.pointer();
-
-        self.write_local_value(cx, ptr, InlineContext::Reref);
-
-        let ptr_ty = cx.scf[ptr].ty();
-        let pointee_ty = cx.module.ty.kind(ptr_ty).expect_ptr();
-
-        self.write_access_chain(cx, pointee_ty, expr.indices().iter().copied());
     }
 
-    fn write_expr_op_extract_value(&mut self, cx: Context, expr: &OpExtractElement) {
-        let value = expr.value();
-
-        self.write_local_value(cx, value, InlineContext::Extract);
-        self.write_access_chain(cx, cx.scf[value].ty(), expr.indices().iter().copied());
+    fn write_expr_op_extract_field(&mut self, cx: Context, expr: &OpExtractField) {
+        self.write_local_value(cx, expr.value(), InlineContext::Extract);
+        self.write_field_access(expr.field_index());
     }
 
-    fn write_access_chain(
-        &mut self,
-        cx: Context,
-        ty: Type,
-        mut indices: impl Iterator<Item = LocalBinding>,
-    ) {
-        if let Some(index) = indices.next() {
-            match &*cx.module.ty.kind(ty) {
-                TypeKind::Vector(_) => {
-                    self.write_array_like_access(cx, index);
-
-                    // Can't project any deeper into a vector type.
-                    debug_assert!(indices.next().is_none());
-                }
-                TypeKind::Matrix(m) => {
-                    self.write_array_like_access(cx, index);
-                    self.write_access_chain(cx, m.column_ty(), indices);
-                }
-                TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => {
-                    self.write_array_like_access(cx, index);
-                    self.write_access_chain(cx, *element_ty, indices);
-                }
-                TypeKind::Struct(s) => {
-                    let stmt = cx.scf[index].kind().expect_expr_binding();
-                    let index = cx.scf[stmt]
-                        .expect_expr_binding()
-                        .expression()
-                        .kind()
-                        .expect_const_u32() as usize;
-
-                    self.w.push_str(".");
-                    self.write_struct_field_ident(index);
-
-                    self.write_access_chain(cx, s.fields[index].ty, indices);
-                }
-                TypeKind::Enum(_)
-                | TypeKind::Ptr(_)
-                | TypeKind::Scalar(_)
-                | TypeKind::Atomic(_)
-                | TypeKind::Function(_)
-                | TypeKind::Predicate
-                | TypeKind::Dummy => panic!("type cannot be projected to an element"),
-            }
-        }
+    fn write_expr_op_extract_element(&mut self, cx: Context, expr: &OpExtractElement) {
+        self.write_local_value(cx, expr.value(), InlineContext::Extract);
+        self.write_array_like_access(cx, expr.index());
     }
 
-    fn write_expr_op_load(&mut self, cx: Context, binding: LocalBinding, inline_cx: InlineContext) {
+    fn write_field_access(&mut self, field_index: u32) {
+        self.w.push_str(".");
+        self.write_struct_field_ident(field_index as usize);
+    }
+
+    fn write_array_like_access(&mut self, cx: Context, index: LocalBinding) {
+        self.w.push_str("[");
+        self.write_local_value(cx, index, InlineContext::None);
+        self.w.push_str("]");
+    }
+
+    fn write_expr_op_load(&mut self, cx: Context, op: &OpLoad, inline_cx: InlineContext) {
+        let ptr_binding = op.ptr();
+
         // If the OpLoad is being inlined as the base value of an OpExtractElement expression, then
         // we may need parenthesis, e.g.:
         //
@@ -1213,15 +1163,15 @@ impl WgslModuleWriter {
         // "alloca discrepancy" (see `write_stmt_alloca`) we also never write a dereferencing
         // operator `*` in this case, so this case also never needs parentheses.
         let needs_parens = if inline_cx == InlineContext::Extract {
-            match cx.scf[binding].kind() {
+            match cx.scf[ptr_binding].kind() {
                 LocalBindingKind::Alloca(_) => false,
                 LocalBindingKind::ExprBinding(stmt) => {
                     let expr_binding = cx.scf[*stmt].expect_expr_binding();
 
                     match expr_binding.expression().kind() {
-                        ExpressionKind::GlobalPtr(_) | ExpressionKind::OpPtrElementPtr(_) => {
-                            !self.should_inline(cx, binding)
-                        }
+                        ExpressionKind::GlobalPtr(_)
+                        | ExpressionKind::OpFieldPtr(_)
+                        | ExpressionKind::OpElementPtr(_) => !self.should_inline(cx, ptr_binding),
                         _ => true,
                     }
                 }
@@ -1231,13 +1181,7 @@ impl WgslModuleWriter {
             false
         };
 
-        self.write_local_value(cx, binding, InlineContext::Deref { needs_parens });
-    }
-
-    fn write_array_like_access(&mut self, cx: Context, index: LocalBinding) {
-        self.w.push_str("[");
-        self.write_local_value(cx, index, InlineContext::None);
-        self.w.push_str("]");
+        self.write_local_value(cx, ptr_binding, InlineContext::Deref { needs_parens });
     }
 
     fn write_bool(&mut self, value: bool) {

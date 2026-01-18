@@ -79,7 +79,7 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
         }
         .into_any(),
         ExpressionKind::OpPtrElementPtr(op) => view! {
-            "&"<LocalBinding binding=op.pointer()/>
+            "&"<LocalBinding binding=op.ptr()/>
 
             {
                 op.indices()

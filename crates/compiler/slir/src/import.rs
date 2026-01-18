@@ -1,9 +1,11 @@
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use crate::cfg::{
-    BasicBlock, BlockPosition, Cfg, ConstPtr, InlineConst, LocalBinding, RootIdentifier, Statement,
-    StatementData, Terminator, Value,
+    BasicBlock, BlockPosition, Cfg, ConstPtr, InlineConst, IntrinsicOp, LocalBinding,
+    RootIdentifier, Statement, StatementData, Terminator, Value,
 };
+use crate::intrinsic::Intrinsic;
 use crate::ty::TypeKind;
 use crate::{ConstantKind, Function, Module};
 
@@ -144,103 +146,77 @@ impl FunctionImporter {
                 self.import_stmt_uninitialized(src_cfg, dst_cfg, dst_bb, src_stmt)
             }
             StatementData::OpAlloca(_) => {
+                // Note: we have a separate import routine for OpAlloca statements, even though it's
+                // currently implemented as an `IntrinsicOp` and all other IntrinsicOps are imported
+                // with `import_stmt_intrinsic_op`. This is because the `OpAlloca` statement is the
+                // one intrinsic operation that introduces a new type that also needs
+                // mapping/importing.
+                //
+                // TODO: should OpAlloca not be implemented via IntrinsicOp just to clearly enforce
+                // its "specialness" in this regard? In all other cases in the code-base it's
+                // currently fine to treat an OpAlloca like any other intrinsic operation.
                 self.import_stmt_op_alloca(src_cfg, dst_cfg, dst_bb, src_stmt)
             }
-            StatementData::OpLoad(_) => {
-                self.import_stmt_op_load((src_mod, src_cfg), (dst_mod, dst_cfg), dst_bb, src_stmt)
+            StatementData::OpLoad(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
-            StatementData::OpStore(_) => {
-                self.import_stmt_op_store((src_mod, src_cfg), (dst_mod, dst_cfg), dst_bb, src_stmt)
+            StatementData::OpStore(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
-            StatementData::OpExtractValue(_) => self.import_stmt_op_extract_value(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpPtrElementPtr(_) => self.import_stmt_op_ptr_element_ptr(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpPtrVariantPtr(_) => self.import_stmt_op_ptr_variant_ptr(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpGetDiscriminant(_) => self.import_stmt_op_get_discriminant(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpSetDiscriminant(_) => self.import_stmt_op_set_discriminant(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpOffsetSlicePtr(_) => self.import_stmt_op_offset_slice_ptr(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpUnary(_) => {
-                self.import_stmt_op_unary((src_mod, src_cfg), (dst_mod, dst_cfg), dst_bb, src_stmt)
+            StatementData::OpExtractField(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
-            StatementData::OpBinary(_) => {
-                self.import_stmt_op_binary((src_mod, src_cfg), (dst_mod, dst_cfg), dst_bb, src_stmt)
+            StatementData::OpExtractElement(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpFieldPtr(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpElementPtr(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpVariantPtr(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpGetDiscriminant(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpSetDiscriminant(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpOffsetSlice(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpUnary(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpBinary(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpCaseToBranchSelector(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpBoolToBranchSelector(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpConvertToU32(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpConvertToI32(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpConvertToF32(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpConvertToBool(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpArrayLength(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
             StatementData::OpCall(_) => {
                 self.import_stmt_op_call((src_mod, src_cfg), (dst_mod, dst_cfg), dst_bb, src_stmt)
             }
-            StatementData::OpCallBuiltin(_) => self.import_stmt_op_call_builtin(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpCaseToBranchPredicate(_) => self
-                .import_stmt_op_case_to_branch_predicate(
-                    (src_mod, src_cfg),
-                    (dst_mod, dst_cfg),
-                    dst_bb,
-                    src_stmt,
-                ),
-            StatementData::OpBoolToBranchPredicate(_) => self
-                .import_stmt_op_bool_to_branch_predicate(
-                    (src_mod, src_cfg),
-                    (dst_mod, dst_cfg),
-                    dst_bb,
-                    src_stmt,
-                ),
-            StatementData::OpConvertToU32(_) => self.import_stmt_op_convert_to_u32(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpConvertToI32(_) => self.import_stmt_op_convert_to_i32(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpConvertToF32(_) => self.import_stmt_op_convert_to_f32(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
-            StatementData::OpConvertToBool(_) => self.import_stmt_op_convert_to_f32(
-                (src_mod, src_cfg),
-                (dst_mod, dst_cfg),
-                dst_bb,
-                src_stmt,
-            ),
         }
     }
 
@@ -291,6 +267,38 @@ impl FunctionImporter {
         self.local_value_mapping.insert(src_local, dst_local);
     }
 
+    fn import_stmt_intrinsic_op<T>(
+        &mut self,
+        src_mod: &Module,
+        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
+        dst_bb: BasicBlock,
+        src_stmt: &IntrinsicOp<T>,
+    ) where
+        T: Intrinsic + Clone,
+        StatementData: From<IntrinsicOp<T>>,
+    {
+        let arguments: SmallVec<[Value; 6]> = src_stmt
+            .arguments()
+            .iter()
+            .map(|v| self.dst_value(src_mod, (dst_mod, dst_cfg), *v))
+            .collect();
+
+        let (_, dst_result) = dst_cfg.add_stmt_intrinsic_op(
+            dst_bb,
+            BlockPosition::Append,
+            src_stmt.intrinsic().clone(),
+            arguments,
+        );
+
+        match (src_stmt.maybe_result(), dst_result) {
+            (Some(src_result), Some(dst_result)) => {
+                self.local_value_mapping.insert(src_result, dst_result);
+            }
+            (None, None) => (),
+            _ => unreachable!(),
+        }
+    }
+
     fn import_stmt_op_alloca(
         &mut self,
         src_cfg: &Cfg,
@@ -304,202 +312,6 @@ impl FunctionImporter {
 
         self.local_value_mapping
             .insert(src_data.result(), dst_result);
-    }
-
-    fn import_stmt_op_load(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_load();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-
-        let (_, dst_result) = dst_cfg.add_stmt_op_load(dst_bb, BlockPosition::Append, dst_pointer);
-
-        self.local_value_mapping
-            .insert(src_data.result(), dst_result);
-    }
-
-    fn import_stmt_op_store(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_store();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-        let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-
-        dst_cfg.add_stmt_op_store(dst_bb, BlockPosition::Append, dst_pointer, dst_value);
-    }
-
-    fn import_stmt_op_extract_value(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_extract_value();
-        let dst_aggregate = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.aggregate());
-        let dst_indices = src_data
-            .indices()
-            .iter()
-            .map(|v| self.dst_value(src_mod, (dst_mod, dst_cfg), *v))
-            .collect::<Vec<_>>();
-
-        let (_, dst_result) = dst_cfg.add_stmt_op_extract_value(
-            dst_bb,
-            BlockPosition::Append,
-            dst_aggregate,
-            dst_indices,
-        );
-
-        self.local_value_mapping
-            .insert(src_data.result(), dst_result);
-    }
-
-    fn import_stmt_op_ptr_element_ptr(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_ptr_element_ptr();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-        let dst_indices = src_data
-            .indices()
-            .iter()
-            .map(|v| self.dst_value(src_mod, (dst_mod, dst_cfg), *v))
-            .collect::<Vec<_>>();
-
-        let (_, dst_result) = dst_cfg.add_stmt_op_ptr_element_ptr(
-            dst_bb,
-            BlockPosition::Append,
-            dst_pointer,
-            dst_indices,
-        );
-
-        self.local_value_mapping
-            .insert(src_data.result(), dst_result);
-    }
-
-    fn import_stmt_op_ptr_variant_ptr(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_ptr_variant_ptr();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-        let dst_variant_index = src_data.variant_index();
-
-        let (_, dst_result) = dst_cfg.add_stmt_op_ptr_variant_ptr(
-            dst_bb,
-            BlockPosition::Append,
-            dst_pointer,
-            dst_variant_index,
-        );
-
-        self.local_value_mapping
-            .insert(src_data.result(), dst_result);
-    }
-
-    fn import_stmt_op_get_discriminant(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_get_discriminant();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-
-        let (_, dst_result) =
-            dst_cfg.add_stmt_op_get_discriminant(dst_bb, BlockPosition::Append, dst_pointer);
-
-        self.local_value_mapping
-            .insert(src_data.result(), dst_result);
-    }
-
-    fn import_stmt_op_set_discriminant(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_set_discriminant();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-        let variant_index = src_data.variant_index();
-
-        dst_cfg.add_stmt_op_set_discriminant(
-            dst_bb,
-            BlockPosition::Append,
-            dst_pointer,
-            variant_index,
-        );
-    }
-
-    fn import_stmt_op_offset_slice_ptr(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_offset_slice_ptr();
-        let dst_pointer = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.pointer());
-        let dst_offset = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.offset());
-
-        let (_, result) = dst_cfg.add_stmt_op_offset_slice(
-            dst_bb,
-            BlockPosition::Append,
-            dst_pointer,
-            dst_offset,
-        );
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_unary(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_unary();
-        let operator = src_data.operator();
-        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.operand());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_unary(dst_bb, BlockPosition::Append, operator, dst_operand);
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_binary(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_binary();
-        let operator = src_data.operator();
-        let dst_lhs = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.lhs());
-        let dst_rhs = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.rhs());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_binary(dst_bb, BlockPosition::Append, operator, dst_lhs, dst_rhs);
-
-        self.local_value_mapping.insert(src_data.result(), result);
     }
 
     fn import_stmt_op_call(
@@ -529,131 +341,6 @@ impl FunctionImporter {
             self.local_value_mapping
                 .insert(src_data.maybe_result().unwrap(), result);
         }
-    }
-
-    fn import_stmt_op_call_builtin(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_call_builtin();
-        let callee = src_data.callee().clone();
-        let dst_arguments = src_data
-            .arguments()
-            .iter()
-            .map(|v| self.dst_value(src_mod, (dst_mod, dst_cfg), *v))
-            .collect::<Vec<_>>();
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_call_builtin(dst_bb, BlockPosition::Append, callee, dst_arguments);
-
-        if let Some(result) = result {
-            self.local_value_mapping
-                .insert(src_data.result().unwrap(), result);
-        }
-    }
-
-    fn import_stmt_op_case_to_branch_predicate(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_case_to_branch_predicate();
-        let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-        let cases = src_data.cases().iter().copied();
-
-        let (_, result) = dst_cfg.add_stmt_op_case_to_branch_selector(
-            dst_bb,
-            BlockPosition::Append,
-            dst_value,
-            cases,
-        );
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_bool_to_branch_predicate(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_bool_to_branch_predicate();
-        let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_bool_to_branch_selector(dst_bb, BlockPosition::Append, dst_value);
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_convert_to_u32(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_convert_to_u32();
-        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_convert_to_u32(dst_bb, BlockPosition::Append, dst_operand);
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_convert_to_i32(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_convert_to_i32();
-        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_convert_to_i32(dst_bb, BlockPosition::Append, dst_operand);
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_convert_to_f32(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_convert_to_f32();
-        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_convert_to_f32(dst_bb, BlockPosition::Append, dst_operand);
-
-        self.local_value_mapping.insert(src_data.result(), result);
-    }
-
-    fn import_stmt_op_convert_to_bool(
-        &mut self,
-        (src_mod, src_cfg): (&Module, &Cfg),
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        dst_bb: BasicBlock,
-        src_stmt: Statement,
-    ) {
-        let src_data = src_cfg[src_stmt].expect_op_convert_to_bool();
-        let dst_operand = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
-
-        let (_, result) =
-            dst_cfg.add_stmt_op_convert_to_bool(dst_bb, BlockPosition::Append, dst_operand);
-
-        self.local_value_mapping.insert(src_data.result(), result);
     }
 
     fn dst_bb(&self, src_bb: BasicBlock) -> BasicBlock {

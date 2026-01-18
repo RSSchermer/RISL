@@ -1,7 +1,10 @@
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 
-use crate::cfg::{Assign, Bind, Cfg, InlineConst, IntrinsicOp, OpCall, RootIdentifier, StatementData, Uninitialized, Value};
+use crate::cfg::{
+    Assign, Bind, Cfg, InlineConst, IntrinsicOp, OpCall, RootIdentifier, StatementData,
+    Uninitialized, Value,
+};
 use crate::ty::Type;
 use crate::{Constant, Function, Module, StorageBinding, UniformBinding, WorkgroupBinding};
 
@@ -148,6 +151,7 @@ impl_collect_dependencies_statement! {
     OpConvertToI32,
     OpConvertToF32,
     OpConvertToBool,
+    OpArrayLength,
 }
 
 fn collect_body_dependencies(cfg: &Cfg, function: Function) -> IndexSet<Item> {

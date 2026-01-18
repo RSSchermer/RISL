@@ -49,8 +49,7 @@ fn try_extract_pred_to_case(rvsdg: &mut Rvsdg, switch_node: Node) {
 
         if cases.len() == branch_count {
             let cases = cases.clone();
-            let pred_to_case =
-                rvsdg.add_op_switch_predicate_to_case(region, predicate_input, cases);
+            let pred_to_case = rvsdg.add_op_branch_selector_to_case(region, predicate_input, cases);
 
             rvsdg.reconnect_value_users(
                 region,

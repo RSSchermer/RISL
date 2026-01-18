@@ -117,26 +117,24 @@ impl<'a> EnumAllocaReplacer<'a> {
             Loop(_) => self.split_loop_input(node, input, split_input),
             Simple(OpGetDiscriminant(_)) => self.replace_op_get_discriminant(node, split_input),
             Simple(OpSetDiscriminant(_)) => self.replace_op_set_discriminant(node, split_input),
-            Simple(OpPtrDiscriminantPtr(_)) => {
-                self.elide_op_ptr_discriminant_ptr(node, split_input)
-            }
-            Simple(OpPtrVariantPtr(_)) => self.elide_op_ptr_variant_ptr(node, split_input),
+            Simple(OpDiscriminantPtr(_)) => self.elide_op_discriminant_ptr(node, split_input),
+            Simple(OpVariantPtr(_)) => self.elide_op_variant_ptr(node, split_input),
             Simple(ValueProxy(_)) => self.visit_value_proxy(node, split_input),
             _ => unreachable!("node kind cannot take a pointer to an enum as input"),
         }
     }
 
-    fn elide_op_ptr_discriminant_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
+    fn elide_op_discriminant_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
-        let node_data = node_data.expect_op_ptr_discriminant_ptr();
+        let node_data = node_data.expect_op_discriminant_ptr();
         let new_user_origin = split_input[0].origin;
-        let user_count = node_data.output().users.len();
+        let user_count = node_data.value_output().users.len();
 
         for i in (0..user_count).rev() {
             let user = self.rvsdg[node]
-                .expect_op_ptr_discriminant_ptr()
-                .output()
+                .expect_op_discriminant_ptr()
+                .value_output()
                 .users[i];
 
             self.rvsdg
@@ -148,16 +146,19 @@ impl<'a> EnumAllocaReplacer<'a> {
         self.rvsdg.remove_node(node);
     }
 
-    fn elide_op_ptr_variant_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
+    fn elide_op_variant_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
-        let node_data = node_data.expect_op_ptr_variant_ptr();
+        let node_data = node_data.expect_op_variant_ptr();
         let variant_index = node_data.variant_index();
         let new_user_origin = split_input[variant_index as usize + 1].origin;
-        let user_count = node_data.output().users.len();
+        let user_count = node_data.value_output().users.len();
 
         for i in (0..user_count).rev() {
-            let user = self.rvsdg[node].expect_op_ptr_variant_ptr().output().users[i];
+            let user = self.rvsdg[node]
+                .expect_op_variant_ptr()
+                .value_output()
+                .users[i];
 
             self.rvsdg
                 .reconnect_value_user(region, user, new_user_origin);
@@ -176,14 +177,17 @@ impl<'a> EnumAllocaReplacer<'a> {
             .origin;
         let user_count = self.rvsdg[node]
             .expect_op_get_discriminant()
-            .output()
+            .value_output()
             .users
             .len();
 
         let load_node = self.rvsdg.add_op_load(region, split_input[0], state_origin);
 
         for i in (0..user_count).rev() {
-            let user = self.rvsdg[node].expect_op_get_discriminant().output().users[i];
+            let user = self.rvsdg[node]
+                .expect_op_get_discriminant()
+                .value_output()
+                .users[i];
 
             self.rvsdg.reconnect_value_user(
                 region,
@@ -386,7 +390,7 @@ impl<'a> EnumAllocaReplacer<'a> {
 
         let discriminant_node = self
             .rvsdg
-            .add_op_ptr_discriminant_ptr(outer_region, proxy_input);
+            .add_op_discriminant_ptr(outer_region, proxy_input);
 
         self.rvsdg
             .add_loop_input(owner, ValueInput::output(TY_PTR_U32, discriminant_node, 0));
@@ -403,12 +407,12 @@ impl<'a> EnumAllocaReplacer<'a> {
 
         for i in 0..variant_count {
             let input_index = (prior_input_count + 1 + i) as u32;
-            let variant_node =
-                self.rvsdg
-                    .add_op_ptr_variant_ptr(outer_region, proxy_input, i as u32);
+            let variant_node = self
+                .rvsdg
+                .add_op_variant_ptr(outer_region, proxy_input, i as u32);
             let variant_ptr_ty = self.rvsdg[variant_node]
-                .expect_op_ptr_variant_ptr()
-                .output()
+                .expect_op_variant_ptr()
+                .value_output()
                 .ty;
 
             self.rvsdg
@@ -477,9 +481,7 @@ impl<'a> EnumAllocaReplacer<'a> {
         split_results_start: usize,
     ) {
         let original_input = self.rvsdg[region].value_results()[original];
-        let discriminant_node = self
-            .rvsdg
-            .add_op_ptr_discriminant_ptr(region, original_input);
+        let discriminant_node = self.rvsdg.add_op_discriminant_ptr(region, original_input);
 
         self.rvsdg.reconnect_region_result(
             region,
@@ -497,7 +499,7 @@ impl<'a> EnumAllocaReplacer<'a> {
             let result_index = (split_results_start + 1 + i) as u32;
             let variant_node = self
                 .rvsdg
-                .add_op_ptr_variant_ptr(region, original_input, i as u32);
+                .add_op_variant_ptr(region, original_input, i as u32);
 
             self.rvsdg.reconnect_region_result(
                 region,
@@ -590,16 +592,13 @@ mod tests {
 
         let switch_0_branch_0 = rvsdg.add_switch_branch(switch_0_node);
 
-        let switch_0_variant_0_node = rvsdg.add_op_ptr_variant_ptr(
-            switch_0_branch_0,
-            ValueInput::argument(enum_ptr_ty, 0),
-            0,
-        );
+        let switch_0_variant_0_node =
+            rvsdg.add_op_variant_ptr(switch_0_branch_0, ValueInput::argument(enum_ptr_ty, 0), 0);
         let switch_0_index_0_node = rvsdg.add_const_u32(switch_0_branch_0, 0);
-        let switch_0_element_0_node = rvsdg.add_op_ptr_element_ptr(
+        let switch_0_element_0_node = rvsdg.add_op_element_ptr(
             switch_0_branch_0,
             ValueInput::output(variant_0_ptr_ty, switch_0_variant_0_node, 0),
-            [ValueInput::output(TY_U32, switch_0_index_0_node, 0)],
+            ValueInput::output(TY_U32, switch_0_index_0_node, 0),
         );
         let switch_0_value_0_node = rvsdg.add_const_u32(switch_0_branch_0, 0);
         let switch_0_store_0_node = rvsdg.add_op_store(
@@ -617,16 +616,13 @@ mod tests {
 
         let switch_0_branch_1 = rvsdg.add_switch_branch(switch_0_node);
 
-        let switch_0_variant_1_node = rvsdg.add_op_ptr_variant_ptr(
-            switch_0_branch_1,
-            ValueInput::argument(enum_ptr_ty, 0),
-            1,
-        );
+        let switch_0_variant_1_node =
+            rvsdg.add_op_variant_ptr(switch_0_branch_1, ValueInput::argument(enum_ptr_ty, 0), 1);
         let switch_0_index_1_node = rvsdg.add_const_u32(switch_0_branch_1, 0);
-        let switch_0_element_1_node = rvsdg.add_op_ptr_element_ptr(
+        let switch_0_element_1_node = rvsdg.add_op_element_ptr(
             switch_0_branch_1,
             ValueInput::output(variant_1_ptr_ty, switch_0_variant_1_node, 0),
-            [ValueInput::output(TY_U32, switch_0_index_1_node, 0)],
+            ValueInput::output(TY_U32, switch_0_index_1_node, 0),
         );
         let switch_0_value_1_node = rvsdg.add_const_u32(switch_0_branch_1, 0);
         let switch_0_store_1_node = rvsdg.add_op_store(
@@ -647,7 +643,7 @@ mod tests {
             ValueInput::output(enum_ptr_ty, alloca_node, 0),
             StateOrigin::Node(switch_0_node),
         );
-        let switch_1_predicate = rvsdg.add_op_u32_to_switch_predicate(
+        let switch_1_predicate = rvsdg.add_op_u32_to_branch_selector(
             region,
             2,
             ValueInput::output(TY_U32, get_discr_node, 0),
@@ -663,16 +659,13 @@ mod tests {
         );
 
         let switch_1_branch_0 = rvsdg.add_switch_branch(switch_1_node);
-        let switch_1_variant_0_node = rvsdg.add_op_ptr_variant_ptr(
-            switch_1_branch_0,
-            ValueInput::argument(enum_ptr_ty, 0),
-            0,
-        );
+        let switch_1_variant_0_node =
+            rvsdg.add_op_variant_ptr(switch_1_branch_0, ValueInput::argument(enum_ptr_ty, 0), 0);
         let switch_1_index_0_node = rvsdg.add_const_u32(switch_1_branch_0, 0);
-        let switch_1_element_0_node = rvsdg.add_op_ptr_element_ptr(
+        let switch_1_element_0_node = rvsdg.add_op_element_ptr(
             switch_1_branch_0,
             ValueInput::output(variant_0_ptr_ty, switch_1_variant_0_node, 0),
-            [ValueInput::output(TY_U32, switch_1_index_0_node, 0)],
+            ValueInput::output(TY_U32, switch_1_index_0_node, 0),
         );
         let switch_1_load_0_node = rvsdg.add_op_load(
             switch_1_branch_0,
@@ -690,16 +683,13 @@ mod tests {
         );
 
         let switch_1_branch_1 = rvsdg.add_switch_branch(switch_1_node);
-        let switch_1_variant_1_node = rvsdg.add_op_ptr_variant_ptr(
-            switch_1_branch_1,
-            ValueInput::argument(enum_ptr_ty, 0),
-            1,
-        );
+        let switch_1_variant_1_node =
+            rvsdg.add_op_variant_ptr(switch_1_branch_1, ValueInput::argument(enum_ptr_ty, 0), 1);
         let switch_1_index_1_node = rvsdg.add_const_u32(switch_1_branch_1, 0);
-        let switch_1_element_1_node = rvsdg.add_op_ptr_element_ptr(
+        let switch_1_element_1_node = rvsdg.add_op_element_ptr(
             switch_1_branch_1,
             ValueInput::output(variant_1_ptr_ty, switch_1_variant_1_node, 0),
-            [ValueInput::output(TY_U32, switch_1_index_1_node, 0)],
+            ValueInput::output(TY_U32, switch_1_index_1_node, 0),
         );
         let switch_1_load_1_node = rvsdg.add_op_load(
             switch_1_branch_1,
@@ -830,7 +820,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[switch_0_element_0_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(1),
@@ -880,7 +870,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[switch_0_element_1_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(2),
@@ -955,7 +945,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[switch_1_element_0_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(1),
@@ -981,7 +971,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[switch_1_element_1_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(2),

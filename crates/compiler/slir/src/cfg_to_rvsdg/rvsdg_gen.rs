@@ -2,14 +2,12 @@ use std::ops::Index;
 
 use index_vec::IndexVec;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 
 use crate::cfg::analyze::item_dependencies::{Item, ItemDependencies, item_dependencies};
 use crate::cfg::{
-    Assign, BasicBlock, Bind, Cfg, InlineConst, LocalBinding, OpAlloca, OpBinary,
-    OpBoolToBranchPredicate, OpCall, OpCallBuiltin, OpCaseToBranchPredicate, OpConvertToBool,
-    OpConvertToF32, OpConvertToI32, OpConvertToU32, OpExtractValue, OpGetDiscriminant, OpLoad,
-    OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, OpUnary,
-    RootIdentifier, StatementData, Terminator, Uninitialized, Value,
+    Assign, BasicBlock, Bind, Cfg, InlineConst, IntrinsicOp, LocalBinding, OpCall, RootIdentifier,
+    StatementData, Terminator, Uninitialized, Value,
 };
 use crate::cfg_to_rvsdg::control_flow_restructuring::{
     Graph, restructure_branches, restructure_loops,
@@ -19,9 +17,10 @@ use crate::cfg_to_rvsdg::control_tree::{
     SliceAnnotation, annotate_demand, annotate_item_dependencies, annotate_read_write,
     annotate_state_use,
 };
+use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind};
-use crate::{Function, Module};
+use crate::{Function, Module, rvsdg};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum InputState {
@@ -307,29 +306,27 @@ impl<'a> RegionBuilder<'a> {
             StatementData::Assign(op) => self.visit_assign(op),
             StatementData::Bind(op) => self.visit_bind(op),
             StatementData::Uninitialized(op) => self.visit_uninitialized(op),
-            StatementData::OpAlloca(op) => self.visit_op_alloca(op),
-            StatementData::OpLoad(op) => self.visit_op_load(op),
-            StatementData::OpStore(op) => self.visit_op_store(op),
-            StatementData::OpExtractValue(op) => self.visit_op_extract_value(op),
-            StatementData::OpPtrElementPtr(op) => self.visit_op_ptr_element_ptr(op),
-            StatementData::OpPtrVariantPtr(op) => self.visit_op_ptr_variant_ptr(op),
-            StatementData::OpGetDiscriminant(op) => self.visit_op_get_discriminant(op),
-            StatementData::OpSetDiscriminant(op) => self.visit_op_set_discriminant(op),
-            StatementData::OpOffsetSlicePtr(op) => self.visit_op_offset_slice_ptr(op),
-            StatementData::OpUnary(op) => self.visit_op_unary(op),
-            StatementData::OpBinary(op) => self.visit_op_binary(op),
+            StatementData::OpAlloca(op) => self.visit_intrinsic_op(op),
+            StatementData::OpLoad(op) => self.visit_intrinsic_op(op),
+            StatementData::OpStore(op) => self.visit_intrinsic_op(op),
+            StatementData::OpExtractElement(op) => self.visit_intrinsic_op(op),
+            StatementData::OpExtractField(op) => self.visit_intrinsic_op(op),
+            StatementData::OpElementPtr(op) => self.visit_intrinsic_op(op),
+            StatementData::OpFieldPtr(op) => self.visit_intrinsic_op(op),
+            StatementData::OpVariantPtr(op) => self.visit_intrinsic_op(op),
+            StatementData::OpGetDiscriminant(op) => self.visit_intrinsic_op(op),
+            StatementData::OpSetDiscriminant(op) => self.visit_intrinsic_op(op),
+            StatementData::OpOffsetSlice(op) => self.visit_intrinsic_op(op),
+            StatementData::OpUnary(op) => self.visit_intrinsic_op(op),
+            StatementData::OpBinary(op) => self.visit_intrinsic_op(op),
+            StatementData::OpCaseToBranchSelector(op) => self.visit_intrinsic_op(op),
+            StatementData::OpBoolToBranchSelector(op) => self.visit_intrinsic_op(op),
+            StatementData::OpConvertToU32(op) => self.visit_intrinsic_op(op),
+            StatementData::OpConvertToI32(op) => self.visit_intrinsic_op(op),
+            StatementData::OpConvertToF32(op) => self.visit_intrinsic_op(op),
+            StatementData::OpConvertToBool(op) => self.visit_intrinsic_op(op),
+            StatementData::OpArrayLength(op) => self.visit_intrinsic_op(op),
             StatementData::OpCall(op) => self.visit_op_call(op),
-            StatementData::OpCallBuiltin(op) => self.visit_op_call_builtin(op),
-            StatementData::OpCaseToBranchPredicate(op) => {
-                self.visit_op_case_to_branch_predicate(op)
-            }
-            StatementData::OpBoolToBranchPredicate(op) => {
-                self.visit_op_bool_to_branch_predicate(op)
-            }
-            StatementData::OpConvertToU32(op) => self.visit_op_convert_to_u32(op),
-            StatementData::OpConvertToI32(op) => self.visit_op_convert_to_i32(op),
-            StatementData::OpConvertToF32(op) => self.visit_op_convert_to_f32(op),
-            StatementData::OpConvertToBool(op) => self.visit_op_convert_to_bool(op),
         }
     }
 
@@ -358,130 +355,35 @@ impl<'a> RegionBuilder<'a> {
         // RVSDG. They also do not have an associated value, so we do not have to do anything here.
     }
 
-    fn visit_op_alloca(&mut self, op: &OpAlloca) {
-        let node = self.rvsdg.add_op_alloca(self.region, op.ty());
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_load(&mut self, op: &OpLoad) {
-        let ptr_input = self.resolve_value(op.pointer());
-        let node = self
-            .rvsdg
-            .add_op_load(self.region, ptr_input, self.state_origin);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-        self.state_origin = StateOrigin::Node(node);
-    }
-
-    fn visit_op_store(&mut self, op: &OpStore) {
-        let ptr_input = self.resolve_value(op.pointer());
-        let value_input = self.resolve_value(op.value());
-        let node = self
-            .rvsdg
-            .add_op_store(self.region, ptr_input, value_input, self.state_origin);
-
-        self.state_origin = StateOrigin::Node(node);
-    }
-
-    fn visit_op_extract_value(&mut self, op: &OpExtractValue) {
-        let aggregate_input = self.resolve_value(op.aggregate());
-        let index_inputs = op
-            .indices()
+    fn visit_intrinsic_op<T>(&mut self, op: &IntrinsicOp<T>)
+    where
+        T: Intrinsic + Clone,
+        rvsdg::SimpleNode: From<rvsdg::IntrinsicNode<T>>,
+    {
+        let value_inputs: SmallVec<[ValueInput; 6]> = op
+            .arguments()
             .iter()
-            .copied()
-            .map(|v| self.resolve_value(v))
-            .collect::<Vec<_>>();
-        let node = self
-            .rvsdg
-            .add_op_extract_element(self.region, aggregate_input, index_inputs);
+            .map(|v| self.resolve_value(*v))
+            .collect();
 
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
+        let affects_state = op.intrinsic().affects_state();
+        let state_origin = affects_state.then(|| self.state_origin);
 
-    fn visit_op_ptr_element_ptr(&mut self, op: &OpPtrElementPtr) {
-        let ptr_input = self.resolve_value(op.pointer());
-        let index_inputs = op
-            .indices()
-            .iter()
-            .copied()
-            .map(|v| self.resolve_value(v))
-            .collect::<Vec<_>>();
-        let node = self
-            .rvsdg
-            .add_op_ptr_element_ptr(self.region, ptr_input, index_inputs);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_ptr_variant_ptr(&mut self, op: &OpPtrVariantPtr) {
-        let input = self.resolve_value(op.pointer());
-
-        let node = self
-            .rvsdg
-            .add_op_ptr_variant_ptr(self.region, input, op.variant_index());
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_get_discriminant(&mut self, op: &OpGetDiscriminant) {
-        let ptr_input = self.resolve_value(op.pointer());
-
-        let node = self
-            .rvsdg
-            .add_op_get_discriminant(self.region, ptr_input, self.state_origin);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-        self.state_origin = StateOrigin::Node(node);
-    }
-
-    fn visit_op_set_discriminant(&mut self, op: &OpSetDiscriminant) {
-        let ptr_input = self.resolve_value(op.pointer());
-        let node = self.rvsdg.add_op_set_discriminant(
+        let node = self.rvsdg.add_intrinsic_op(
             self.region,
-            ptr_input,
-            op.variant_index(),
-            self.state_origin,
+            op.intrinsic().clone(),
+            value_inputs,
+            state_origin,
         );
 
-        self.state_origin = StateOrigin::Node(node);
-    }
+        if let Some(result) = op.maybe_result() {
+            self.input_state_tracker
+                .insert_value_node(self.cfg, result, node, 0);
+        }
 
-    fn visit_op_offset_slice_ptr(&mut self, op: &OpOffsetSlicePtr) {
-        let slice_ptr = self.resolve_value(op.pointer());
-        let offset = self.resolve_value(op.offset());
-
-        let node = self
-            .rvsdg
-            .add_op_add_ptr_offset(self.region, slice_ptr, offset);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_unary(&mut self, op: &OpUnary) {
-        let input = self.resolve_value(op.operand());
-        let node = self.rvsdg.add_op_unary(self.region, op.operator(), input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_binary(&mut self, op: &OpBinary) {
-        let lhs_input = self.resolve_value(op.lhs());
-        let rhs_input = self.resolve_value(op.rhs());
-        let node = self
-            .rvsdg
-            .add_op_binary(self.region, op.operator(), lhs_input, rhs_input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
+        if affects_state {
+            self.state_origin = StateOrigin::Node(node);
+        }
     }
 
     fn visit_op_call(&mut self, op: &OpCall) {
@@ -506,77 +408,6 @@ impl<'a> RegionBuilder<'a> {
         }
 
         self.state_origin = StateOrigin::Node(node);
-    }
-
-    fn visit_op_call_builtin(&mut self, op: &OpCallBuiltin) {
-        let callee = op.callee().clone();
-        let arg_inputs = op
-            .arguments()
-            .iter()
-            .copied()
-            .map(|v| self.resolve_value(v))
-            .collect::<Vec<_>>();
-        let node = self
-            .rvsdg
-            .add_op_call_builtin(self.module, self.region, callee, arg_inputs);
-
-        if let Some(result) = op.result() {
-            self.input_state_tracker
-                .insert_value_node(self.cfg, result, node, 0);
-        }
-    }
-
-    fn visit_op_case_to_branch_predicate(&mut self, op: &OpCaseToBranchPredicate) {
-        let input = self.resolve_value(op.value());
-        let cases = op.cases().to_vec();
-        let node = self
-            .rvsdg
-            .add_op_case_to_switch_predicate(self.region, input, cases);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_bool_to_branch_predicate(&mut self, op: &OpBoolToBranchPredicate) {
-        let input = self.resolve_value(op.value());
-        let node = self
-            .rvsdg
-            .add_op_bool_to_switch_predicate(self.region, input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_convert_to_u32(&mut self, op: &OpConvertToU32) {
-        let input = self.resolve_value(op.value());
-        let node = self.rvsdg.add_op_convert_to_u32(self.region, input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_convert_to_i32(&mut self, op: &OpConvertToI32) {
-        let input = self.resolve_value(op.value());
-        let node = self.rvsdg.add_op_convert_to_i32(self.region, input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_convert_to_f32(&mut self, op: &OpConvertToF32) {
-        let input = self.resolve_value(op.value());
-        let node = self.rvsdg.add_op_convert_to_f32(self.region, input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
-    }
-
-    fn visit_op_convert_to_bool(&mut self, op: &OpConvertToBool) {
-        let input = self.resolve_value(op.value());
-        let node = self.rvsdg.add_op_convert_to_bool(self.region, input);
-
-        self.input_state_tracker
-            .insert_value_node(self.cfg, op.result(), node, 0);
     }
 
     fn connect_result(&mut self, result: u32, value: Value) {
@@ -767,10 +598,8 @@ pub fn cfg_to_rvsdg(module: &mut Module, cfg: &mut Cfg) -> Rvsdg {
 mod tests {
     use std::iter;
 
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::cfg::{BlockPosition, Branch, LocalBindingData};
+    use crate::cfg::BlockPosition;
     use crate::ty::{TY_DUMMY, TY_PREDICATE};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Symbol};
 
@@ -933,7 +762,7 @@ mod tests {
 
         let (_, region) = expected.register_function(&module, function, iter::empty());
 
-        let predicate_node = expected.add_op_case_to_switch_predicate(
+        let predicate_node = expected.add_op_case_to_branch_selector(
             region,
             ValueInput::argument(TY_U32, 0),
             [0, 1],
@@ -1072,7 +901,7 @@ mod tests {
             ValueInput::output(TY_U32, compare_value_node, 0),
         );
         let predicate_node = expected
-            .add_op_bool_to_switch_predicate(loop_region, ValueInput::output(TY_BOOL, cmp_node, 0));
+            .add_op_bool_to_branch_selector(loop_region, ValueInput::output(TY_BOOL, cmp_node, 0));
 
         expected.reconnect_region_result(
             loop_region,

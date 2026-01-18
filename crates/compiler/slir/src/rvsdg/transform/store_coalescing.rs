@@ -68,7 +68,7 @@ use arrayvec::ArrayVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::rvsdg::NodeKind::Simple;
-use crate::rvsdg::SimpleNode::OpPtrElementPtr;
+use crate::rvsdg::SimpleNode::OpElementPtr;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::visit::reverse_value_flow::ReverseValueFlowVisitor;
 use crate::rvsdg::{
@@ -209,9 +209,10 @@ impl ReverseValueFlowVisitor for PointerAnalyzer {
             Simple(OpAlloca(_)) => {
                 self.root_identifier = RootIdentifier::Alloca(node);
             }
-            Simple(OpPtrElementPtr(_))
-            | Simple(OpPtrVariantPtr(_))
-            | Simple(OpAddPtrOffset(_))
+            Simple(OpFieldPtr(_))
+            | Simple(OpElementPtr(_))
+            | Simple(OpVariantPtr(_))
+            | Simple(OpOffsetSlice(_))
             | Simple(ConstPtr(_)) => {
                 // Only visit the pointer input.
                 visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
@@ -283,14 +284,14 @@ fn remove_element_store(rvsdg: &mut Rvsdg, node: Node) {
         output: 0,
     } = store.ptr_input().origin
     else {
-        panic!("the store node's pointer should originate from a ptr-element-ptr node");
+        panic!("the store node's pointer should originate from an element-ptr node");
     };
 
     rvsdg.remove_node(node);
 
     if rvsdg[element_ptr_node]
-        .expect_op_ptr_element_ptr()
-        .output()
+        .expect_op_element_ptr()
+        .value_output()
         .users
         .is_empty()
     {
@@ -538,13 +539,12 @@ impl<'a> Coalescer<'a> {
             producer,
             output: 0,
         } = ptr_origin
-            && let Simple(OpPtrElementPtr(op)) = rvsdg[producer].kind()
+            && let Simple(OpElementPtr(op)) = rvsdg[producer].kind()
             && let Some(aggregate) =
                 self.pointer_analyzer
                     .aggregate_info(rvsdg, region, *op.ptr_input())
             && aggregate.matches_mode(mode)
-            && op.index_inputs().len() == 1
-            && let Some(element) = try_resolve_const_index(rvsdg, op.index_inputs()[0].origin)
+            && let Some(element) = try_resolve_const_index(rvsdg, op.index_input().origin)
         {
             self.state.push(aggregate, element as usize, op_store_node)
         } else {
@@ -608,10 +608,10 @@ mod tests {
         let alloca_node = rvsdg.add_op_alloca(region, TY_VEC3_F32);
 
         let index_0_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -622,10 +622,10 @@ mod tests {
         );
 
         let index_1_node = rvsdg.add_const_u32(region, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(region, 2.0);
         let store_1_node = rvsdg.add_op_store(
@@ -636,10 +636,10 @@ mod tests {
         );
 
         let index_2_node = rvsdg.add_const_u32(region, 2);
-        let ptr_2_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_2_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_2_node, 0)],
+            ValueInput::output(TY_U32, index_2_node, 0),
         );
         let value_2_node = rvsdg.add_const_f32(region, 3.0);
         let store_2_node = rvsdg.add_op_store(
@@ -749,10 +749,10 @@ mod tests {
         let alloca_node = rvsdg.add_op_alloca(region, TY_VEC3_F32);
 
         let index_0_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -763,10 +763,10 @@ mod tests {
         );
 
         let index_2_node = rvsdg.add_const_u32(region, 2);
-        let ptr_2_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_2_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_2_node, 0)],
+            ValueInput::output(TY_U32, index_2_node, 0),
         );
         let value_2_node = rvsdg.add_const_f32(region, 3.0);
         let store_2_node = rvsdg.add_op_store(
@@ -844,10 +844,10 @@ mod tests {
         let alloca_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
 
         let index_0_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -864,10 +864,10 @@ mod tests {
         );
 
         let index_1_node = rvsdg.add_const_u32(region, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(region, 3.0);
         let store_1_node = rvsdg.add_op_store(
@@ -951,10 +951,10 @@ mod tests {
         let other_alloca_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
 
         let index_0_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -971,10 +971,10 @@ mod tests {
         );
 
         let index_1_node = rvsdg.add_const_u32(region, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(region, 3.0);
         let store_1_node = rvsdg.add_op_store(
@@ -1086,10 +1086,10 @@ mod tests {
         let alloca_1_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
 
         let index_0_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_0_node, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -1100,10 +1100,10 @@ mod tests {
         );
 
         let interrupting_index_node = rvsdg.add_const_u32(region, 0);
-        let interrupting_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let interrupting_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_1_node, 0),
-            [ValueInput::output(TY_U32, interrupting_index_node, 0)],
+            ValueInput::output(TY_U32, interrupting_index_node, 0),
         );
         let interrupting_value_node = rvsdg.add_const_f32(region, 1.0);
         let interrupting_store_node = rvsdg.add_op_store(
@@ -1114,10 +1114,10 @@ mod tests {
         );
 
         let index_1_node = rvsdg.add_const_u32(region, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_0_node, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(region, 3.0);
         let store_1_node = rvsdg.add_op_store(
@@ -1203,10 +1203,10 @@ mod tests {
         let alloca_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
 
         let index_0_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -1217,7 +1217,7 @@ mod tests {
         );
 
         let predicate_node =
-            rvsdg.add_op_bool_to_switch_predicate(region, ValueInput::argument(TY_BOOL, 0));
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::argument(TY_BOOL, 0));
         let switch_node = rvsdg.add_switch(
             region,
             vec![ValueInput::output(TY_PREDICATE, predicate_node, 0)],
@@ -1229,10 +1229,10 @@ mod tests {
         rvsdg.add_switch_branch(switch_node);
 
         let index_1_node = rvsdg.add_const_u32(region, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(region, 3.0);
         let store_1_node = rvsdg.add_op_store(
@@ -1315,10 +1315,10 @@ mod tests {
         let alloca_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
 
         let index_0_before_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_before_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_before_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_before_node, 0)],
+            ValueInput::output(TY_U32, index_0_before_node, 0),
         );
         let value_0_before_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_before_node = rvsdg.add_op_store(
@@ -1335,10 +1335,10 @@ mod tests {
         );
 
         let index_0_after_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_after_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_after_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_after_node, 0)],
+            ValueInput::output(TY_U32, index_0_after_node, 0),
         );
         let value_0_after_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_after_node = rvsdg.add_op_store(
@@ -1349,10 +1349,10 @@ mod tests {
         );
 
         let index_1_node = rvsdg.add_const_u32(region, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(region, 3.0);
         let store_1_node = rvsdg.add_op_store(
@@ -1478,10 +1478,10 @@ mod tests {
         let alloca_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
 
         let index_0_before_node = rvsdg.add_const_u32(region, 0);
-        let ptr_0_before_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_before_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
-            [ValueInput::output(TY_U32, index_0_before_node, 0)],
+            ValueInput::output(TY_U32, index_0_before_node, 0),
         );
         let value_0_before_node = rvsdg.add_const_f32(region, 1.0);
         let store_0_before_node = rvsdg.add_op_store(
@@ -1492,7 +1492,7 @@ mod tests {
         );
 
         let predicate_node =
-            rvsdg.add_op_bool_to_switch_predicate(region, ValueInput::argument(TY_BOOL, 0));
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::argument(TY_BOOL, 0));
         let switch_node = rvsdg.add_switch(
             region,
             vec![
@@ -1507,10 +1507,10 @@ mod tests {
         rvsdg.add_switch_branch(switch_node);
 
         let index_0_node = rvsdg.add_const_u32(branch_0, 0);
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             branch_0,
             ValueInput::argument(ptr_ty, 0),
-            [ValueInput::output(TY_U32, index_0_node, 0)],
+            ValueInput::output(TY_U32, index_0_node, 0),
         );
         let value_0_node = rvsdg.add_const_f32(branch_0, 1.0);
         let store_0_node = rvsdg.add_op_store(
@@ -1521,10 +1521,10 @@ mod tests {
         );
 
         let index_1_node = rvsdg.add_const_u32(branch_0, 1);
-        let ptr_1_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_1_node = rvsdg.add_op_element_ptr(
             branch_0,
             ValueInput::argument(ptr_ty, 0),
-            [ValueInput::output(TY_U32, index_1_node, 0)],
+            ValueInput::output(TY_U32, index_1_node, 0),
         );
         let value_1_node = rvsdg.add_const_f32(branch_0, 3.0);
         let store_1_node = rvsdg.add_op_store(

@@ -1,15 +1,14 @@
 use std::collections::VecDeque;
-use std::ops::{Deref, Range};
+use std::ops::Deref;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::rvsdg::analyse::element_index::ElementIndex;
-use crate::rvsdg::transform::enum_replacement::{EnumAllocaReplacer, replace_enum_alloca};
+use crate::rvsdg::transform::enum_replacement::replace_enum_alloca;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{
-    Connectivity, LoopNode, Node, NodeKind, OpAlloca, OpLoad, OpPtrDiscriminantPtr, ProxyKind,
-    Region, Rvsdg, SimpleNode, StateOrigin, SwitchNode, ValueInput, ValueOrigin, ValueOutput,
-    ValueUser, visit,
+    Connectivity, Node, NodeKind, OpAlloca, OpLoad, ProxyKind, Region, Rvsdg, SimpleNode,
+    StateOrigin, ValueInput, ValueOrigin, ValueOutput, ValueUser, visit,
 };
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{Function, Module};
@@ -167,17 +166,19 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
             Simple(OpStore(_))
-            | Simple(OpPtrElementPtr(_))
-            | Simple(OpPtrVariantPtr(_))
+            | Simple(OpExtractField(_))
             | Simple(OpExtractElement(_))
-            | Simple(OpPtrDiscriminantPtr(_))
+            | Simple(OpFieldPtr(_))
+            | Simple(OpElementPtr(_))
+            | Simple(OpVariantPtr(_))
+            | Simple(OpDiscriminantPtr(_))
             | Simple(OpGetDiscriminant(_))
             | Simple(OpSetDiscriminant(_))
-            | Simple(OpGetPtrOffset(_)) => {
+            | Simple(OpGetSliceOffset(_)) => {
                 // These operations take a pointer to an aggregate as input, but splitting does not
                 // propagate past these node kinds, so we end the search
             }
-            Switch(_) | Loop(_) | Simple(OpAddPtrOffset(_)) => {
+            Switch(_) | Loop(_) | Simple(OpOffsetSlice(_)) => {
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
             _ => unreachable!("node kind cannot take (a pointer to) an aggregate value as input"),
@@ -513,36 +514,52 @@ impl Replacer<'_, '_, '_> {
             Loop(_) => self.split_loop_input(node, input, split_input),
             Simple(OpLoad(_)) => self.split_op_load(node, split_input),
             Simple(OpStore(_)) => self.split_op_store(node, input, split_input),
-            Simple(OpPtrElementPtr(_)) => self.visit_op_ptr_element_ptr(node, split_input),
+            Simple(OpFieldPtr(_)) => self.visit_op_field_ptr(node, split_input),
+            Simple(OpElementPtr(_)) => self.visit_op_element_ptr(node, split_input),
+            Simple(OpExtractField(_)) => self.visit_op_extract_field(node, split_input),
             Simple(OpExtractElement(_)) => self.visit_op_extract_element(node, split_input),
-            Simple(OpAddPtrOffset(_)) => self.visit_users(node, 0, split_input),
-            Simple(OpGetPtrOffset(_)) => (),
+            Simple(OpOffsetSlice(_)) => self.visit_users(node, 0, split_input),
+            Simple(OpGetSliceOffset(_)) => (),
             Simple(ValueProxy(_)) => self.visit_value_proxy(node, split_input),
             _ => unreachable!("node kind cannot take a pointer or aggregate value as input"),
         }
     }
 
-    fn visit_op_ptr_element_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
+    fn visit_op_field_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
-        let node_data = node_data.expect_op_ptr_element_ptr();
-        let output_ty = node_data.output().ty;
-        let user_count = node_data.output().users.len();
+        let node_data = node_data.expect_op_field_ptr();
+        let field_index = node_data.field_index();
+        let new_user_origin = split_input[field_index as usize].origin;
 
-        let first_index = ElementIndex::from_origin(self.rvsdg, node_data.index_inputs()[0].origin);
+        self.rvsdg.reconnect_value_users(
+            region,
+            ValueOrigin::Output {
+                producer: node,
+                output: 0,
+            },
+            new_user_origin,
+        );
+
+        self.rvsdg.remove_node(node);
+    }
+
+    fn visit_op_element_ptr(&mut self, node: Node, split_input: &[ValueInput]) {
+        let node_data = &self.rvsdg[node];
+        let region = node_data.region();
+        let node_data = node_data.expect_op_element_ptr();
+        let output_ty = node_data.value_output().ty;
+
+        let first_index = ElementIndex::from_origin(self.rvsdg, node_data.index_input().origin);
 
         let new_user_origin = match first_index {
-            ElementIndex::Static(index) => {
-                let split_input = split_input[index as usize];
-
-                self.adapt_op_ptr_element_ptr(node, split_input, region)
-            }
+            ElementIndex::Static(index) => split_input[index as usize].origin,
             ElementIndex::Dynamic(selector) => {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
                 let branch_count = split_input.len() as u32;
-                let to_predicate = self.rvsdg.add_op_u32_to_switch_predicate(
+                let to_predicate = self.rvsdg.add_op_u32_to_branch_selector(
                     region,
                     branch_count,
                     ValueInput {
@@ -570,14 +587,7 @@ impl Replacer<'_, '_, '_> {
 
                 for (i, input) in split_input.iter().enumerate() {
                     let branch = self.rvsdg.add_switch_branch(switch);
-                    let origin = self.adapt_op_ptr_element_ptr(
-                        node,
-                        ValueInput {
-                            ty: input.ty,
-                            origin: ValueOrigin::Argument(i as u32),
-                        },
-                        region,
-                    );
+                    let origin = ValueOrigin::Argument(i as u32);
 
                     self.rvsdg.reconnect_region_result(branch, 0, origin);
                 }
@@ -589,69 +599,55 @@ impl Replacer<'_, '_, '_> {
             }
         };
 
-        for i in (0..user_count).rev() {
-            let user = self.rvsdg[node].expect_op_ptr_element_ptr().output().users[i];
-
-            self.rvsdg
-                .reconnect_value_user(region, user, new_user_origin);
-        }
+        self.rvsdg.reconnect_value_users(
+            region,
+            ValueOrigin::Output {
+                producer: node,
+                output: 0,
+            },
+            new_user_origin,
+        );
 
         // We've reconnected all the node's users now. Consequently, it's now dead and can
         // be removed.
         self.rvsdg.remove_node(node);
     }
 
-    fn adapt_op_ptr_element_ptr(
-        &mut self,
-        original: Node,
-        input: ValueInput,
-        target_region: Region,
-    ) -> ValueOrigin {
-        let node_data = self.rvsdg[original].expect_op_ptr_element_ptr();
-        let is_multi_layer_access = node_data.index_inputs().len() > 1;
+    fn visit_op_extract_field(&mut self, node: Node, split_input: &[ValueInput]) {
+        let node_data = &self.rvsdg[node];
+        let region = node_data.region();
+        let node_data = node_data.expect_op_extract_field();
+        let field_index = node_data.field_index();
+        let new_user_origin = split_input[field_index as usize].origin;
 
-        if is_multi_layer_access {
-            let indices = node_data
-                .index_inputs()
-                .iter()
-                .copied()
-                .skip(1)
-                .collect::<Vec<_>>();
-
-            let node = self
-                .rvsdg
-                .add_op_ptr_element_ptr(target_region, input, indices);
-
+        self.rvsdg.reconnect_value_users(
+            region,
             ValueOrigin::Output {
                 producer: node,
                 output: 0,
-            }
-        } else {
-            input.origin
-        }
+            },
+            new_user_origin,
+        );
+
+        self.rvsdg.remove_node(node);
     }
 
     fn visit_op_extract_element(&mut self, node: Node, split_input: &[ValueInput]) {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
         let node_data = node_data.expect_op_extract_element();
-        let output_ty = node_data.output().ty;
-        let user_count = node_data.output().users.len();
+        let output_ty = node_data.value_output().ty;
 
-        let first_index = ElementIndex::from_origin(self.rvsdg, node_data.indices()[0].origin);
+        let first_index = ElementIndex::from_origin(self.rvsdg, node_data.index_input().origin);
 
         let new_user_origin = match first_index {
-            ElementIndex::Static(index) => {
-                let split_input = split_input[index as usize];
-
-                self.adapt_op_extract_element(node, split_input, region)
-            }
+            ElementIndex::Static(index) => split_input[index as usize].origin,
             ElementIndex::Dynamic(selector) => {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
                 let branch_count = split_input.len() as u32;
-                let to_predicate = self.rvsdg.add_op_u32_to_switch_predicate(
+                let to_predicate = self.rvsdg.add_op_u32_to_branch_selector(
                     region,
                     branch_count,
                     ValueInput {
@@ -679,14 +675,7 @@ impl Replacer<'_, '_, '_> {
 
                 for (i, input) in split_input.iter().enumerate() {
                     let branch = self.rvsdg.add_switch_branch(switch);
-                    let origin = self.adapt_op_extract_element(
-                        node,
-                        ValueInput {
-                            ty: input.ty,
-                            origin: ValueOrigin::Argument(i as u32),
-                        },
-                        region,
-                    );
+                    let origin = ValueOrigin::Argument(i as u32);
 
                     self.rvsdg.reconnect_region_result(branch, 0, origin);
                 }
@@ -698,46 +687,18 @@ impl Replacer<'_, '_, '_> {
             }
         };
 
-        for i in (0..user_count).rev() {
-            let user = self.rvsdg[node].expect_op_extract_element().output().users[i];
-
-            self.rvsdg
-                .reconnect_value_user(region, user, new_user_origin);
-        }
+        self.rvsdg.reconnect_value_users(
+            region,
+            ValueOrigin::Output {
+                producer: node,
+                output: 0,
+            },
+            new_user_origin,
+        );
 
         // We've reconnected all the node's users now. Consequently, it's now dead and can
         // be removed.
         self.rvsdg.remove_node(node);
-    }
-
-    fn adapt_op_extract_element(
-        &mut self,
-        original: Node,
-        input: ValueInput,
-        target_region: Region,
-    ) -> ValueOrigin {
-        let node_data = self.rvsdg[original].expect_op_extract_element();
-        let is_multi_layer_access = node_data.indices().len() > 1;
-
-        if is_multi_layer_access {
-            let indices = node_data
-                .indices()
-                .iter()
-                .copied()
-                .skip(1)
-                .collect::<Vec<_>>();
-
-            let node = self
-                .rvsdg
-                .add_op_extract_element(target_region, input, indices);
-
-            ValueOrigin::Output {
-                producer: node,
-                output: 0,
-            }
-        } else {
-            input.origin
-        }
     }
 
     fn split_op_load(&mut self, node: Node, split_input: &[ValueInput]) {
@@ -790,24 +751,24 @@ impl Replacer<'_, '_, '_> {
         // having two inputs, both of which have to split at the same time (as opposed to e.g. a
         // Switch input, where we can split inputs individually). For whichever input is visited
         // first, we generate final connectivity immediately; for the other, we introduce an
-        // intermediate set of [OpPtrElementPtr] nodes (for the case of the "pointer" input) or an
-        // intermediate set of [OpExtractElement] nodes (for the case of the "value" input).
+        // intermediate set of [OpFieldPtr]/[OpElementPtr] nodes (for the case of the "pointer"
+        // input) or an intermediate set of [OpExtractField]/[OpExtractElement] nodes (for the case
+        // of the "value" input).
         //
         // However, it is possible that both inputs originate from a common output somewhere up
-        // the DAG. Adding [OpPtrElementPtr]/[OpExtractElement] nodes to upstream user sets
-        // runs the risk of modifying a user set concurrently with its iteration. To sidestep this
-        // problem, instead of directly connecting the [OpPtrElementPtr]/[OpExtractElement]
-        // nodes to the value origin, we first introduce a [ValueProxy] node with
-        // [Rvsdg::proxy_origin_user] and then connect the [OpPtrElementPtr]/[OpExtractElement]
-        // to the output of this [ValueProxy] node instead.
+        // the DAG. Adding [OpElementPtr]/[OpExtractElement] nodes to upstream user sets runs the
+        // risk of modifying a user set concurrently with its iteration. To sidestep this problem,
+        // instead of directly connecting the [OpElementPtr]/[OpExtractElement] nodes to the value
+        // origin, we first introduce a [ValueProxy] node with [Rvsdg::proxy_origin_user] and then
+        // connect the [OpElementPtr]/[OpExtractElement] to the output of this [ValueProxy] node
+        // instead.
         //
-        // The [ValueProxy] and [OpPtrElementPtr]/[OpExtractElement] nodes introduced by this
-        // strategy are in most cases temporary. When later the DAG path that would have arrived at
-        // the other input is traversed, the [ValueProxy] and [OpPtrElementPtr]/
-        // [OpExtractElement] nodes will typically be eliminated. For cases where the input does
-        // not originate from an OpAlloca, [ValueProxy] nodes will have to be cleaned up by a later
-        // pass (in these cases the [OpPtrElementPtr]/[OpExtractElement] nodes typically remain
-        // necessary).
+        // The [ValueProxy] and [OpElementPtr]/[OpExtractElement] nodes introduced by this strategy
+        // are in most cases temporary. When later the DAG path that would have arrived at the other
+        // input is traversed, the [ValueProxy] and [OpElementPtr]/[OpExtractElement] nodes will
+        // typically be eliminated. For cases where the input does not originate from an OpAlloca,
+        // [ValueProxy] nodes will have to be cleaned up by a later pass (in these cases the
+        // [OpElementPtr]/[OpExtractElement] nodes typically remain necessary).
 
         assert!(input < 2, "OpStore only has 2 value inputs");
 
@@ -890,13 +851,13 @@ impl Replacer<'_, '_, '_> {
                 // We iterate in reverse for the same reason as for the array case, see the comment
                 // above.
                 for i in (0..field_count).rev() {
-                    let element_ty = struct_data.fields[i].ty;
+                    let field_ty = struct_data.fields[i].ty;
 
-                    self.add_store_element_nodes(
+                    self.add_store_field_nodes(
                         region,
                         input,
                         i as u32,
-                        element_ty,
+                        field_ty,
                         ptr_input,
                         value_input,
                         state_origin,
@@ -927,10 +888,10 @@ impl Replacer<'_, '_, '_> {
         let element_ptr_input = if provoking_input == 0 {
             split_input[element_index as usize]
         } else {
-            let element_ptr = self.rvsdg.add_op_ptr_element_ptr(
+            let element_ptr = self.rvsdg.add_op_element_ptr(
                 region,
                 ptr_input,
-                [ValueInput::output(TY_U32, index_input, 0)],
+                ValueInput::output(TY_U32, index_input, 0),
             );
 
             ValueInput::output(ptr_ty, element_ptr, 0)
@@ -942,7 +903,7 @@ impl Replacer<'_, '_, '_> {
             let element_value = self.rvsdg.add_op_extract_element(
                 region,
                 value_input,
-                [ValueInput::output(TY_U32, index_input, 0)],
+                ValueInput::output(TY_U32, index_input, 0),
             );
 
             ValueInput::output(element_ty, element_value, 0)
@@ -950,6 +911,41 @@ impl Replacer<'_, '_, '_> {
 
         self.rvsdg
             .add_op_store(region, element_ptr_input, element_value_input, state_origin);
+    }
+
+    fn add_store_field_nodes(
+        &mut self,
+        region: Region,
+        provoking_input: u32,
+        field_index: u32,
+        field_ty: Type,
+        ptr_input: ValueInput,
+        value_input: ValueInput,
+        state_origin: StateOrigin,
+        split_input: &[ValueInput],
+    ) {
+        let ptr_ty = self.rvsdg.ty().register(TypeKind::Ptr(field_ty));
+
+        let field_ptr_input = if provoking_input == 0 {
+            split_input[field_index as usize]
+        } else {
+            let field_ptr = self.rvsdg.add_op_field_ptr(region, ptr_input, field_index);
+
+            ValueInput::output(ptr_ty, field_ptr, 0)
+        };
+
+        let field_value_input = if provoking_input == 1 {
+            split_input[field_index as usize]
+        } else {
+            let field_value = self
+                .rvsdg
+                .add_op_extract_field(region, value_input, field_index);
+
+            ValueInput::output(field_ty, field_value, 0)
+        };
+
+        self.rvsdg
+            .add_op_store(region, field_ptr_input, field_value_input, state_origin);
     }
 
     fn split_switch_input(&mut self, node: Node, input: u32, split_input: &[ValueInput]) {
@@ -1132,10 +1128,10 @@ impl Replacer<'_, '_, '_> {
                     for i in 0..*count {
                         let ptr_ty = ty_reg.register(TypeKind::Ptr(*base));
                         let index = self.rvsdg.add_const_u32(outer_region, i as u32);
-                        let element = self.rvsdg.add_op_ptr_element_ptr(
+                        let element = self.rvsdg.add_op_element_ptr(
                             outer_region,
                             proxy_input,
-                            [ValueInput::output(TY_U32, index, 0)],
+                            ValueInput::output(TY_U32, index, 0),
                         );
 
                         self.rvsdg
@@ -1157,12 +1153,9 @@ impl Replacer<'_, '_, '_> {
                         let element_ty = field.ty;
                         let ptr_ty = ty_reg.register(TypeKind::Ptr(element_ty));
 
-                        let index = self.rvsdg.add_const_u32(outer_region, i as u32);
-                        let element = self.rvsdg.add_op_ptr_element_ptr(
-                            outer_region,
-                            proxy_input,
-                            [ValueInput::output(TY_U32, index, 0)],
-                        );
+                        let element =
+                            self.rvsdg
+                                .add_op_field_ptr(outer_region, proxy_input, i as u32);
 
                         self.rvsdg
                             .add_loop_input(owner, ValueInput::output(ptr_ty, element, 0));
@@ -1190,7 +1183,7 @@ impl Replacer<'_, '_, '_> {
                     let element = self.rvsdg.add_op_extract_element(
                         outer_region,
                         proxy_input,
-                        [ValueInput::output(TY_U32, index, 0)],
+                        ValueInput::output(TY_U32, index, 0),
                     );
 
                     self.rvsdg
@@ -1211,12 +1204,9 @@ impl Replacer<'_, '_, '_> {
                 for (i, field) in struct_data.fields.iter().enumerate() {
                     let element_ty = field.ty;
 
-                    let index = self.rvsdg.add_const_u32(outer_region, i as u32);
-                    let element = self.rvsdg.add_op_extract_element(
-                        outer_region,
-                        proxy_input,
-                        [ValueInput::output(TY_U32, index, 0)],
-                    );
+                    let element =
+                        self.rvsdg
+                            .add_op_extract_field(outer_region, proxy_input, i as u32);
 
                     self.rvsdg
                         .add_loop_input(owner, ValueInput::output(element_ty, element, 0));
@@ -1295,10 +1285,10 @@ impl Replacer<'_, '_, '_> {
                 TypeKind::Array { count, .. } => {
                     for i in 0..*count {
                         let index_node = self.rvsdg.add_const_u32(region, i as u32);
-                        let split_node = self.rvsdg.add_op_ptr_element_ptr(
+                        let split_node = self.rvsdg.add_op_element_ptr(
                             region,
                             original_input,
-                            [ValueInput::output(TY_U32, index_node, 0)],
+                            ValueInput::output(TY_U32, index_node, 0),
                         );
                         let result_index = split_results_start + i as usize;
 
@@ -1314,12 +1304,9 @@ impl Replacer<'_, '_, '_> {
                 }
                 TypeKind::Struct(struct_data) => {
                     for i in 0..struct_data.fields.len() {
-                        let index_node = self.rvsdg.add_const_u32(region, i as u32);
-                        let split_node = self.rvsdg.add_op_ptr_element_ptr(
-                            region,
-                            original_input,
-                            [ValueInput::output(TY_U32, index_node, 0)],
-                        );
+                        let split_node =
+                            self.rvsdg
+                                .add_op_field_ptr(region, original_input, i as u32);
                         let result_index = split_results_start + i as usize;
 
                         self.rvsdg.reconnect_region_result(
@@ -1340,7 +1327,7 @@ impl Replacer<'_, '_, '_> {
                     let split_node = self.rvsdg.add_op_extract_element(
                         region,
                         original_input,
-                        [ValueInput::output(TY_U32, index_node, 0)],
+                        ValueInput::output(TY_U32, index_node, 0),
                     );
                     let result_index = split_results_start + i as usize;
 
@@ -1356,12 +1343,9 @@ impl Replacer<'_, '_, '_> {
             }
             TypeKind::Struct(struct_data) => {
                 for i in 0..struct_data.fields.len() {
-                    let index_node = self.rvsdg.add_const_u32(region, i as u32);
-                    let split_node = self.rvsdg.add_op_extract_element(
-                        region,
-                        original_input,
-                        [ValueInput::output(TY_U32, index_node, 0)],
-                    );
+                    let split_node =
+                        self.rvsdg
+                            .add_op_extract_field(region, original_input, i as u32);
                     let result_index = split_results_start + i;
 
                     self.rvsdg.reconnect_region_result(
@@ -1532,10 +1516,10 @@ mod tests {
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let element_index = rvsdg.add_const_u32(region, 1);
-        let op_ptr_element_ptr = rvsdg.add_op_ptr_element_ptr(
+        let op_ptr_element_ptr = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, op_alloca, 0),
-            [ValueInput::output(TY_U32, element_index, 0)],
+            ValueInput::output(TY_U32, element_index, 0),
         );
         let load = rvsdg.add_op_load(
             region,
@@ -1622,10 +1606,10 @@ mod tests {
         let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
-        let op_ptr_element_ptr = rvsdg.add_op_ptr_element_ptr(
+        let op_ptr_element_ptr = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, op_alloca, 0),
-            [ValueInput::argument(TY_U32, 0)],
+            ValueInput::argument(TY_U32, 0),
         );
         let load = rvsdg.add_op_load(
             region,
@@ -1710,10 +1694,13 @@ mod tests {
             panic!("switch input 0's origin should be the first output of a node")
         };
 
-        let to_predicate_data = rvsdg[to_predicate].expect_op_u32_to_switch_predicate();
+        let to_predicate_data = rvsdg[to_predicate].expect_op_u32_to_branch_selector();
 
         assert_eq!(to_predicate_data.branch_count(), 2);
-        assert_eq!(to_predicate_data.input().origin, ValueOrigin::Argument(0));
+        assert_eq!(
+            to_predicate_data.value_input().origin,
+            ValueOrigin::Argument(0)
+        );
 
         assert_eq!(switch.value_inputs()[1].ty, element_ptr_ty);
 
@@ -1801,7 +1788,7 @@ mod tests {
         let op_extract_element = rvsdg.add_op_extract_element(
             region,
             ValueInput::output(ty, op_load, 0),
-            [ValueInput::output(TY_U32, element_index, 0)],
+            ValueInput::output(TY_U32, element_index, 0),
         );
 
         rvsdg.reconnect_region_result(
@@ -2120,10 +2107,10 @@ mod tests {
 
         let branch_0 = rvsdg.add_switch_branch(switch_node);
         let branch_0_index = rvsdg.add_const_u32(branch_0, 0);
-        let branch_0_op_ptr_element_ptr = rvsdg.add_op_ptr_element_ptr(
+        let branch_0_op_ptr_element_ptr = rvsdg.add_op_element_ptr(
             branch_0,
             ValueInput::argument(ptr_ty, 0),
-            [ValueInput::output(TY_U32, branch_0_index, 0)],
+            ValueInput::output(TY_U32, branch_0_index, 0),
         );
         let branch_0_load = rvsdg.add_op_load(
             branch_0,
@@ -2142,10 +2129,10 @@ mod tests {
 
         let branch_1 = rvsdg.add_switch_branch(switch_node);
         let branch_1_index = rvsdg.add_const_u32(branch_1, 1);
-        let branch_1_op_ptr_element_ptr = rvsdg.add_op_ptr_element_ptr(
+        let branch_1_op_ptr_element_ptr = rvsdg.add_op_element_ptr(
             branch_1,
             ValueInput::argument(ptr_ty, 0),
-            [ValueInput::output(TY_U32, branch_1_index, 0)],
+            ValueInput::output(TY_U32, branch_1_index, 0),
         );
         let branch_1_load = rvsdg.add_op_load(
             branch_1,
@@ -2336,10 +2323,10 @@ mod tests {
         );
 
         let element_index = rvsdg.add_const_u32(loop_region, 0);
-        let op_ptr_element_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let op_ptr_element_ptr_node = rvsdg.add_op_element_ptr(
             loop_region,
             ValueInput::argument(ptr_ty, 2),
-            [ValueInput::output(TY_U32, element_index, 0)],
+            ValueInput::output(TY_U32, element_index, 0),
         );
         let load_node = rvsdg.add_op_load(
             loop_region,

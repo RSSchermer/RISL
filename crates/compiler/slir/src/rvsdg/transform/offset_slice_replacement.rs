@@ -1,6 +1,5 @@
 use rustc_hash::FxHashMap;
 
-use crate::rvsdg::transform::ptr_offset_elaboration::PtrOffsetElaborator;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, visit,
@@ -19,8 +18,8 @@ impl RegionNodesVisitor for NodeCollector<'_, '_> {
         use SimpleNode::*;
 
         match rvsdg[node].kind() {
-            Simple(OpGetPtrOffset(_)) => self.get_offset_queue.push(node),
-            Simple(OpAddPtrOffset(_)) => self.add_offset_queue.push(node),
+            Simple(OpGetSliceOffset(_)) => self.get_offset_queue.push(node),
+            Simple(OpOffsetSlice(_)) => self.add_offset_queue.push(node),
             _ => (),
         }
 
@@ -35,22 +34,22 @@ enum PtrOffset {
 }
 
 pub struct PtrOffsetReplacer {
-    get_offset_queue: Vec<Node>,
-    add_offset_queue: Vec<Node>,
-    ptr_offset_cache: FxHashMap<(Region, ValueOrigin), PtrOffset>,
+    get_slice_offset_queue: Vec<Node>,
+    offset_slice_queue: Vec<Node>,
+    slice_offset_cache: FxHashMap<(Region, ValueOrigin), PtrOffset>,
 }
 
 impl PtrOffsetReplacer {
     pub fn new() -> Self {
         Self {
-            get_offset_queue: vec![],
-            add_offset_queue: vec![],
-            ptr_offset_cache: FxHashMap::default(),
+            get_slice_offset_queue: vec![],
+            offset_slice_queue: vec![],
+            slice_offset_cache: FxHashMap::default(),
         }
     }
 
     pub fn replace_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) {
-        self.ptr_offset_cache.clear();
+        self.slice_offset_cache.clear();
 
         let fn_node = rvsdg
             .get_function_node(function)
@@ -58,30 +57,30 @@ impl PtrOffsetReplacer {
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
         let mut collector = NodeCollector {
-            get_offset_queue: &mut self.get_offset_queue,
-            add_offset_queue: &mut self.add_offset_queue,
+            get_offset_queue: &mut self.get_slice_offset_queue,
+            add_offset_queue: &mut self.offset_slice_queue,
         };
 
         collector.visit_region(rvsdg, body_region);
 
         // First replace all [OpGetPtrOffset] nodes
-        while let Some(node) = self.get_offset_queue.pop() {
-            self.replace_op_get_ptr_offset(rvsdg, node);
+        while let Some(node) = self.get_slice_offset_queue.pop() {
+            self.replace_op_get_slice_offset(rvsdg, node);
         }
 
         // Now that there should no longer be any [OpGetPtrOffset] nodes, "dissolve" all
         // [OpAddPtrOffset] nodes.
-        while let Some(node) = self.add_offset_queue.pop() {
-            self.dissolve_op_add_ptr_offset(rvsdg, node);
+        while let Some(node) = self.offset_slice_queue.pop() {
+            self.dissolve_op_offset_slice(rvsdg, node);
         }
     }
 
-    fn replace_op_get_ptr_offset(&mut self, rvsdg: &mut Rvsdg, node: Node) {
+    fn replace_op_get_slice_offset(&mut self, rvsdg: &mut Rvsdg, node: Node) {
         let region = rvsdg[node].region();
-        let data = rvsdg[node].expect_op_get_ptr_offset();
-        let ptr_origin = data.ptr().origin;
-        let user_count = data.output().users.len();
-        let ptr_offset = self.resolve_ptr_offset(rvsdg, region, ptr_origin);
+        let data = rvsdg[node].expect_op_offset_slice();
+        let ptr_origin = data.ptr_input().origin;
+        let user_count = data.value_output().users.len();
+        let ptr_offset = self.resolve_slice_offset(rvsdg, region, ptr_origin);
         let offset_origin = match ptr_offset {
             PtrOffset::Zero => {
                 let zero = rvsdg.add_const_u32(region, 0);
@@ -95,7 +94,10 @@ impl PtrOffsetReplacer {
         };
 
         for i in (0..user_count).rev() {
-            let user = rvsdg[node].expect_op_get_ptr_offset().output().users[i];
+            let user = rvsdg[node]
+                .expect_op_get_slice_offset()
+                .value_output()
+                .users[i];
 
             rvsdg.reconnect_value_user(region, user, offset_origin);
         }
@@ -103,14 +105,14 @@ impl PtrOffsetReplacer {
         rvsdg.remove_node(node);
     }
 
-    fn dissolve_op_add_ptr_offset(&mut self, rvsdg: &mut Rvsdg, node: Node) {
+    fn dissolve_op_offset_slice(&mut self, rvsdg: &mut Rvsdg, node: Node) {
         let region = rvsdg[node].region();
-        let data = rvsdg[node].expect_op_add_ptr_offset();
-        let ptr_origin = data.slice_ptr().origin;
-        let user_count = data.output().users.len();
+        let data = rvsdg[node].expect_op_offset_slice();
+        let ptr_origin = data.ptr_input().origin;
+        let user_count = data.value_output().users.len();
 
         for i in (0..user_count).rev() {
-            let user = rvsdg[node].expect_op_add_ptr_offset().output().users[i];
+            let user = rvsdg[node].expect_op_offset_slice().value_output().users[i];
 
             rvsdg.reconnect_value_user(region, user, ptr_origin);
         }
@@ -118,18 +120,18 @@ impl PtrOffsetReplacer {
         rvsdg.remove_node(node);
     }
 
-    fn resolve_ptr_offset(
+    fn resolve_slice_offset(
         &mut self,
         rvsdg: &mut Rvsdg,
         region: Region,
         ptr_origin: ValueOrigin,
     ) -> PtrOffset {
-        if let Some(offset) = self.ptr_offset_cache.get(&(region, ptr_origin)) {
+        if let Some(offset) = self.slice_offset_cache.get(&(region, ptr_origin)) {
             *offset
         } else {
             let offset = self.offset_for_origin(rvsdg, region, ptr_origin);
 
-            self.ptr_offset_cache.insert((region, ptr_origin), offset);
+            self.slice_offset_cache.insert((region, ptr_origin), offset);
 
             offset
         }
@@ -175,21 +177,21 @@ impl PtrOffsetReplacer {
         match rvsdg[node].kind() {
             Switch(_) => self.offset_for_switch_output(rvsdg, node, ptr_output),
             Loop(_) => self.offset_for_loop_output(rvsdg, node, ptr_output),
-            Simple(OpAddPtrOffset(_)) => self.offset_for_op_add_ptr_offset(rvsdg, node),
+            Simple(OpOffsetSlice(_)) => self.offset_for_op_offset_slice(rvsdg, node),
             Simple(
-                OpAlloca(_) | OpPtrElementPtr(_) | OpPtrVariantPtr(_) | OpExtractElement(_)
-                | ConstPtr(_) | ConstFallback(_),
+                OpAlloca(_) | OpFieldPtr(_) | OpElementPtr(_) | OpVariantPtr(_) | OpExtractField(_)
+                | OpExtractElement(_) | ConstPtr(_) | ConstFallback(_),
             ) => PtrOffset::Zero,
             _ => panic!("unsupported node kind"),
         }
     }
 
-    fn offset_for_op_add_ptr_offset(&mut self, rvsdg: &mut Rvsdg, node: Node) -> PtrOffset {
+    fn offset_for_op_offset_slice(&mut self, rvsdg: &mut Rvsdg, node: Node) -> PtrOffset {
         let region = rvsdg[node].region();
-        let data = rvsdg[node].expect_op_add_ptr_offset();
-        let ptr_origin = data.slice_ptr().origin;
-        let added_offset_origin = data.offset().origin;
-        let prior_offset = self.resolve_ptr_offset(rvsdg, region, ptr_origin);
+        let data = rvsdg[node].expect_op_offset_slice();
+        let ptr_origin = data.ptr_input().origin;
+        let added_offset_origin = data.offset_input().origin;
+        let prior_offset = self.resolve_slice_offset(rvsdg, region, ptr_origin);
 
         match prior_offset {
             PtrOffset::Zero => PtrOffset::Value(added_offset_origin),
@@ -229,7 +231,7 @@ impl PtrOffsetReplacer {
         for i in 0..branch_count {
             let branch = rvsdg[switch_node].expect_switch().branches()[i];
             let ptr_origin = rvsdg[branch].value_results()[ptr_output as usize].origin;
-            let ptr_offset = self.resolve_ptr_offset(rvsdg, branch, ptr_origin);
+            let ptr_offset = self.resolve_slice_offset(rvsdg, branch, ptr_origin);
 
             let offset_origin = match ptr_offset {
                 PtrOffset::Zero => {
@@ -262,7 +264,7 @@ impl PtrOffsetReplacer {
         let switch_node = rvsdg[branch].owner();
         let outer_region = rvsdg[switch_node].region();
         let ptr_origin = rvsdg[switch_node].value_inputs()[ptr_index as usize].origin;
-        let outer_offset = self.resolve_ptr_offset(rvsdg, outer_region, ptr_origin);
+        let outer_offset = self.resolve_slice_offset(rvsdg, outer_region, ptr_origin);
 
         let inner_offset = match outer_offset {
             PtrOffset::Zero => PtrOffset::Zero,
@@ -276,7 +278,7 @@ impl PtrOffsetReplacer {
         // Make sure we only do this for the first branch we encounter by adding a cache entry for
         // every branch; other branches should short-circuit to using this cached value.
         for branch in rvsdg[switch_node].expect_switch().branches() {
-            self.ptr_offset_cache
+            self.slice_offset_cache
                 .insert((*branch, ValueOrigin::Argument(ptr_argument)), inner_offset);
         }
 
@@ -313,7 +315,7 @@ impl PtrOffsetReplacer {
         let data = rvsdg[loop_node].expect_loop();
         let loop_region = data.loop_region();
         let input_ptr_origin = data.value_inputs()[ptr_input as usize].origin;
-        let input_offset = self.resolve_ptr_offset(rvsdg, outer_region, input_ptr_origin);
+        let input_offset = self.resolve_slice_offset(rvsdg, outer_region, input_ptr_origin);
 
         let input_offset_origin = match input_offset {
             PtrOffset::Zero => {
@@ -339,14 +341,14 @@ impl PtrOffsetReplacer {
         // Add a cache entry for the new argument that we've just created, before resolving a
         // pointer offset for the new result we've created: the new result may resolve to that
         // argument, and we don't want to create another duplicate input.
-        self.ptr_offset_cache.insert(
+        self.slice_offset_cache.insert(
             (loop_region, ValueOrigin::Argument(ptr_input)),
             PtrOffset::Value(ValueOrigin::Argument(offset_input)),
         );
 
         let ptr_result = ptr_input + 1;
         let inner_ptr_origin = rvsdg[loop_region].value_results()[ptr_result as usize].origin;
-        let inner_offset = self.resolve_ptr_offset(rvsdg, loop_region, inner_ptr_origin);
+        let inner_offset = self.resolve_slice_offset(rvsdg, loop_region, inner_ptr_origin);
 
         match inner_offset {
             PtrOffset::Zero => {
@@ -417,7 +419,7 @@ mod tests {
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_node = rvsdg.add_const_u32(region, 2);
-        let add_offset_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_node = rvsdg.add_op_offset_slice(
             region,
             ValueInput::output(array_ptr_ty, array_node, 0),
             ValueInput::output(TY_U32, offset_node, 0),
@@ -431,10 +433,10 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, add_offset_node, 0),
-            [ValueInput::output(TY_U32, add_node, 0)],
+            ValueInput::output(TY_U32, add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
@@ -464,7 +466,7 @@ mod tests {
         );
         assert_eq!(
             rvsdg[ptr_element_ptr_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Output {
@@ -507,13 +509,13 @@ mod tests {
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_0_node = rvsdg.add_const_u32(region, 1);
-        let add_offset_0_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_0_node = rvsdg.add_op_offset_slice(
             region,
             ValueInput::output(array_ptr_ty, array_node, 0),
             ValueInput::output(TY_U32, offset_0_node, 0),
         );
         let offset_1_node = rvsdg.add_const_u32(region, 1);
-        let add_offset_1_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_1_node = rvsdg.add_op_offset_slice(
             region,
             ValueInput::output(array_ptr_ty, add_offset_0_node, 0),
             ValueInput::output(TY_U32, offset_1_node, 0),
@@ -529,10 +531,10 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, add_offset_1_node, 0),
-            [ValueInput::output(TY_U32, index_add_node, 0)],
+            ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
@@ -582,7 +584,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[ptr_element_ptr_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Output {
@@ -629,7 +631,7 @@ mod tests {
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_0_node = rvsdg.add_const_u32(region, 1);
-        let add_offset_0_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_0_node = rvsdg.add_op_offset_slice(
             region,
             ValueInput::output(array_ptr_ty, array_node, 0),
             ValueInput::output(TY_U32, offset_0_node, 0),
@@ -648,7 +650,7 @@ mod tests {
         let branch_0 = rvsdg.add_switch_branch(switch_node);
 
         let offset_1_node = rvsdg.add_const_u32(branch_0, 1);
-        let add_offset_1_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_1_node = rvsdg.add_op_offset_slice(
             branch_0,
             ValueInput::argument(array_ptr_ty, 0),
             ValueInput::output(TY_U32, offset_1_node, 0),
@@ -676,10 +678,10 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, switch_node, 0),
-            [ValueInput::output(TY_U32, index_add_node, 0)],
+            ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
@@ -745,7 +747,7 @@ mod tests {
             }
         );
         assert_eq!(
-            &offset_add_data.output().users,
+            &offset_add_data.value_output().users,
             &thin_set![ValueUser::Result(1)],
             "the offset-add-node's output should connect directly to the branch's second result"
         );
@@ -773,7 +775,7 @@ mod tests {
         );
         assert_eq!(
             rvsdg[ptr_element_ptr_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Output {
@@ -822,7 +824,7 @@ mod tests {
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_0_node = rvsdg.add_const_u32(region, 1);
-        let add_offset_0_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_0_node = rvsdg.add_op_offset_slice(
             region,
             ValueInput::output(array_ptr_ty, array_node, 0),
             ValueInput::output(TY_U32, offset_0_node, 0),
@@ -836,7 +838,7 @@ mod tests {
 
         let reentry_predicate_node = rvsdg.add_const_bool(loop_region, false);
         let offset_1_node = rvsdg.add_const_u32(loop_region, 1);
-        let add_offset_1_node = rvsdg.add_op_add_ptr_offset(
+        let add_offset_1_node = rvsdg.add_op_offset_slice(
             loop_region,
             ValueInput::argument(array_ptr_ty, 0),
             ValueInput::output(TY_U32, offset_1_node, 0),
@@ -868,10 +870,10 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, loop_node, 0),
-            [ValueInput::output(TY_U32, index_add_node, 0)],
+            ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
@@ -937,7 +939,7 @@ mod tests {
             }
         );
         assert_eq!(
-            &offset_add_data.output().users,
+            &offset_add_data.value_output().users,
             &thin_set![ValueUser::Result(2)],
             "the offset-add-node's output should connect directly to the loop region's third result"
         );
@@ -952,7 +954,7 @@ mod tests {
         );
         assert_eq!(
             rvsdg[ptr_element_ptr_node]
-                .expect_op_ptr_element_ptr()
+                .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Output {

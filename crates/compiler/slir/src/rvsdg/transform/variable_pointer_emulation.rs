@@ -79,6 +79,28 @@ impl BranchingNode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Access {
+    Field(u32),
+    StaticElement(u32),
+    DynamicElement(ValueOrigin),
+}
+
+impl Access {
+    pub fn from_element_origin(rvsdg: &Rvsdg, origin: ValueOrigin) -> Self {
+        match origin {
+            ValueOrigin::Argument(_) => Access::DynamicElement(origin),
+            ValueOrigin::Output { producer, .. } => {
+                if let NodeKind::Simple(SimpleNode::ConstU32(n)) = rvsdg[producer].kind() {
+                    Access::StaticElement(n.value())
+                } else {
+                    Access::DynamicElement(origin)
+                }
+            }
+        }
+    }
+}
+
 /// Represents a leaf node in a variable pointer emulation program description.
 ///
 /// A leaf node resolves to a pointer without any further branching.
@@ -89,7 +111,7 @@ struct LeafNode {
 
     /// A complete access chain that will refine the [root_identifier] into the pointer that this
     /// leave emulates.
-    access_chain: Vec<ElementIndex>,
+    access_chain: Vec<Access>,
 }
 
 impl EmulationTreeNode {
@@ -131,7 +153,7 @@ impl EmulationTreeNode {
 
                 if visit_non_ptr_origins {
                     for access in &mut node.access_chain {
-                        if let ElementIndex::Dynamic(origin) = access {
+                        if let Access::DynamicElement(origin) = access {
                             visitor(origin);
                         }
                     }
@@ -278,7 +300,7 @@ impl ChildInputAssigner {
         parent_value_inputs.insert(node.root_pointer);
 
         for access in &node.access_chain {
-            if let &ElementIndex::Dynamic(index_origin) = access {
+            if let &Access::DynamicElement(index_origin) = access {
                 parent_value_inputs.insert(index_origin);
             }
         }
@@ -417,11 +439,12 @@ impl EmulationContext {
             ValueOrigin::Output { producer, output } => match rvsdg[producer].kind() {
                 Switch(_) => self.create_switch_output_info(rvsdg, producer, output),
                 Loop(_) => self.create_loop_output_info(rvsdg, producer, output),
-                Simple(OpPtrElementPtr(_)) => self.create_ptr_element_ptr_info(rvsdg, producer),
+                Simple(OpFieldPtr(_)) => self.create_field_ptr_info(rvsdg, producer),
+                Simple(OpElementPtr(_)) => self.create_element_ptr_info(rvsdg, producer),
                 Simple(OpAlloca(_)) => self.create_alloca_info(rvsdg, producer),
                 Simple(ConstPtr(_)) => self.create_const_ptr_info(rvsdg, producer),
                 Simple(ConstFallback(_)) => self.create_fallback_info(rvsdg, producer),
-                Simple(OpAddPtrOffset(_)) => self.create_add_ptr_offset_info(rvsdg, producer),
+                Simple(OpOffsetSlice(_)) => self.create_add_offset_slice_info(rvsdg, producer),
                 Simple(OpLoad(_)) => panic!(
                     "cannot emulate a pointer for which the access chain \
                 information cannot be tracked through value-flow"
@@ -782,27 +805,47 @@ impl EmulationContext {
         info
     }
 
-    fn create_ptr_element_ptr_info(
+    fn create_field_ptr_info(
         &mut self,
         rvsdg: &mut Rvsdg,
-        op_ptr_element_ptr: Node,
+        op_field_ptr: Node,
     ) -> PointerEmulationInfo {
-        let region = rvsdg[op_ptr_element_ptr].region();
-        let ptr_element_ptr = rvsdg[op_ptr_element_ptr].expect_op_ptr_element_ptr();
-        let pointer_ty = ptr_element_ptr.output().ty;
-        let ptr_origin = ptr_element_ptr.ptr_input().origin;
-        let access_chain = ptr_element_ptr
-            .index_inputs()
-            .iter()
-            .map(|index_input| ElementIndex::from_origin(rvsdg, index_input.origin))
-            .collect::<Vec<_>>();
+        let region = rvsdg[op_field_ptr].region();
+        let field_ptr = rvsdg[op_field_ptr].expect_op_field_ptr();
+        let pointer_ty = field_ptr.value_output().ty;
+        let ptr_origin = field_ptr.ptr_input().origin;
+        let access = Access::Field(field_ptr.field_index());
 
         let mut info = self
             .resolve_pointer_emulation_info(rvsdg, region, ptr_origin)
             .clone();
 
         info.emulation_root.visit_leaves_mut(&mut |leaf| {
-            leaf.access_chain.extend(access_chain.iter().copied());
+            leaf.access_chain.push(access);
+        });
+        info.pointer_ty = pointer_ty;
+
+        info
+    }
+
+    fn create_element_ptr_info(
+        &mut self,
+        rvsdg: &mut Rvsdg,
+        op_element_ptr: Node,
+    ) -> PointerEmulationInfo {
+        let region = rvsdg[op_element_ptr].region();
+        let element_ptr = rvsdg[op_element_ptr].expect_op_element_ptr();
+        let pointer_ty = element_ptr.value_output().ty;
+        let ptr_origin = element_ptr.ptr_input().origin;
+        let index_origin = element_ptr.index_input().origin;
+        let access = Access::from_element_origin(rvsdg, index_origin);
+
+        let mut info = self
+            .resolve_pointer_emulation_info(rvsdg, region, ptr_origin)
+            .clone();
+
+        info.emulation_root.visit_leaves_mut(&mut |leaf| {
+            leaf.access_chain.push(access);
         });
         info.pointer_ty = pointer_ty;
 
@@ -858,14 +901,14 @@ impl EmulationContext {
         }
     }
 
-    fn create_add_ptr_offset_info(
+    fn create_add_offset_slice_info(
         &mut self,
         rvsdg: &mut Rvsdg,
-        op_add_ptr_offset: Node,
+        op_offset_slice: Node,
     ) -> PointerEmulationInfo {
-        let region = rvsdg[op_add_ptr_offset].region();
-        let add_ptr_offset = rvsdg[op_add_ptr_offset].expect_op_add_ptr_offset();
-        let ptr_origin = add_ptr_offset.slice_ptr().origin;
+        let region = rvsdg[op_offset_slice].region();
+        let offset_slice = rvsdg[op_offset_slice].expect_op_offset_slice();
+        let ptr_origin = offset_slice.ptr_input().origin;
 
         self.resolve_pointer_emulation_info(rvsdg, region, ptr_origin)
             .clone()
@@ -1049,29 +1092,44 @@ where
         let ptr_input = if leaf_node.access_chain.is_empty() {
             ptr_input
         } else {
-            // We'll use a single OpPtrElementPtr node to apply the access chain. For static element
-            // indices we'll create new ConstU32 nodes; for dynamic indices we'll resolve a value
-            // input either from the outer region directly (if this is the emulation tree root) or
-            // from the argument through which it has been routed into the parent switch node.
+            let mut ptr_input = ptr_input;
+            let mut last = None;
 
-            let index_input = leaf_node
-                .access_chain
-                .iter()
-                .map(|index| match *index {
-                    ElementIndex::Static(index) => {
-                        let index_node = self.rvsdg.add_const_u32(region, index);
+            for access in &leaf_node.access_chain {
+                let (node, ty) = match access {
+                    Access::Field(field_index) => {
+                        let node = self.rvsdg.add_op_field_ptr(region, ptr_input, *field_index);
+                        let ty = self.rvsdg[node].expect_op_field_ptr().value_output().ty;
 
-                        ValueInput::output(TY_U32, index_node, 0)
+                        (node, ty)
                     }
-                    ElementIndex::Dynamic(origin) => resolve_input(origin, TY_U32),
-                })
-                .collect::<Vec<_>>();
+                    Access::StaticElement(element_index) => {
+                        let index_node = self.rvsdg.add_const_u32(region, *element_index);
+                        let node = self.rvsdg.add_op_element_ptr(
+                            region,
+                            ptr_input,
+                            ValueInput::output(TY_U32, index_node, 0),
+                        );
+                        let ty = self.rvsdg[node].expect_op_element_ptr().value_output().ty;
 
-            let pep_node = self
-                .rvsdg
-                .add_op_ptr_element_ptr(region, ptr_input, index_input);
+                        (node, ty)
+                    }
+                    Access::DynamicElement(origin) => {
+                        let input = resolve_input(*origin, TY_U32);
+                        let node = self.rvsdg.add_op_element_ptr(region, ptr_input, input);
+                        let ty = self.rvsdg[node].expect_op_element_ptr().value_output().ty;
 
-            ValueInput::output(self.pointer_ty, pep_node, 0)
+                        (node, ty)
+                    }
+                };
+
+                ptr_input = ValueInput::output(ty, node, 0);
+                last = Some(node);
+            }
+
+            let last = last.expect("verified that leaf node access chain is non-empty");
+
+            ValueInput::output(self.pointer_ty, last, 0)
         };
 
         if let Some(input_mapping) = input_mapping {
@@ -1577,10 +1635,10 @@ mod tests {
         let array_alloca_node = rvsdg.add_op_alloca(region, array_ty);
         let index_node = rvsdg.add_const_u32(region, 1);
 
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, array_alloca_node, 0),
-            [ValueInput::output(TY_U32, index_node, 0)],
+            ValueInput::output(TY_U32, index_node, 0),
         );
         let ptr_1_node = rvsdg.add_op_alloca(region, TY_U32);
 
@@ -1664,27 +1722,27 @@ mod tests {
         let emulation_0_load_data = rvsdg[emulation_0_load_node].expect_op_load();
 
         let ValueOrigin::Output {
-            producer: emulation_0_pep_node,
+            producer: emulation_0_ep_node,
             output: 0,
         } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
 
-        let emulation_pep_data = rvsdg[emulation_0_pep_node].expect_op_ptr_element_ptr();
+        let emulation_ep_data = rvsdg[emulation_0_ep_node].expect_op_element_ptr();
 
-        assert_eq!(emulation_pep_data.value_inputs().len(), 2);
+        assert_eq!(emulation_ep_data.value_inputs().len(), 2);
         assert_eq!(
-            emulation_pep_data.value_inputs()[0],
-            ValueInput::argument(array_ptr_ty, 0)
+            emulation_ep_data.ptr_input(),
+            &ValueInput::argument(array_ptr_ty, 0)
         );
 
         let ValueOrigin::Output {
             producer: emulation_0_index_node,
             output: 0,
-        } = emulation_pep_data.value_inputs()[1].origin
+        } = emulation_ep_data.index_input().origin
         else {
-            panic!("the second PEP node input should connect to the first output of a node")
+            panic!("the second element-ptr node input should connect to the first output of a node")
         };
 
         let emulation_0_index_data = rvsdg[emulation_0_index_node].expect_const_u32();
@@ -1804,10 +1862,10 @@ mod tests {
 
         let array_alloca_node = rvsdg.add_op_alloca(region, array_ty);
 
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, array_alloca_node, 0),
-            [ValueInput::argument(TY_U32, 1)],
+            ValueInput::argument(TY_U32, 1),
         );
         let ptr_1_node = rvsdg.add_op_alloca(region, TY_U32);
 
@@ -1892,17 +1950,17 @@ mod tests {
         let emulation_0_load_data = rvsdg[emulation_0_load_node].expect_op_load();
 
         let ValueOrigin::Output {
-            producer: emulation_0_pep_node,
+            producer: emulation_0_ep_node,
             output: 0,
         } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
 
-        let emulation_pep_data = rvsdg[emulation_0_pep_node].expect_op_ptr_element_ptr();
+        let emulation_ep_data = rvsdg[emulation_0_ep_node].expect_op_element_ptr();
 
         assert_eq!(
-            emulation_pep_data.value_inputs(),
+            emulation_ep_data.value_inputs(),
             &[
                 ValueInput::argument(array_ptr_ty, 0),
                 ValueInput::argument(TY_U32, 1),
@@ -2053,10 +2111,10 @@ mod tests {
         let array_alloca_node = rvsdg.add_op_alloca(region, array_of_array_ty);
         let index_node = rvsdg.add_const_u32(region, 1);
 
-        let ptr_0_node = rvsdg.add_op_ptr_element_ptr(
+        let ptr_0_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_of_array_ptr_ty, array_alloca_node, 0),
-            [ValueInput::output(TY_U32, index_node, 0)],
+            ValueInput::output(TY_U32, index_node, 0),
         );
         let ptr_1_node = rvsdg.add_op_alloca(region, TY_U32);
 
@@ -2074,10 +2132,10 @@ mod tests {
         let branch_0 = rvsdg.add_switch_branch(switch_node);
 
         let branch_0_index_node = rvsdg.add_const_u32(branch_0, 0);
-        let branch_0_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let branch_0_ptr_node = rvsdg.add_op_element_ptr(
             branch_0,
             ValueInput::argument(array_ptr_ty, 0),
-            [ValueInput::output(TY_U32, branch_0_index_node, 0)],
+            ValueInput::output(TY_U32, branch_0_index_node, 0),
         );
 
         rvsdg.reconnect_region_result(
@@ -2152,44 +2210,56 @@ mod tests {
         let emulation_0_load_data = rvsdg[emulation_0_load_node].expect_op_load();
 
         let ValueOrigin::Output {
-            producer: emulation_0_pep_node,
+            producer: emulation_0_ep1_node,
             output: 0,
         } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
 
-        let emulation_pep_data = rvsdg[emulation_0_pep_node].expect_op_ptr_element_ptr();
-
-        assert_eq!(emulation_pep_data.value_inputs().len(), 3);
-        assert_eq!(
-            emulation_pep_data.value_inputs()[0],
-            ValueInput::argument(array_of_array_ptr_ty, 0)
-        );
-
-        let ValueOrigin::Output {
-            producer: emulation_0_index_0_node,
-            output: 0,
-        } = emulation_pep_data.value_inputs()[1].origin
-        else {
-            panic!("the second PEP node input should connect to the first output of a node")
-        };
-
-        let emulation_0_index_0_data = rvsdg[emulation_0_index_0_node].expect_const_u32();
-
-        assert_eq!(emulation_0_index_0_data.value(), 1);
+        let emulation_ep1_data = rvsdg[emulation_0_ep1_node].expect_op_element_ptr();
 
         let ValueOrigin::Output {
             producer: emulation_0_index_1_node,
             output: 0,
-        } = emulation_pep_data.value_inputs()[2].origin
+        } = emulation_ep1_data.index_input().origin
         else {
-            panic!("the second PEP node input should connect to the first output of a node")
+            panic!("the third element-ptr node input should connect to the first output of a node")
         };
 
         let emulation_0_index_1_data = rvsdg[emulation_0_index_1_node].expect_const_u32();
 
         assert_eq!(emulation_0_index_1_data.value(), 0);
+
+        let ValueOrigin::Output {
+            producer: emulation_0_ep0_node,
+            output: 0,
+        } = emulation_ep1_data.index_input().origin
+        else {
+            panic!(
+                "the second element-pointer node input should connect to the first output of a \
+                node"
+            )
+        };
+
+        let emulation_0_ep0_data = rvsdg[emulation_0_ep0_node].expect_op_element_ptr();
+
+        assert_eq!(
+            emulation_0_ep0_data.ptr_input(),
+            &ValueInput::argument(array_of_array_ptr_ty, 0)
+        );
+
+        let ValueOrigin::Output {
+            producer: emulation_0_index_0_node,
+            output: 0,
+        } = emulation_0_ep0_data.index_input().origin
+        else {
+            panic!("the second element-ptr node input should connect to the first output of a node")
+        };
+
+        let emulation_0_index_0_data = rvsdg[emulation_0_index_0_node].expect_const_u32();
+
+        assert_eq!(emulation_0_index_0_data.value(), 1);
 
         let emulation_branch_1 = emulation_switch_data.branches()[1];
 
@@ -3111,20 +3181,22 @@ mod tests {
             ValueInput::output(TY_U32, branch_0_const_node, 0),
         );
 
-        let branch_0_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let branch_0_ptr_0_node = rvsdg.add_op_element_ptr(
             branch_0,
             ValueInput::argument(array_of_array_ptr_ty, 0),
-            [
-                ValueInput::output(TY_U32, branch_0_index_0, 0),
-                ValueInput::output(TY_U32, branch_0_index_1, 0),
-            ],
+            ValueInput::output(TY_U32, branch_0_index_0, 0),
+        );
+        let branch_0_ptr_1_node = rvsdg.add_op_element_ptr(
+            branch_0,
+            ValueInput::output(array_ptr_ty, branch_0_ptr_0_node, 0),
+            ValueInput::output(TY_U32, branch_0_index_1, 0),
         );
 
         rvsdg.reconnect_region_result(
             branch_0,
             0,
             ValueOrigin::Output {
-                producer: branch_0_ptr_node,
+                producer: branch_0_ptr_1_node,
                 output: 0,
             },
         );
@@ -3143,20 +3215,22 @@ mod tests {
         );
         let branch_1_index_1 = rvsdg.add_const_u32(branch_1, 0);
 
-        let branch_1_ptr_node = rvsdg.add_op_ptr_element_ptr(
+        let branch_1_ptr_0_node = rvsdg.add_op_element_ptr(
             branch_1,
             ValueInput::argument(array_of_array_ptr_ty, 0),
-            [
-                ValueInput::output(TY_U32, branch_1_index_0, 0),
-                ValueInput::output(TY_U32, branch_1_index_1, 0),
-            ],
+            ValueInput::output(TY_U32, branch_1_index_0, 0),
+        );
+        let branch_1_ptr_1_node = rvsdg.add_op_element_ptr(
+            branch_1,
+            ValueInput::output(array_ptr_ty, branch_1_ptr_0_node, 0),
+            ValueInput::output(TY_U32, branch_1_index_1, 0),
         );
 
         rvsdg.reconnect_region_result(
             branch_1,
             0,
             ValueOrigin::Output {
-                producer: branch_1_ptr_node,
+                producer: branch_1_ptr_1_node,
                 output: 0,
             },
         );
@@ -3221,23 +3295,40 @@ mod tests {
         let emulation_0_load_data = rvsdg[emulation_0_load_node].expect_op_load();
 
         let ValueOrigin::Output {
-            producer: emulation_0_pep_node,
+            producer: emulation_0_ep_1_node,
             output: 0,
         } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
 
-        let emulation_0_pep_data = rvsdg[emulation_0_pep_node].expect_op_ptr_element_ptr();
+        let emulation_0_ep1_data = rvsdg[emulation_0_ep_1_node].expect_op_element_ptr();
 
-        assert_eq!(emulation_0_pep_data.value_inputs().len(), 3);
         assert_eq!(
-            emulation_0_pep_data.value_inputs(),
-            &[
-                ValueInput::argument(array_of_array_ptr_ty, 0),
-                ValueInput::argument(TY_U32, 1),
-                ValueInput::argument(TY_U32, 2),
-            ]
+            emulation_0_ep1_data.index_input(),
+            &ValueInput::argument(TY_U32, 2)
+        );
+
+        let ValueOrigin::Output {
+            producer: emulation_0_ep_0_node,
+            output: 0,
+        } = emulation_0_ep1_data.index_input().origin
+        else {
+            panic!(
+                "the second element-ptr node in branch `0` should connect to the first output of a \
+                node"
+            )
+        };
+
+        let emulation_0_ep0_data = rvsdg[emulation_0_ep_0_node].expect_op_element_ptr();
+
+        assert_eq!(
+            emulation_0_ep0_data.ptr_input(),
+            &ValueInput::argument(array_of_array_ptr_ty, 0)
+        );
+        assert_eq!(
+            emulation_0_ep0_data.index_input(),
+            &ValueInput::argument(TY_U32, 1)
         );
 
         let emulation_branch_1 = emulation_switch_data.branches()[1];
@@ -3253,36 +3344,51 @@ mod tests {
         let emulation_1_load_data = rvsdg[emulation_1_load_node].expect_op_load();
 
         let ValueOrigin::Output {
-            producer: emulation_1_pep_node,
+            producer: emulation_1_ep1_node,
             output: 0,
-        } = emulation_1_load_data.value_inputs()[0].origin
+        } = emulation_1_load_data.ptr_input().origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
 
-        let emulation_1_pep_data = rvsdg[emulation_1_pep_node].expect_op_ptr_element_ptr();
-
-        assert_eq!(emulation_1_pep_data.value_inputs().len(), 3);
-        assert_eq!(
-            emulation_1_pep_data.value_inputs()[0],
-            ValueInput::argument(array_of_array_ptr_ty, 0)
-        );
-        assert_eq!(
-            emulation_1_pep_data.value_inputs()[1],
-            ValueInput::argument(TY_U32, 1)
-        );
+        let emulation_1_ep1_data = rvsdg[emulation_1_ep1_node].expect_op_element_ptr();
 
         let ValueOrigin::Output {
             producer: emulation_1_index_node,
             output: 0,
-        } = emulation_1_pep_data.value_inputs()[2].origin
+        } = emulation_1_ep1_data.index_input().origin
         else {
-            panic!("the third PEP node input should connect to the first output of a node")
+            panic!(
+                "the index-input of the second element-ptr node in branch `1` should connect to \
+            the first output of a node"
+            )
         };
 
         let emulation_1_index_data = rvsdg[emulation_1_index_node].expect_const_u32();
 
         assert_eq!(emulation_1_index_data.value(), 0);
+
+        let ValueOrigin::Output {
+            producer: emulation_1_ep0_data,
+            output: 0,
+        } = emulation_1_ep1_data.ptr_input().origin
+        else {
+            panic!(
+                "the ptr-input of the second element-ptr node in branch `1` should connect to \
+            the first output of a node"
+            )
+        };
+
+        let emulation_1_ep0_data = rvsdg[emulation_1_ep0_data].expect_op_element_ptr();
+
+        assert_eq!(
+            emulation_1_ep0_data.ptr_input(),
+            &ValueInput::argument(array_of_array_ptr_ty, 0)
+        );
+        assert_eq!(
+            emulation_1_ep0_data.index_input(),
+            &ValueInput::argument(TY_U32, 1)
+        );
 
         assert_eq!(
             &rvsdg[array_alloca_node]

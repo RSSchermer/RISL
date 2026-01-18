@@ -4,11 +4,11 @@ pub mod enum_replacement;
 pub mod function_inlining;
 pub mod memory_promotion_and_legalization;
 pub mod memory_transform;
+pub mod offset_slice_elaboration;
+pub mod offset_slice_replacement;
 pub mod pred_to_case_extraction;
 pub mod pred_to_case_to_pred_merging;
 pub mod proxy_node_elimination;
-pub mod ptr_offset_elaboration;
-pub mod ptr_offset_replacement;
 pub mod region_replication;
 pub mod scalar_replacement;
 pub mod store_coalescing;
@@ -21,9 +21,9 @@ use crate::rvsdg::Rvsdg;
 
 pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
-    ptr_offset_elaboration::transform_entry_points(module, rvsdg);
+    offset_slice_elaboration::transform_entry_points(module, rvsdg);
     memory_transform::transform_entry_points(module, rvsdg);
-    ptr_offset_replacement::transform_entry_points(module, rvsdg);
+    offset_slice_replacement::transform_entry_points(module, rvsdg);
     pred_to_case_extraction::transform_entry_points(module, rvsdg);
     pred_to_case_to_pred_merging::transform_entry_points(module, rvsdg);
     switch_arg_reduction::transform_entry_points(module, rvsdg);

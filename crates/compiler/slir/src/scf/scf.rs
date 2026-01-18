@@ -6,13 +6,15 @@ use indexmap::{IndexMap, IndexSet};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use slotmap::{Key, SlotMap};
+use smallvec::{SmallVec, smallvec};
 
 use crate::builtin_function::BuiltinFunction;
+use crate::intrinsic::Intrinsic;
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{
     BinaryOperator, Constant, ConstantRegistry, Function, Module, StorageBinding,
     StorageBindingRegistry, UnaryOperator, UniformBinding, UniformBindingRegistry,
-    WorkgroupBinding, WorkgroupBindingRegistry, ty,
+    WorkgroupBinding, WorkgroupBindingRegistry, intrinsic, ty,
 };
 
 slotmap::new_key_type! {
@@ -99,180 +101,149 @@ impl LocalBindingKind {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Expression {
-    ty: Type,
-    kind: ExpressionKind,
+pub struct IntrinsicOp<T> {
+    intrinsic: T,
+    arguments: SmallVec<[LocalBinding; 2]>,
 }
 
-impl Expression {
-    pub fn ty(&self) -> Type {
-        self.ty
-    }
-
-    pub fn kind(&self) -> &ExpressionKind {
-        &self.kind
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpUnary {
-    operator: UnaryOperator,
-    operand: LocalBinding,
-}
-
-impl OpUnary {
-    pub fn operator(&self) -> UnaryOperator {
-        self.operator
-    }
-
-    pub fn operand(&self) -> LocalBinding {
-        self.operand
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpBinary {
-    operator: BinaryOperator,
-    lhs: LocalBinding,
-    rhs: LocalBinding,
-}
-
-impl OpBinary {
-    pub fn operator(&self) -> BinaryOperator {
-        self.operator
-    }
-
-    pub fn lhs(&self) -> LocalBinding {
-        self.lhs
-    }
-
-    pub fn rhs(&self) -> LocalBinding {
-        self.rhs
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpVector {
-    vector_ty: ty::Vector,
-    elements: Vec<LocalBinding>,
-}
-
-impl OpVector {
-    pub fn vector_ty(&self) -> &ty::Vector {
-        &self.vector_ty
-    }
-
-    pub fn elements(&self) -> &[LocalBinding] {
-        &self.elements
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpMatrix {
-    matrix_ty: ty::Matrix,
-    columns: Vec<LocalBinding>,
-}
-
-impl OpMatrix {
-    pub fn matrix_ty(&self) -> &ty::Matrix {
-        &self.matrix_ty
-    }
-
-    pub fn columns(&self) -> &[LocalBinding] {
-        &self.columns
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpConvertToU32 {
-    value: LocalBinding,
-}
-
-impl OpConvertToU32 {
-    pub fn value(&self) -> LocalBinding {
-        self.value
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpConvertToI32 {
-    value: LocalBinding,
-}
-
-impl OpConvertToI32 {
-    pub fn value(&self) -> LocalBinding {
-        self.value
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpConvertToF32 {
-    value: LocalBinding,
-}
-
-impl OpConvertToF32 {
-    pub fn value(&self) -> LocalBinding {
-        self.value
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpConvertToBool {
-    value: LocalBinding,
-}
-
-impl OpConvertToBool {
-    pub fn value(&self) -> LocalBinding {
-        self.value
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpPtrElementPtr {
-    pointer: LocalBinding,
-    indices: Vec<LocalBinding>,
-}
-
-impl OpPtrElementPtr {
-    pub fn pointer(&self) -> LocalBinding {
-        self.pointer
-    }
-
-    pub fn indices(&self) -> &[LocalBinding] {
-        &self.indices
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpExtractElement {
-    value: LocalBinding,
-    indices: Vec<LocalBinding>,
-}
-
-impl OpExtractElement {
-    pub fn value(&self) -> LocalBinding {
-        self.value
-    }
-
-    pub fn indices(&self) -> &[LocalBinding] {
-        &self.indices
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct OpCallBuiltin {
-    callee: BuiltinFunction,
-    arguments: Vec<LocalBinding>,
-}
-
-impl OpCallBuiltin {
-    pub fn callee(&self) -> &BuiltinFunction {
-        &self.callee
+impl<T> IntrinsicOp<T> {
+    pub fn intrinsic(&self) -> &T {
+        &self.intrinsic
     }
 
     pub fn arguments(&self) -> &[LocalBinding] {
         &self.arguments
     }
+}
+
+macro_rules! gen_intrinsic_arg_getter {
+    ($name:ident, $index:literal) => {
+        pub fn $name(&self) -> LocalBinding {
+            self.arguments[$index]
+        }
+    };
+}
+
+pub type OpUnary = IntrinsicOp<intrinsic::OpUnary>;
+
+impl OpUnary {
+    pub fn operator(&self) -> UnaryOperator {
+        self.intrinsic.operator
+    }
+
+    gen_intrinsic_arg_getter!(operand, 0);
+}
+
+pub type OpBinary = IntrinsicOp<intrinsic::OpBinary>;
+
+impl OpBinary {
+    pub fn operator(&self) -> BinaryOperator {
+        self.intrinsic.operator
+    }
+
+    gen_intrinsic_arg_getter!(lhs, 0);
+    gen_intrinsic_arg_getter!(rhs, 1);
+}
+
+pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
+
+impl OpVector {
+    pub fn vector_ty(&self) -> &ty::Vector {
+        &self.intrinsic.ty
+    }
+
+    pub fn elements(&self) -> &[LocalBinding] {
+        &self.arguments
+    }
+}
+
+pub type OpMatrix = IntrinsicOp<intrinsic::OpMatrix>;
+
+impl OpMatrix {
+    pub fn matrix_ty(&self) -> &ty::Matrix {
+        &self.intrinsic.ty
+    }
+
+    pub fn columns(&self) -> &[LocalBinding] {
+        &self.arguments
+    }
+}
+
+pub type OpConvertToU32 = IntrinsicOp<intrinsic::OpConvertToU32>;
+
+impl OpConvertToU32 {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpConvertToI32 = IntrinsicOp<intrinsic::OpConvertToI32>;
+
+impl OpConvertToI32 {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpConvertToF32 = IntrinsicOp<intrinsic::OpConvertToF32>;
+
+impl OpConvertToF32 {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpConvertToBool = IntrinsicOp<intrinsic::OpConvertToBool>;
+
+impl OpConvertToBool {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpLoad = IntrinsicOp<intrinsic::OpLoad>;
+
+impl OpLoad {
+    gen_intrinsic_arg_getter!(ptr, 0);
+}
+
+pub type OpStore = IntrinsicOp<intrinsic::OpStore>;
+
+impl OpStore {
+    gen_intrinsic_arg_getter!(ptr, 0);
+    gen_intrinsic_arg_getter!(value, 1);
+}
+
+pub type OpFieldPtr = IntrinsicOp<intrinsic::OpFieldPtr>;
+
+impl OpFieldPtr {
+    pub fn field_index(&self) -> u32 {
+        self.intrinsic.field_index
+    }
+
+    gen_intrinsic_arg_getter!(ptr, 0);
+}
+
+pub type OpElementPtr = IntrinsicOp<intrinsic::OpElementPtr>;
+
+impl OpElementPtr {
+    gen_intrinsic_arg_getter!(ptr, 0);
+    gen_intrinsic_arg_getter!(index, 1);
+}
+
+pub type OpExtractField = IntrinsicOp<intrinsic::OpExtractField>;
+
+impl OpExtractField {
+    pub fn field_index(&self) -> u32 {
+        self.intrinsic.field_index
+    }
+
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpExtractElement = IntrinsicOp<intrinsic::OpExtractElement>;
+
+impl OpExtractElement {
+    gen_intrinsic_arg_getter!(value, 0);
+    gen_intrinsic_arg_getter!(index, 1);
+}
+
+pub type OpArrayLength = IntrinsicOp<intrinsic::OpArrayLength>;
+
+impl OpArrayLength {
+    gen_intrinsic_arg_getter!(ptr, 0);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
@@ -299,19 +270,67 @@ pub enum ExpressionKind {
     OpConvertToI32(OpConvertToI32),
     OpConvertToF32(OpConvertToF32),
     OpConvertToBool(OpConvertToBool),
-    OpPtrElementPtr(OpPtrElementPtr),
+    OpFieldPtr(OpFieldPtr),
+    OpElementPtr(OpElementPtr),
+    OpExtractField(OpExtractField),
     OpExtractElement(OpExtractElement),
-    OpLoad(LocalBinding),
-    OpCallBuiltin(OpCallBuiltin),
+    OpLoad(OpLoad),
+    OpArrayLength(OpArrayLength),
+}
+
+macro_rules! gen_expression_kind_from {
+    ($($kind:ident : $kind_ty:ident,)*) => {
+        $(
+            impl From<$kind_ty> for ExpressionKind {
+                fn from(value: $kind_ty) -> Self {
+                    Self::$kind(value)
+                }
+            }
+        )*
+    }
+}
+
+gen_expression_kind_from! {
+    ConstU32: u32,
+    ConstI32: i32,
+    ConstF32: f32,
+    ConstBool: bool,
+    GlobalPtr: GlobalPtr,
+    OpUnary: OpUnary,
+    OpBinary: OpBinary,
+    OpVector: OpVector,
+    OpMatrix: OpMatrix,
+    OpConvertToU32: OpConvertToU32,
+    OpConvertToI32: OpConvertToI32,
+    OpConvertToF32: OpConvertToF32,
+    OpConvertToBool: OpConvertToBool,
+    OpFieldPtr: OpFieldPtr,
+    OpElementPtr: OpElementPtr,
+    OpExtractField: OpExtractField,
+    OpExtractElement: OpExtractElement,
+    OpLoad: OpLoad,
+    OpArrayLength: OpArrayLength,
+}
+
+macro_rules! gen_expression_kind_is_and_expect {
+    ($($name:ident $is_name:ident $expect_name:ident $label:literal,)*) => {
+        $(
+            pub fn $is_name(&self) -> bool {
+                matches!(self, ExpressionKind::$name(_))
+            }
+
+            pub fn $expect_name(&self) -> &$name {
+                if let ExpressionKind::$name(expr) = self {
+                    expr
+                } else {
+                    panic!("expected a(n) {} expression", $label);
+                }
+            }
+        )*
+    }
 }
 
 impl ExpressionKind {
-    pub fn expect_fallback_value(&self) {
-        if !matches!(self, ExpressionKind::FallbackValue) {
-            panic!("expected a fallback-value expression");
-        }
-    }
-
     pub fn is_const_u32(&self) -> bool {
         matches!(self, ExpressionKind::ConstU32(_))
     }
@@ -324,12 +343,20 @@ impl ExpressionKind {
         }
     }
 
+    pub fn is_const_i32(&self) -> bool {
+        matches!(self, ExpressionKind::ConstI32(_))
+    }
+
     pub fn expect_const_i32(&self) -> i32 {
         if let ExpressionKind::ConstI32(value) = self {
             *value
         } else {
             panic!("expected a constant i32 expression");
         }
+    }
+
+    pub fn is_const_f32(&self) -> bool {
+        matches!(self, ExpressionKind::ConstF32(_))
     }
 
     pub fn expect_const_f32(&self) -> f32 {
@@ -340,6 +367,10 @@ impl ExpressionKind {
         }
     }
 
+    pub fn is_const_bool(&self) -> bool {
+        matches!(self, ExpressionKind::ConstBool(_))
+    }
+
     pub fn expect_const_bool(&self) -> bool {
         if let ExpressionKind::ConstBool(value) = self {
             *value
@@ -348,108 +379,38 @@ impl ExpressionKind {
         }
     }
 
-    pub fn expect_global_ptr(&self) -> &GlobalPtr {
-        if let ExpressionKind::GlobalPtr(expr) = self {
-            expr
-        } else {
-            panic!("expected a global-pointer expression");
-        }
+    gen_expression_kind_is_and_expect! {
+        GlobalPtr is_global_ptr expect_global_ptr "global-pointer",
+        OpUnary is_op_unary expect_op_unary "unary operation",
+        OpBinary is_op_binary expect_op_binary "binary operation",
+        OpVector is_op_vector expect_op_vector "vector operation",
+        OpMatrix is_op_matrix expect_op_matrix "matrix operation",
+        OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",
+        OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32 operation",
+        OpConvertToF32 is_op_convert_to_f32 expect_op_convert_to_f32 "convert-to-f32 operation",
+        OpConvertToBool is_op_convert_to_bool expect_op_convert_to_bool "convert-to-bool operation",
+        OpFieldPtr is_op_field_ptr expect_op_field_ptr "field-pointer operation",
+        OpElementPtr is_op_element_ptr expect_op_element_ptr "element-pointer operation",
+        OpExtractField is_op_extract_field expect_op_extract_field "extract-field operation",
+        OpExtractElement is_op_extract_element expect_op_extract_element "extract-element operation",
+        OpLoad is_op_load expect_op_load "load operation",
+        OpArrayLength is_op_array_length expect_op_array_length "array-length operation",
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Expression {
+    ty: Type,
+    kind: ExpressionKind,
+}
+
+impl Expression {
+    pub fn ty(&self) -> Type {
+        self.ty
     }
 
-    pub fn expect_op_unary(&self) -> &OpUnary {
-        if let ExpressionKind::OpUnary(op) = self {
-            op
-        } else {
-            panic!("expected an unary operation expression");
-        }
-    }
-
-    pub fn expect_op_binary(&self) -> &OpBinary {
-        if let ExpressionKind::OpBinary(op) = self {
-            op
-        } else {
-            panic!("expected a binary operation expression");
-        }
-    }
-
-    pub fn expect_op_vector(&self) -> &OpVector {
-        if let ExpressionKind::OpVector(op) = self {
-            op
-        } else {
-            panic!("expected a vector operation expression");
-        }
-    }
-
-    pub fn expect_op_matrix(&self) -> &OpMatrix {
-        if let ExpressionKind::OpMatrix(op) = self {
-            op
-        } else {
-            panic!("expected a matrix operation expression");
-        }
-    }
-
-    pub fn expect_op_convert_to_u32(&self) -> &OpConvertToU32 {
-        if let ExpressionKind::OpConvertToU32(op) = self {
-            op
-        } else {
-            panic!("expected an convert-to-u32 operation expression");
-        }
-    }
-
-    pub fn expect_op_convert_to_i32(&self) -> &OpConvertToI32 {
-        if let ExpressionKind::OpConvertToI32(op) = self {
-            op
-        } else {
-            panic!("expected an convert-to-i32 operation expression");
-        }
-    }
-
-    pub fn expect_op_convert_to_f32(&self) -> &OpConvertToF32 {
-        if let ExpressionKind::OpConvertToF32(op) = self {
-            op
-        } else {
-            panic!("expected an convert-to-f32 operation expression");
-        }
-    }
-
-    pub fn expect_op_convert_to_bool(&self) -> &OpConvertToBool {
-        if let ExpressionKind::OpConvertToBool(op) = self {
-            op
-        } else {
-            panic!("expected an convert-to-bool operation expression");
-        }
-    }
-
-    pub fn expect_op_ptr_element_ptr(&self) -> &OpPtrElementPtr {
-        if let ExpressionKind::OpPtrElementPtr(op) = self {
-            op
-        } else {
-            panic!("expected a pointer-element-pointer operation expression");
-        }
-    }
-
-    pub fn expect_op_extract_element(&self) -> &OpExtractElement {
-        if let ExpressionKind::OpExtractElement(op) = self {
-            op
-        } else {
-            panic!("expected an extract-element operation expression");
-        }
-    }
-
-    pub fn expect_op_load(&self) -> LocalBinding {
-        if let ExpressionKind::OpLoad(op) = self {
-            *op
-        } else {
-            panic!("expected a load operation expression");
-        }
-    }
-
-    pub fn expect_op_call_builtin(&self) -> &OpCallBuiltin {
-        if let ExpressionKind::OpCallBuiltin(op) = self {
-            op
-        } else {
-            panic!("expected a call-builtin operation expression");
-        }
+    pub fn kind(&self) -> &ExpressionKind {
+        &self.kind
     }
 }
 
@@ -704,22 +665,6 @@ impl Alloca {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Store {
-    pointer: LocalBinding,
-    value: LocalBinding,
-}
-
-impl Store {
-    pub fn pointer(&self) -> LocalBinding {
-        self.pointer
-    }
-
-    pub fn value(&self) -> LocalBinding {
-        self.value
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct StatementData {
     block: Block,
     kind: StatementKind,
@@ -742,8 +687,7 @@ impl StatementData {
             pub fn expect_return(&self) -> &Return;
             pub fn expect_expr_binding(&self) -> &ExprBinding;
             pub fn expect_alloca(&self) -> &Alloca;
-            pub fn expect_store(&self) -> &Store;
-            pub fn expect_call_builtin(&self) -> &OpCallBuiltin;
+            pub fn expect_op_store(&self) -> &OpStore;
         }
     }
 }
@@ -756,9 +700,22 @@ pub enum StatementKind {
     Return(Return),
     ExprBinding(ExprBinding),
     Alloca(Alloca),
-    Store(Store),
-    CallBuiltin(OpCallBuiltin),
+    OpStore(OpStore),
 }
+
+macro_rules! gen_statement_kind_from_kind {
+    ($($kind:ident),*) => {
+        $(
+            impl From<$kind> for StatementKind {
+                fn from(value: $kind) -> Self {
+                    StatementKind::$kind(value)
+                }
+            }
+        )*
+    };
+}
+
+gen_statement_kind_from_kind!(If, Switch, Loop, Return, ExprBinding, Alloca, OpStore);
 
 impl StatementKind {
     pub fn expect_if(&self) -> &If {
@@ -833,19 +790,11 @@ impl StatementKind {
         }
     }
 
-    pub fn expect_store(&self) -> &Store {
-        if let StatementKind::Store(stmt) = self {
+    pub fn expect_op_store(&self) -> &OpStore {
+        if let StatementKind::OpStore(stmt) = self {
             stmt
         } else {
             panic!("expected a store statement");
-        }
-    }
-
-    pub fn expect_call_builtin(&self) -> &OpCallBuiltin {
-        if let StatementKind::CallBuiltin(stmt) = self {
-            stmt
-        } else {
-            panic!("expected a call-builtin statement");
         }
     }
 }
@@ -1271,14 +1220,26 @@ impl Scf {
         (statement, binding)
     }
 
-    pub fn add_bind_op_unary(
+    pub fn add_bind_intrinsic_op<T>(
         &mut self,
         block: Block,
         position: BlockPosition,
-        operator: UnaryOperator,
-        operand: LocalBinding,
-    ) -> (Statement, LocalBinding) {
-        let ty = self.local_bindings[operand].ty();
+        intrinsic: T,
+        arguments: impl IntoIterator<Item = LocalBinding>,
+    ) -> (Statement, LocalBinding)
+    where
+        T: Intrinsic,
+        ExpressionKind: From<IntrinsicOp<T>>,
+    {
+        let arguments: SmallVec<[LocalBinding; 2]> = arguments.into_iter().collect();
+
+        let ty = intrinsic
+            .process_args(
+                self.ty(),
+                arguments.iter().map(|a| self.local_bindings[*a].ty()),
+            )
+            .unwrap()
+            .expect("bindable intrinsics should have a return value");
 
         let binding = self.local_bindings.insert(LocalBindingData {
             ty,
@@ -1292,7 +1253,11 @@ impl Scf {
                 binding,
                 expression: Expression {
                     ty,
-                    kind: ExpressionKind::OpUnary(OpUnary { operator, operand }),
+                    kind: IntrinsicOp {
+                        intrinsic,
+                        arguments,
+                    }
+                    .into(),
                 },
             }),
         });
@@ -1303,6 +1268,16 @@ impl Scf {
         self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
 
         (statement, binding)
+    }
+
+    pub fn add_bind_op_unary(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        operator: UnaryOperator,
+        operand: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpUnary { operator }, [operand])
     }
 
     pub fn add_bind_op_binary(
@@ -1313,33 +1288,12 @@ impl Scf {
         lhs: LocalBinding,
         rhs: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let lhs_ty = self.local_bindings[lhs].ty();
-        let rhs_ty = self.local_bindings[rhs].ty();
-        let ty = self.ty().check_binary_op(operator, lhs_ty, rhs_ty).unwrap();
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
+        self.add_bind_intrinsic_op(
             block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpBinary(OpBinary { operator, lhs, rhs }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+            position,
+            intrinsic::OpBinary { operator },
+            [lhs, rhs],
+        )
     }
 
     pub fn add_bind_op_vector(
@@ -1349,77 +1303,12 @@ impl Scf {
         vector_ty: ty::Vector,
         elements: impl IntoIterator<Item = LocalBinding>,
     ) -> (Statement, LocalBinding) {
-        let size = vector_ty.size.to_usize();
-
-        let mut collected_elements = Vec::with_capacity(size);
-        let mut iter = elements.into_iter();
-
-        for i in 0..size {
-            let Some(binding) = iter.next() else {
-                panic!(
-                    "expected at least {size} elements for a vector of type `{vector_ty}` (found \
-                    only {i})"
-                );
-            };
-
-            let ty = self.local_bindings[binding].ty();
-
-            let TypeKind::Scalar(s) = *self.ty().kind(ty) else {
-                panic!(
-                    "expected all vector element inputs to be `{}` values (element `{i}` was of \
-                    type `{}`)",
-                    vector_ty.scalar,
-                    ty.to_string(self.ty())
-                );
-            };
-
-            if s != vector_ty.scalar {
-                panic!(
-                    "expected all vector element inputs to be `{}` values (element `{i}` was of \
-                    type `{}`)",
-                    vector_ty.scalar,
-                    ty.to_string(self.ty())
-                );
-            }
-
-            collected_elements.push(binding);
-        }
-
-        if let Some(_) = iter.next() {
-            panic!(
-                "expected only {size} elements for a vector of type `{vector_ty}`, but more were \
-                provided"
-            );
-        }
-
-        let ty = self.ty().register(TypeKind::Vector(vector_ty));
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
+        self.add_bind_intrinsic_op(
             block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpVector(OpVector {
-                        vector_ty,
-                        elements: collected_elements,
-                    }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+            position,
+            intrinsic::OpVector { ty: vector_ty },
+            elements,
+        )
     }
 
     pub fn add_bind_op_matrix(
@@ -1429,80 +1318,12 @@ impl Scf {
         matrix_ty: ty::Matrix,
         columns: impl IntoIterator<Item = LocalBinding>,
     ) -> (Statement, LocalBinding) {
-        let size = matrix_ty.columns.to_usize();
-
-        let expected_vector_ty = ty::Vector {
-            scalar: matrix_ty.scalar,
-            size: matrix_ty.rows,
-        };
-
-        let mut collected_columns = Vec::with_capacity(size);
-        let mut iter = columns.into_iter();
-
-        for i in 0..size {
-            let Some(binding) = iter.next() else {
-                panic!(
-                    "expected at least {size} columns for a matrix of type `{matrix_ty}` (found \
-                    only {i})"
-                );
-            };
-
-            let ty = self.local_bindings[binding].ty();
-
-            let TypeKind::Vector(v) = *self.ty().kind(ty) else {
-                panic!(
-                    "expected all column inputs to be `{expected_vector_ty}` values (element `{i}` \
-                    was of type `{}`)",
-                    ty.to_string(self.ty())
-                );
-            };
-
-            if v != expected_vector_ty {
-                panic!(
-                    "expected all column inputs to be `{expected_vector_ty}` values (element `{i}` \
-                    was of type `{}`)",
-                    ty.to_string(self.ty())
-                );
-            }
-
-            collected_columns.push(binding);
-        }
-
-        if let Some(_) = iter.next() {
-            panic!(
-                "expected only {size} columns for a matrix of type `{matrix_ty}`, but more were \
-                provided",
-            );
-        }
-
-        let ty = self.ty().register(TypeKind::Matrix(matrix_ty));
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
+        self.add_bind_intrinsic_op(
             block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpMatrix(OpMatrix {
-                        matrix_ty,
-                        columns: collected_columns,
-                    }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+            position,
+            intrinsic::OpMatrix { ty: matrix_ty },
+            columns,
+        )
     }
 
     pub fn add_bind_op_convert_to_u32(
@@ -1511,31 +1332,7 @@ impl Scf {
         position: BlockPosition,
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let ty = self.local_bindings[value].ty();
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpConvertToU32(OpConvertToU32 { value }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpConvertToU32, [value])
     }
 
     pub fn add_bind_op_convert_to_i32(
@@ -1544,31 +1341,7 @@ impl Scf {
         position: BlockPosition,
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let ty = self.local_bindings[value].ty();
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpConvertToI32(OpConvertToI32 { value }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpConvertToI32, [value])
     }
 
     pub fn add_bind_op_convert_to_f32(
@@ -1577,31 +1350,7 @@ impl Scf {
         position: BlockPosition,
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let ty = self.local_bindings[value].ty();
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpConvertToF32(OpConvertToF32 { value }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpConvertToF32, [value])
     }
 
     pub fn add_bind_op_convert_to_bool(
@@ -1610,74 +1359,52 @@ impl Scf {
         position: BlockPosition,
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let ty = self.local_bindings[value].ty();
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::OpConvertToBool(OpConvertToBool { value }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpConvertToBool, [value])
     }
 
-    pub fn add_bind_op_ptr_element_ptr(
+    pub fn add_bind_op_field_ptr(
         &mut self,
         block: Block,
         position: BlockPosition,
         pointer: LocalBinding,
-        indices: impl IntoIterator<Item = LocalBinding>,
+        field_index: u32,
     ) -> (Statement, LocalBinding) {
-        let ptr_ty = self.local_bindings[pointer].ty();
-
-        let TypeKind::Ptr(pointee_ty) = *self.ty.kind(ptr_ty) else {
-            panic!("expected `pointer` expression to have a pointer type")
-        };
-
-        let indices = indices.into_iter().collect::<Vec<_>>();
-
-        let element_ty = self.project_ty(pointee_ty, &indices);
-        let element_ptr_ty = self.ty.register(TypeKind::Ptr(element_ty));
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty: element_ptr_ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
+        self.add_bind_intrinsic_op(
             block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty: element_ptr_ty,
-                    kind: ExpressionKind::OpPtrElementPtr(OpPtrElementPtr { pointer, indices }),
-                },
-            }),
-        });
+            position,
+            intrinsic::OpFieldPtr { field_index },
+            [pointer],
+        )
+    }
 
-        self.blocks[block].add_statement(position, statement);
+    pub fn add_bind_op_element_ptr(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        pointer: LocalBinding,
+        element_index: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(
+            block,
+            position,
+            intrinsic::OpElementPtr,
+            [pointer, element_index],
+        )
+    }
 
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+    pub fn add_bind_op_extract_field(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+        field_index: u32,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(
+            block,
+            position,
+            intrinsic::OpExtractField { field_index },
+            [value],
+        )
     }
 
     pub fn add_bind_op_extract_element(
@@ -1685,113 +1412,32 @@ impl Scf {
         block: Block,
         position: BlockPosition,
         value: LocalBinding,
-        indices: impl IntoIterator<Item = LocalBinding>,
+        element_index: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let value_ty = self[value].ty();
-        let indices = indices.into_iter().collect::<Vec<_>>();
-        let element_ty = self.project_ty(value_ty, &indices);
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty: element_ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
+        self.add_bind_intrinsic_op(
             block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty: element_ty,
-                    kind: ExpressionKind::OpExtractElement(OpExtractElement { value, indices }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+            position,
+            intrinsic::OpExtractElement,
+            [value, element_index],
+        )
     }
 
     pub fn add_bind_op_load(
         &mut self,
         block: Block,
         position: BlockPosition,
-        pointer: LocalBinding,
+        ptr: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let ptr_ty = self.local_bindings[pointer].ty();
-
-        let TypeKind::Ptr(pointee_ty) = *self.ty.kind(ptr_ty) else {
-            panic!("expected `pointer` expression to have a pointer type")
-        };
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty: pointee_ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty: pointee_ty,
-                    kind: ExpressionKind::OpLoad(pointer),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpLoad, [ptr])
     }
 
-    pub fn add_bind_op_call_builtin(
+    pub fn add_bind_op_array_length(
         &mut self,
         block: Block,
         position: BlockPosition,
-        callee: BuiltinFunction,
-        arguments: impl IntoIterator<Item = LocalBinding>,
+        ptr: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        let Some(ret_ty) = callee.return_type() else {
-            panic!(
-                "only function calls that return a value can be bound as an expression; \
-                to call a function without a return value, use `add_call_builtin` instead"
-            )
-        };
-
-        let arguments = self.collect_call_builtin_args(&callee, arguments);
-
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty: ret_ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty: ret_ty,
-                    kind: ExpressionKind::OpCallBuiltin(OpCallBuiltin { callee, arguments }),
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpArrayLength, [ptr])
     }
 
     pub fn add_if(
@@ -2124,28 +1770,33 @@ impl Scf {
         (statement, binding)
     }
 
-    pub fn add_store(
+    pub fn add_intrinsic_stmt<T>(
         &mut self,
         block: Block,
         position: BlockPosition,
-        pointer: LocalBinding,
-        value: LocalBinding,
-    ) -> Statement {
-        let pointer_ty = self.local_bindings[pointer].ty();
-        let value_ty = self.local_bindings[value].ty();
+        intrinsic: T,
+        arguments: impl IntoIterator<Item = LocalBinding>,
+    ) -> Statement
+    where
+        T: Intrinsic,
+        StatementKind: From<IntrinsicOp<T>>,
+    {
+        let arguments: SmallVec<[LocalBinding; 2]> = arguments.into_iter().collect();
 
-        let TypeKind::Ptr(pointee_ty) = *self.ty.kind(pointer_ty) else {
-            panic!("expected `pointer` to be a pointer type");
-        };
-
-        assert_eq!(
-            pointee_ty, value_ty,
-            "the `value`'s type must match the `pointer`'s pointee type"
-        );
+        intrinsic
+            .process_args(
+                self.ty(),
+                arguments.iter().map(|a| self.local_bindings[*a].ty()),
+            )
+            .unwrap();
 
         let statement = self.statements.insert(StatementData {
             block,
-            kind: StatementKind::Store(Store { pointer, value }),
+            kind: IntrinsicOp {
+                intrinsic,
+                arguments,
+            }
+            .into(),
         });
 
         self.blocks[block].add_statement(position, statement);
@@ -2153,23 +1804,14 @@ impl Scf {
         statement
     }
 
-    pub fn add_call_builtin(
+    pub fn add_store(
         &mut self,
         block: Block,
         position: BlockPosition,
-        callee: BuiltinFunction,
-        arguments: impl IntoIterator<Item = LocalBinding>,
+        pointer: LocalBinding,
+        value: LocalBinding,
     ) -> Statement {
-        let arguments = self.collect_call_builtin_args(&callee, arguments);
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::CallBuiltin(OpCallBuiltin { callee, arguments }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        statement
+        self.add_intrinsic_stmt(block, position, intrinsic::OpStore, [pointer, value])
     }
 
     pub fn remove_statement(&mut self, statement: Statement) {
@@ -2217,62 +1859,6 @@ impl Scf {
 
             self.remove_statement_and_bindings(stmt);
         }
-    }
-
-    fn collect_call_builtin_args(
-        &self,
-        callee: &BuiltinFunction,
-        arguments: impl IntoIterator<Item = LocalBinding>,
-    ) -> Vec<LocalBinding> {
-        let mut collected_args = Vec::new();
-
-        for (i, arg) in arguments.into_iter().enumerate() {
-            let arg_ty = self.local_bindings[arg].ty();
-            let expected_ty = callee.arguments()[i];
-
-            assert_eq!(arg_ty, expected_ty, "argument {i} has wrong type");
-
-            collected_args.push(arg);
-        }
-
-        collected_args
-    }
-
-    fn project_ty(&self, base: Type, indices: &[LocalBinding]) -> Type {
-        let mut element_ty = base;
-
-        for (i, binding) in indices.iter().copied().enumerate() {
-            assert_eq!(
-                self[binding].ty(),
-                TY_U32,
-                "index `{i}` does not resolve to a `u32` value"
-            );
-
-            element_ty = match &*self.ty().kind(element_ty) {
-                TypeKind::Struct(s) => {
-                    let bind_stmt = self[binding].kind().expect_expr_binding();
-
-                    let ExpressionKind::ConstU32(field) =
-                        *self[bind_stmt].expect_expr_binding().expression().kind()
-                    else {
-                        panic!(
-                            "index `{i}` tried to index into a struct, but does not resolve to a \
-                            constant `u32` expression"
-                        );
-                    };
-
-                    s.fields[field as usize].ty
-                }
-                TypeKind::Vector(v) => v.scalar.ty(),
-                TypeKind::Matrix(m) => m.column_ty(),
-                TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => {
-                    *element_ty
-                }
-                _ => panic!("can only project into aggregate types"),
-            };
-        }
-
-        element_ty
     }
 }
 

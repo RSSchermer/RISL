@@ -29,8 +29,8 @@ impl Intrinsic for OpOffsetSlice {
             } => (*element_ty, *stride),
             _ => {
                 return Err(format!(
-                    "offset-slice operation expected the first argument to be a pointer to an array or \
-                a slice, found `{}`",
+                    "offset-slice operation expected the first argument to be a pointer to an \
+                    array or a slice, found `{}`",
                     arg_0.to_string(ty_registry)
                 ));
             }

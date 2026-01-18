@@ -4,8 +4,9 @@ use slotmap::{SecondaryMap, SlotMap};
 
 use crate::scf::visit::TopDownVisitor;
 use crate::scf::{
-    Block, ExprBinding, ExpressionKind, If, LocalBinding, LocalBindingData, LocalBindingKind, Loop,
-    LoopControl, OpCallBuiltin, Return, Scf, Statement, StatementKind, Store, Switch, visit,
+    Block, ExprBinding, ExpressionKind, If, IntrinsicOp, LocalBinding, LocalBindingData,
+    LocalBindingKind, Loop, LoopControl, OpStore, Return, Scf, Statement, StatementKind, Switch,
+    visit,
 };
 
 pub struct Config {
@@ -64,9 +65,10 @@ impl UseCounter {
         }
     }
 
-    fn count_store(&mut self, store_stmt: &Store) {
-        self.increment(store_stmt.pointer());
-        self.increment(store_stmt.value());
+    fn count_intrinsic_op_binding<T>(&mut self, intrinsic_op: &IntrinsicOp<T>) {
+        for arg in intrinsic_op.arguments() {
+            self.increment(*arg);
+        }
     }
 
     fn count_expr_binding(&mut self, scf: &Scf, stmt: &ExprBinding) {
@@ -77,51 +79,20 @@ impl UseCounter {
             | ExpressionKind::ConstF32(_)
             | ExpressionKind::ConstBool(_)
             | ExpressionKind::GlobalPtr(_) => {}
-            ExpressionKind::OpUnary(op) => self.increment(op.operand()),
-            ExpressionKind::OpBinary(op) => {
-                self.increment(op.lhs());
-                self.increment(op.rhs());
-            }
-            ExpressionKind::OpVector(op) => {
-                for element in op.elements() {
-                    self.increment(*element);
-                }
-            }
-            ExpressionKind::OpMatrix(op) => {
-                for column in op.columns() {
-                    self.increment(*column);
-                }
-            }
-            ExpressionKind::OpConvertToU32(op) => self.increment(op.value()),
-            ExpressionKind::OpConvertToI32(op) => self.increment(op.value()),
-            ExpressionKind::OpConvertToF32(op) => self.increment(op.value()),
-            ExpressionKind::OpConvertToBool(op) => self.increment(op.value()),
-            ExpressionKind::OpPtrElementPtr(op) => {
-                self.increment(op.pointer());
-
-                for index in op.indices() {
-                    if self.config.count_const_index_use || !is_const_u32(scf, *index) {
-                        self.increment(*index);
-                    }
-                }
-            }
-            ExpressionKind::OpExtractElement(op) => {
-                self.increment(op.value());
-
-                for index in op.indices() {
-                    if self.config.count_const_index_use || !is_const_u32(scf, *index) {
-                        self.increment(*index);
-                    }
-                }
-            }
-            ExpressionKind::OpLoad(ptr) => self.increment(*ptr),
-            ExpressionKind::OpCallBuiltin(op) => self.count_call_builtin(op),
-        }
-    }
-
-    fn count_call_builtin(&mut self, call_builtin: &OpCallBuiltin) {
-        for arg in call_builtin.arguments() {
-            self.increment(*arg);
+            ExpressionKind::OpUnary(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpBinary(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpVector(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpMatrix(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpConvertToU32(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpConvertToI32(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpConvertToF32(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpConvertToBool(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpFieldPtr(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpElementPtr(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpExtractField(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpExtractElement(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpLoad(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpArrayLength(op) => self.count_intrinsic_op_binding(op),
         }
     }
 }
@@ -155,8 +126,7 @@ impl TopDownVisitor for Visitor {
             StatementKind::Return(stmt) => self.counter.count_return(stmt),
             StatementKind::Alloca(_) => (),
             StatementKind::ExprBinding(stmt) => self.counter.count_expr_binding(scf, stmt),
-            StatementKind::Store(stmt) => self.counter.count_store(stmt),
-            StatementKind::CallBuiltin(stmt) => self.counter.count_call_builtin(stmt),
+            StatementKind::OpStore(stmt) => self.counter.count_intrinsic_op_binding(stmt),
         }
 
         visit::visit_statement_top_down(self, scf, statement);

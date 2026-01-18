@@ -6,6 +6,12 @@ use crate::ty::{TY_PTR_U32, Type, TypeKind};
 /// Operation that takes a pointer to an enum and returns a pointer to its discriminant.
 ///
 /// An enum value's discriminant dynamically represents the enum value's active variant.
+///
+/// This is a temporary node kind used by the RVSDG [enum_replacement][0] pass. To represent code
+/// that interacts with an enum's discriminant, consider using [OpGetDiscriminant] and
+/// [OpSetDiscriminant] instead.
+///
+/// [0]: crate::rvsdg::transform::enum_replacement
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpDiscriminantPtr;
 

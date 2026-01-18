@@ -1,18 +1,9 @@
-use std::io;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use rustc_middle::bug;
 use rustc_public::mir::mono::{Instance, MonoItem};
 use slir::BinaryOperator;
-use slir::cfg::{
-    BlockPosition, Branch, InlineConst, LocalBindingData, OpBinary, OpBoolToBranchPredicate,
-    OpOffsetSlicePtr, OpPtrElementPtr, OpPtrVariantPtr, OpSetDiscriminant, OpStore, Terminator,
-    Value,
-};
-use slir::ty::{TY_BOOL, TY_PREDICATE, TY_PTR_U32, TY_U32, TypeKind};
-use smallvec::smallvec;
-use thin_vec::thin_vec;
+use slir::cfg::{BlockPosition, InlineConst, Terminator};
 
 use crate::slir_build::context::CodegenContext;
 use crate::stable_cg::traits::MiscCodegenMethods;
@@ -79,19 +70,11 @@ fn define_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
 
     // The "in bounds" branch
     cfg.add_stmt_op_set_discriminant(bb1, BlockPosition::Append, ret.into(), 1);
-    let (_, some_ptr) = cfg.add_stmt_op_ptr_variant_ptr(bb1, BlockPosition::Append, ret.into(), 1);
-    let (_, payload_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-        bb1,
-        BlockPosition::Append,
-        some_ptr.into(),
-        [InlineConst::U32(0).into()],
-    );
-    let (_, elem_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-        bb1,
-        BlockPosition::Append,
-        slice_ptr.into(),
-        [index.into()],
-    );
+    let (_, some_ptr) = cfg.add_stmt_op_variant_ptr(bb1, BlockPosition::Append, ret.into(), 1);
+    let (_, payload_ptr) =
+        cfg.add_stmt_op_field_ptr(bb1, BlockPosition::Append, some_ptr.into(), 0);
+    let (_, elem_ptr) =
+        cfg.add_stmt_op_element_ptr(bb1, BlockPosition::Append, slice_ptr.into(), index.into());
     cfg.add_stmt_op_store(
         bb1,
         BlockPosition::Append,
@@ -158,7 +141,11 @@ fn define_range_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
 
     // `Some` branch
     let (_, some_variant_ptr) =
-        cfg.add_stmt_op_ptr_variant_ptr(bb_some, BlockPosition::Append, ret.into(), 1);
+        cfg.add_stmt_op_variant_ptr(bb_some, BlockPosition::Append, ret.into(), 1);
+    // The `Some` variant is represented by a single-field struct where the field holds the actual
+    // payload, so project the pointer onto the field.
+    let (_, some_variant_ptr) =
+        cfg.add_stmt_op_field_ptr(bb_some, BlockPosition::Append, some_variant_ptr.into(), 0);
     // Compute the new slice pointer
     let (_, out_slice_ptr) = cfg.add_stmt_op_offset_slice(
         bb_some,
@@ -167,12 +154,8 @@ fn define_range_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
         start.into(),
     );
     // Store the new slice pointer
-    let (_, out_slice_ptr_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-        bb_some,
-        BlockPosition::Append,
-        some_variant_ptr.into(),
-        [InlineConst::U32(0).into(), InlineConst::U32(0).into()],
-    );
+    let (_, out_slice_ptr_ptr) =
+        cfg.add_stmt_op_field_ptr(bb_some, BlockPosition::Append, some_variant_ptr.into(), 0);
     cfg.add_stmt_op_store(
         bb_some,
         BlockPosition::Append,
@@ -188,12 +171,8 @@ fn define_range_usize_slice_index_get(instance: Instance, cx: &CodegenContext) {
         start.into(),
     );
     // Store the new len
-    let (_, out_len_ptr) = cfg.add_stmt_op_ptr_element_ptr(
-        bb_some,
-        BlockPosition::Append,
-        some_variant_ptr.into(),
-        [InlineConst::U32(0).into(), InlineConst::U32(1).into()],
-    );
+    let (_, out_len_ptr) =
+        cfg.add_stmt_op_field_ptr(bb_some, BlockPosition::Append, some_variant_ptr.into(), 1);
     cfg.add_stmt_op_store(
         bb_some,
         BlockPosition::Append,

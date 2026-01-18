@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
+use crate::intrinsic::Intrinsic;
 use crate::rvsdg::analyse::region_stratification::RegionStratifier;
 use crate::rvsdg::{Connectivity, NodeKind, Rvsdg, SimpleNode, ValueOrigin};
 use crate::scf::{BlockPosition, LocalBinding, LoopControl, Scf};
@@ -69,6 +71,35 @@ impl ValueMapping {
     }
 }
 
+struct PreparedBindIntrinsic<T> {
+    node: rvsdg::Node,
+    intrinsic: T,
+    arguments: SmallVec<[LocalBinding; 6]>,
+}
+
+impl<T> PreparedBindIntrinsic<T>
+where
+    T: Intrinsic,
+    scf::ExpressionKind: From<scf::IntrinsicOp<T>>,
+{
+    fn apply(self, visitor: &mut RegionVisitor) {
+        let PreparedBindIntrinsic {
+            node,
+            intrinsic,
+            arguments,
+        } = self;
+
+        let (_, binding) = visitor.scf.add_bind_intrinsic_op(
+            visitor.dst_block,
+            BlockPosition::Append,
+            intrinsic,
+            arguments,
+        );
+
+        visitor.value_mapping.map_output(node, 0, binding);
+    }
+}
+
 struct RegionVisitor<'a, 'b, 'c> {
     module: &'a Module,
     rvsdg: &'a Rvsdg,
@@ -119,13 +150,13 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
                 self.generate_switch(node, predicate_binding, None);
             }
             ValueOrigin::Output { producer, .. } => match self.rvsdg[producer].kind() {
-                Simple(OpCaseToSwitchPredicate(op)) => {
+                Simple(OpCaseToBranchSelector(op)) => {
                     self.generate_switch(node, predicate_binding, Some(op.cases()));
                 }
-                Simple(OpBoolToSwitchPredicate(_)) => {
+                Simple(OpBoolToBranchSelector(_)) => {
                     self.generate_if(node, predicate_binding);
                 }
-                Simple(OpU32ToSwitchPredicate(_)) => {
+                Simple(OpU32ToBranchSelector(_)) => {
                     self.generate_switch(node, predicate_binding, None);
                 }
                 _ => panic!(
@@ -282,22 +313,28 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             ConstPtr(_) => self.visit_const_ptr(node),
             ConstFallback(_) => self.visit_const_fallback(node),
             OpAlloca(_) => self.visit_op_alloca(node),
-            OpLoad(_) => self.visit_op_load(node),
             OpStore(_) => self.visit_op_store(node),
-            OpPtrElementPtr(_) => self.visit_op_ptr_element_ptr(node),
-            OpExtractElement(_) => self.visit_op_extract_element(node),
-            OpUnary(_) => self.visit_op_unary(node),
-            OpBinary(_) => self.visit_op_binary(node),
-            OpVector(_) => self.visit_op_vector(node),
-            OpMatrix(_) => self.visit_op_matrix(node),
-            OpCaseToSwitchPredicate(_) => self.visit_op_case_to_switch_predicate(node),
-            OpBoolToSwitchPredicate(_) => self.visit_op_bool_to_switch_predicate(node),
-            OpU32ToSwitchPredicate(_) => self.visit_op_u32_to_switch_predicate(node),
-            OpCallBuiltin(_) => self.visit_op_call_builtin(node),
-            OpConvertToU32(_) => self.visit_op_convert_to_u32(node),
-            OpConvertToI32(_) => self.visit_op_convert_to_i32(node),
-            OpConvertToF32(_) => self.visit_op_convert_to_f32(node),
-            OpConvertToBool(_) => self.visit_op_convert_to_bool(node),
+            OpLoad(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpFieldPtr(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpElementPtr(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpExtractField(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpExtractElement(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpUnary(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpBinary(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpVector(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpMatrix(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpConvertToU32(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpConvertToI32(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpConvertToF32(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpConvertToBool(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+
+            // We don't express switch predicates in the SCF, instead we translate the switch nodes
+            // either if statements or switch statements with the approprate cases. Therefore,
+            // though these operations are implemented as RVSDG intrinsics, they get special
+            // treatment here.
+            OpBoolToBranchSelector(_) => self.visit_op_case_to_branch_selector(node),
+            OpBoolToBranchSelector(_) => self.visit_op_bool_to_branch_selector(node),
+            OpU32ToBranchSelector(_) => self.visit_op_u32_to_branch_selector(node),
             _ => {
                 panic!("node kind not currently supported by SLIR's structured control-flow format")
             }
@@ -384,24 +421,33 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         self.value_mapping.map_output(node, 0, binding);
     }
 
+    fn prepare_bind_intrinsic<T>(
+        &self,
+        node: rvsdg::Node,
+        node_data: &rvsdg::IntrinsicNode<T>,
+    ) -> PreparedBindIntrinsic<T>
+    where
+        T: Intrinsic + Clone,
+        scf::ExpressionKind: From<scf::IntrinsicOp<T>>,
+    {
+        let arguments = node_data
+            .value_inputs()
+            .iter()
+            .map(|i| self.value_mapping.mapping(i.origin).expect_local())
+            .collect();
+
+        PreparedBindIntrinsic {
+            node,
+            intrinsic: node_data.intrinsic().clone(),
+            arguments,
+        }
+    }
+
     fn visit_op_alloca(&mut self, node: rvsdg::Node) {
         let data = self.rvsdg[node].expect_op_alloca();
         let (_, binding) = self
             .scf
             .add_alloca(self.dst_block, BlockPosition::Append, data.ty());
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_load(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_load();
-        let ptr = self
-            .value_mapping
-            .mapping(data.ptr_input().origin)
-            .expect_local();
-        let (_, binding) = self
-            .scf
-            .add_bind_op_load(self.dst_block, BlockPosition::Append, ptr);
 
         self.value_mapping.map_output(node, 0, binding);
     }
@@ -421,226 +467,46 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             .add_store(self.dst_block, BlockPosition::Append, ptr, value);
     }
 
-    fn visit_op_ptr_element_ptr(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_ptr_element_ptr();
-        let ptr = self
-            .value_mapping
-            .mapping(data.ptr_input().origin)
-            .expect_local();
-        let indices = data
-            .index_inputs()
-            .iter()
-            .map(|i| self.value_mapping.mapping(i.origin).expect_local());
-        let (_, binding) = self.scf.add_bind_op_ptr_element_ptr(
-            self.dst_block,
-            BlockPosition::Append,
-            ptr,
-            indices,
-        );
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_extract_element(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_extract_element();
-        let value = self
-            .value_mapping
-            .mapping(data.aggregate().origin)
-            .expect_local();
-        let indices = data
-            .indices()
-            .iter()
-            .map(|i| self.value_mapping.mapping(i.origin).expect_local());
-        let (_, binding) = self.scf.add_bind_op_extract_element(
-            self.dst_block,
-            BlockPosition::Append,
-            value,
-            indices,
-        );
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_unary(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_unary();
-        let value = self
-            .value_mapping
-            .mapping(data.input().origin)
-            .expect_local();
-        let (_, binding) = self.scf.add_bind_op_unary(
-            self.dst_block,
-            BlockPosition::Append,
-            data.operator(),
-            value,
-        );
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_binary(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_binary();
-        let lhs_expr = self
-            .value_mapping
-            .mapping(data.lhs_input().origin)
-            .expect_local();
-        let rhs_expr = self
-            .value_mapping
-            .mapping(data.rhs_input().origin)
-            .expect_local();
-        let (_, binding) = self.scf.add_bind_op_binary(
-            self.dst_block,
-            BlockPosition::Append,
-            data.operator(),
-            lhs_expr,
-            rhs_expr,
-        );
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_vector(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_vector();
-        let vector_ty = *data.vector_ty();
-        let elements = data
-            .inputs()
-            .iter()
-            .map(|i| self.value_mapping.mapping(i.origin).expect_local());
-        let (_, binding) =
-            self.scf
-                .add_bind_op_vector(self.dst_block, BlockPosition::Append, vector_ty, elements);
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_matrix(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_matrix();
-        let matrix_ty = *data.matrix_ty();
-        let columns = data
-            .inputs()
-            .iter()
-            .map(|i| self.value_mapping.mapping(i.origin).expect_local());
-        let (_, binding) =
-            self.scf
-                .add_bind_op_matrix(self.dst_block, BlockPosition::Append, matrix_ty, columns);
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_bool_to_switch_predicate(&mut self, node: rvsdg::Node) {
+    fn visit_op_bool_to_branch_selector(&mut self, node: rvsdg::Node) {
         // We don't express bool-to-switch-predicate expression in the SCF, instead we translate
         // the switch nodes that use this predicate into "if" statements in the SCF; see
         // `visit_switch_node`. We therefore simply forward the output mapping to the input mapping.
 
-        let data = self.rvsdg[node].expect_op_bool_to_switch_predicate();
+        let data = self.rvsdg[node].expect_op_bool_to_branch_selector();
         let binding = self
             .value_mapping
-            .mapping(data.input().origin)
+            .mapping(data.value_input().origin)
             .expect_local();
 
         self.value_mapping.map_output(node, 0, binding);
     }
 
-    fn visit_op_u32_to_switch_predicate(&mut self, node: rvsdg::Node) {
+    fn visit_op_u32_to_branch_selector(&mut self, node: rvsdg::Node) {
         // We don't express u32-to-switch-predicate expression in the SCF, instead we translate any
         // switch node that uses this predicate into a switch statement in the SCF that uses the
         // appropriate cases; see `visit_switch_node`. We therefore simply forward the output
         // mapping to the input mapping.
 
-        let data = self.rvsdg[node].expect_op_u32_to_switch_predicate();
+        let data = self.rvsdg[node].expect_op_u32_to_branch_selector();
         let binding = self
             .value_mapping
-            .mapping(data.input().origin)
+            .mapping(data.value_input().origin)
             .expect_local();
 
         self.value_mapping.map_output(node, 0, binding);
     }
 
-    fn visit_op_case_to_switch_predicate(&mut self, node: rvsdg::Node) {
+    fn visit_op_case_to_branch_selector(&mut self, node: rvsdg::Node) {
         // We don't express case-to-switch-predicate expression in the SCF, instead we translate any
         // switch node that uses this predicate into a switch statement in the SCF that uses the
         // appropriate cases; see `visit_switch_node`. We therefore simply forward the output
         // mapping to the input mapping.
 
-        let data = self.rvsdg[node].expect_op_case_to_switch_predicate();
+        let data = self.rvsdg[node].expect_op_case_to_branch_selector();
         let binding = self
             .value_mapping
-            .mapping(data.input().origin)
+            .mapping(data.value_input().origin)
             .expect_local();
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_call_builtin(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_call_builtin();
-        let callee = data.callee().clone();
-        let arguments = data
-            .argument_inputs()
-            .iter()
-            .map(|input| self.value_mapping.mapping(input.origin).expect_local());
-
-        if data.value_output().is_some() {
-            let (_, binding) = self.scf.add_bind_op_call_builtin(
-                self.dst_block,
-                BlockPosition::Append,
-                callee,
-                arguments,
-            );
-
-            self.value_mapping.map_output(node, 0, binding);
-        } else {
-            self.scf
-                .add_call_builtin(self.dst_block, BlockPosition::Append, callee, arguments);
-        }
-    }
-
-    fn visit_op_convert_to_u32(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_convert_to_u32();
-        let value = self
-            .value_mapping
-            .mapping(data.input().origin)
-            .expect_local();
-        let (_, binding) =
-            self.scf
-                .add_bind_op_convert_to_u32(self.dst_block, BlockPosition::Append, value);
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_convert_to_i32(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_convert_to_i32();
-        let value = self
-            .value_mapping
-            .mapping(data.input().origin)
-            .expect_local();
-        let (_, binding) =
-            self.scf
-                .add_bind_op_convert_to_i32(self.dst_block, BlockPosition::Append, value);
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_convert_to_f32(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_convert_to_f32();
-        let value = self
-            .value_mapping
-            .mapping(data.input().origin)
-            .expect_local();
-        let (_, binding) =
-            self.scf
-                .add_bind_op_convert_to_f32(self.dst_block, BlockPosition::Append, value);
-
-        self.value_mapping.map_output(node, 0, binding);
-    }
-
-    fn visit_op_convert_to_bool(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_op_convert_to_bool();
-        let value = self
-            .value_mapping
-            .mapping(data.input().origin)
-            .expect_local();
-        let (_, binding) =
-            self.scf
-                .add_bind_op_convert_to_bool(self.dst_block, BlockPosition::Append, value);
 
         self.value_mapping.map_output(node, 0, binding);
     }

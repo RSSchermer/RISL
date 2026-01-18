@@ -5,16 +5,17 @@ use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
+use smallvec::SmallVec;
 use thiserror::Error;
 
-use crate::builtin_function::BuiltinFunction;
+use crate::intrinsic::Intrinsic;
 use crate::ty::{
     TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry,
 };
 use crate::util::thin_set::ThinSet;
 use crate::{
     BinaryOperator, Constant, Function, Module, StorageBinding, UnaryOperator, UniformBinding,
-    WorkgroupBinding, thin_set, ty,
+    WorkgroupBinding, intrinsic, thin_set, ty,
 };
 
 pub trait Connectivity {
@@ -232,6 +233,24 @@ pub struct NodeData {
     region: Option<Region>,
 }
 
+macro_rules! gen_node_data_is_and_expect_simple_kind {
+    ($($kind:ident $is_name:ident $expect_name:ident $label:literal,)*) => {
+        $(
+            pub fn $is_name(&self) -> bool {
+                matches!(self.kind, NodeKind::Simple(SimpleNode::$kind(_)))
+            }
+
+            pub fn $expect_name(&self) -> &$kind {
+                if let NodeKind::Simple(SimpleNode::$kind(op)) = &self.kind {
+                    op
+                } else {
+                    panic!("expected node to be `{}`", $label)
+                }
+            }
+        )*
+    };
+}
+
 impl NodeData {
     pub fn kind(&self) -> &NodeKind {
         &self.kind
@@ -360,421 +379,43 @@ impl NodeData {
         }
     }
 
-    pub fn is_const_u32(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstU32(_)))
-    }
-
-    pub fn expect_const_u32(&self) -> &ConstU32 {
-        if let NodeKind::Simple(SimpleNode::ConstU32(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `u32` constant")
-        }
-    }
-
-    pub fn is_const_i32(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstI32(_)))
-    }
-
-    pub fn expect_const_i32(&self) -> &ConstI32 {
-        if let NodeKind::Simple(SimpleNode::ConstI32(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be an `i32` constant")
-        }
-    }
-
-    pub fn is_const_f32(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstF32(_)))
-    }
-
-    pub fn expect_const_f32(&self) -> &ConstF32 {
-        if let NodeKind::Simple(SimpleNode::ConstF32(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be an `f32` constant")
-        }
-    }
-
-    pub fn is_const_bool(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstBool(_)))
-    }
-
-    pub fn expect_const_bool(&self) -> &ConstBool {
-        if let NodeKind::Simple(SimpleNode::ConstBool(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `bool` constant")
-        }
-    }
-
-    pub fn is_const_predicate(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstPredicate(_)))
-    }
-
-    pub fn expect_const_predicate(&self) -> &ConstPredicate {
-        if let NodeKind::Simple(SimpleNode::ConstPredicate(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `predicate` constant")
-        }
-    }
-
-    pub fn is_const_ptr(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstPtr(_)))
-    }
-
-    pub fn expect_const_ptr(&self) -> &ConstPtr {
-        if let NodeKind::Simple(SimpleNode::ConstPtr(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a pointer constant")
-        }
-    }
-
-    pub fn is_const_fallback(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ConstFallback(_)))
-    }
-
-    pub fn expect_const_fallback(&self) -> &ConstFallback {
-        if let NodeKind::Simple(SimpleNode::ConstFallback(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a fallback value constant")
-        }
-    }
-
-    pub fn is_op_alloca(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpAlloca(_)))
-    }
-
-    pub fn expect_op_alloca(&self) -> &OpAlloca {
-        if let NodeKind::Simple(SimpleNode::OpAlloca(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be an `alloca` operation")
-        }
-    }
-
-    pub fn is_op_load(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpLoad(_)))
-    }
-
-    pub fn expect_op_load(&self) -> &OpLoad {
-        if let NodeKind::Simple(SimpleNode::OpLoad(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `load` operation")
-        }
-    }
-
-    pub fn is_op_store(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpStore(_)))
-    }
-
-    pub fn expect_op_store(&self) -> &OpStore {
-        if let NodeKind::Simple(SimpleNode::OpStore(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `store` operation")
-        }
-    }
-
-    pub fn is_op_ptr_element_ptr(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpPtrElementPtr(_)))
-    }
-
-    pub fn expect_op_ptr_element_ptr(&self) -> &OpPtrElementPtr {
-        if let NodeKind::Simple(SimpleNode::OpPtrElementPtr(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `pointer-element-pointer` operation")
-        }
-    }
-
-    pub fn is_op_ptr_discriminant_ptr(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpPtrDiscriminantPtr(_))
-        )
-    }
-
-    pub fn expect_op_ptr_discriminant_ptr(&self) -> &OpPtrDiscriminantPtr {
-        if let NodeKind::Simple(SimpleNode::OpPtrDiscriminantPtr(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `pointer-discriminant-pointer` operation")
-        }
-    }
-
-    pub fn is_op_ptr_variant_ptr(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpPtrVariantPtr(_)))
-    }
-
-    pub fn expect_op_ptr_variant_ptr(&self) -> &OpPtrVariantPtr {
-        if let NodeKind::Simple(SimpleNode::OpPtrVariantPtr(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `pointer-variant-pointer` operation")
-        }
-    }
-
-    pub fn is_op_extract_element(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpExtractElement(_)))
-    }
-
-    pub fn expect_op_extract_element(&self) -> &OpExtractElement {
-        if let NodeKind::Simple(SimpleNode::OpExtractElement(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be an `extract-element` operation")
-        }
-    }
-
-    pub fn is_op_get_discriminant(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpGetDiscriminant(_))
-        )
-    }
-
-    pub fn expect_op_get_discriminant(&self) -> &OpGetDiscriminant {
-        if let NodeKind::Simple(SimpleNode::OpGetDiscriminant(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `get-discriminant` operation")
-        }
-    }
-
-    pub fn is_op_set_discriminant(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpSetDiscriminant(_))
-        )
-    }
-
-    pub fn expect_op_set_discriminant(&self) -> &OpSetDiscriminant {
-        if let NodeKind::Simple(SimpleNode::OpSetDiscriminant(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `set-discriminant` operation")
-        }
-    }
-
-    pub fn is_op_add_ptr_offset(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpAddPtrOffset(_)))
-    }
-
-    pub fn expect_op_add_ptr_offset(&self) -> &OpAddPtrOffset {
-        if let NodeKind::Simple(SimpleNode::OpAddPtrOffset(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `add-ptr-offset` operation")
-        }
-    }
-
-    pub fn is_op_get_ptr_offset(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpGetPtrOffset(_)))
-    }
-
-    pub fn expect_op_get_ptr_offset(&self) -> &OpGetPtrOffset {
-        if let NodeKind::Simple(SimpleNode::OpGetPtrOffset(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `get-ptr-offset` operation")
-        }
-    }
-
-    pub fn is_op_call(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpCall(_)))
-    }
-
-    pub fn expect_op_call(&self) -> &OpCall {
-        if let NodeKind::Simple(SimpleNode::OpCall(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be an `call` operation")
-        }
-    }
-
-    pub fn is_op_call_builtin(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpCallBuiltin(_)))
-    }
-
-    pub fn expect_op_call_builtin(&self) -> &OpCallBuiltin {
-        if let NodeKind::Simple(SimpleNode::OpCallBuiltin(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be an `call-builtin` operation")
-        }
-    }
-
-    pub fn is_op_unary(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpUnary(_)))
-    }
-
-    pub fn expect_op_unary(&self) -> &OpUnary {
-        if let NodeKind::Simple(SimpleNode::OpUnary(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `unary` operation")
-        }
-    }
-
-    pub fn is_op_binary(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpBinary(_)))
-    }
-
-    pub fn expect_op_binary(&self) -> &OpBinary {
-        if let NodeKind::Simple(SimpleNode::OpBinary(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `binary` operation")
-        }
-    }
-
-    pub fn is_op_vector(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpVector(_)))
-    }
-
-    pub fn expect_op_vector(&self) -> &OpVector {
-        if let NodeKind::Simple(SimpleNode::OpVector(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `vector` operation")
-        }
-    }
-
-    pub fn is_op_matrix(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpMatrix(_)))
-    }
-
-    pub fn expect_op_matrix(&self) -> &OpMatrix {
-        if let NodeKind::Simple(SimpleNode::OpMatrix(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `matrix` operation")
-        }
-    }
-
-    pub fn is_op_case_to_switch_predicate(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpCaseToSwitchPredicate(_))
-        )
-    }
-
-    pub fn expect_op_case_to_switch_predicate(&self) -> &OpCaseToSwitchPredicate {
-        if let NodeKind::Simple(SimpleNode::OpCaseToSwitchPredicate(proxy)) = &self.kind {
-            proxy
-        } else {
-            panic!("expected node to be an op-case-to-switch-predicate node")
-        }
-    }
-
-    fn expect_op_case_to_switch_predicate_mut(&mut self) -> &mut OpCaseToSwitchPredicate {
-        if let NodeKind::Simple(SimpleNode::OpCaseToSwitchPredicate(proxy)) = &mut self.kind {
-            proxy
-        } else {
-            panic!("expected node to be an op-case-to-switch-predicate node")
-        }
-    }
-
-    pub fn is_op_bool_to_switch_predicate(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpBoolToSwitchPredicate(_))
-        )
-    }
-
-    pub fn expect_op_bool_to_switch_predicate(&self) -> &OpBoolToSwitchPredicate {
-        if let NodeKind::Simple(SimpleNode::OpBoolToSwitchPredicate(proxy)) = &self.kind {
-            proxy
-        } else {
-            panic!("expected node to be an op-bool-to-switch-predicate node")
-        }
-    }
-
-    pub fn is_op_u32_to_switch_predicate(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpU32ToSwitchPredicate(_))
-        )
-    }
-
-    pub fn expect_op_u32_to_switch_predicate(&self) -> &OpU32ToSwitchPredicate {
-        if let NodeKind::Simple(SimpleNode::OpU32ToSwitchPredicate(proxy)) = &self.kind {
-            proxy
-        } else {
-            panic!("expected node to be an op-u32-to-switch-predicate node")
-        }
-    }
-
-    pub fn is_op_switch_predicate_case(&self) -> bool {
-        matches!(
-            self.kind,
-            NodeKind::Simple(SimpleNode::OpSwitchPredicateToCase(_))
-        )
-    }
-
-    pub fn expect_op_switch_predicate_to_case(&self) -> &OpSwitchPredicateToCase {
-        if let NodeKind::Simple(SimpleNode::OpSwitchPredicateToCase(proxy)) = &self.kind {
-            proxy
-        } else {
-            panic!("expected node to be an op-switch-predicate-to-case node")
-        }
-    }
-
-    pub fn is_op_convert_to_u32(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToU32(_)))
-    }
-
-    pub fn expect_op_convert_to_u32(&self) -> &OpConvertToU32 {
-        if let NodeKind::Simple(SimpleNode::OpConvertToU32(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `convert-to-u32` operation")
-        }
-    }
-
-    pub fn is_op_convert_to_i32(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToI32(_)))
-    }
-
-    pub fn expect_op_convert_to_i32(&self) -> &OpConvertToI32 {
-        if let NodeKind::Simple(SimpleNode::OpConvertToI32(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `convert-to-i32` operation")
-        }
-    }
-
-    pub fn is_op_convert_to_f32(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToF32(_)))
-    }
-
-    pub fn expect_op_convert_to_f32(&self) -> &OpConvertToF32 {
-        if let NodeKind::Simple(SimpleNode::OpConvertToF32(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `convert-to-f32` operation")
-        }
-    }
-
-    pub fn is_op_convert_to_bool(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::OpConvertToBool(_)))
-    }
-
-    pub fn expect_op_convert_to_bool(&self) -> &OpConvertToBool {
-        if let NodeKind::Simple(SimpleNode::OpConvertToBool(op)) = &self.kind {
-            op
-        } else {
-            panic!("expected node to be a `convert-to-bool` operation")
-        }
-    }
-
-    pub fn is_value_proxy(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::ValueProxy(_)))
+    gen_node_data_is_and_expect_simple_kind! {
+        ConstU32 is_const_u32 expect_const_u32 "a `u32` constant",
+        ConstI32 is_const_i32 expect_const_i32 "a `i32` constant",
+        ConstF32 is_const_f32 expect_const_f32 "a `f32` constant",
+        ConstBool is_const_bool expect_const_bool "a `bool` constant",
+        ConstPredicate is_const_predicate expect_const_predicate "a `predicate` constant",
+        ConstPtr is_const_ptr expect_const_ptr "a pointer constant",
+        ConstFallback is_const_fallback expect_const_fallback "a fallback-value constant",
+        OpAlloca is_op_alloca expect_op_alloca "an `alloca` operation",
+        OpLoad is_op_load expect_op_load "a `load` operation",
+        OpStore is_op_store expect_op_store "a `store` operation",
+        OpFieldPtr is_op_field_ptr expect_op_field_ptr "a `field-pointer` operation",
+        OpElementPtr is_op_element_ptr expect_op_element_ptr "a `element-pointer` operation",
+        OpExtractField is_op_extract_field expect_op_extract_field "an `extract-field` operation",
+        OpExtractElement is_op_extract_element expect_op_extract_element "an `extract-element` operation",
+        OpDiscriminantPtr is_op_discriminant_ptr expect_op_discriminant_ptr "a `discriminant-pointer` operation",
+        OpVariantPtr is_op_variant_ptr expect_op_variant_ptr "a `variant-pointer` operation",
+        OpGetDiscriminant is_op_get_discriminant expect_op_get_discriminant "a `get-discriminant` operation",
+        OpSetDiscriminant is_op_set_discriminant expect_op_set_discriminant "a `set-discriminant` operation",
+        OpOffsetSlice is_op_offset_slice expect_op_offset_slice "an `offset-slice` operation",
+        OpGetSliceOffset is_op_get_slice_offset expect_op_get_slice_offset "a `get-slice-offset` operation",
+        OpUnary is_op_unary expect_op_unary "a `unary` operation",
+        OpBinary is_op_binary expect_op_binary "a `binary` operation",
+        OpVector is_op_vector expect_op_vector "a `vector` operation",
+        OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
+        OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
+        OpBoolToBranchSelector is_op_bool_to_branch_selector expect_op_bool_to_branch_selector "an `op-bool-to-branch-selector` operation",
+        OpU32ToBranchSelector is_op_u32_to_branch_selector expect_op_u32_to_branch_selector "an `op-u32-to-branch-selector` operation",
+        OpBranchSelectorToCase is_op_branch_selector_to_case expect_op_branch_selector_to_case "an `op-branch-selector-to-case` operation",
+        OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "a `convert-to-u32` operation",
+        OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "a `convert-to-i32` operation",
+        OpConvertToF32 is_op_convert_to_f32 expect_op_convert_to_f32 "a `convert-to-f32` operation",
+        OpConvertToBool is_op_convert_to_bool expect_op_convert_to_bool "a `convert-to-bool` operation",
+        OpArrayLength is_op_array_length expect_op_array_length "an `array-length` operation",
+        OpCall is_op_call expect_op_call "a `call` operation",
+        ValueProxy is_value_proxy expect_value_proxy "a value-proxy node",
+        Reaggregation is_reaggregation expect_reaggregation "a reaggregation node",
     }
 
     pub fn is_switch_output_replacement_marker(&self) -> bool {
@@ -785,23 +426,11 @@ impl NodeData {
         }
     }
 
-    pub fn expect_value_proxy(&self) -> &ValueProxy {
-        if let NodeKind::Simple(SimpleNode::ValueProxy(proxy)) = &self.kind {
-            proxy
+    fn expect_op_case_to_branch_selector_mut(&mut self) -> &mut OpCaseToBranchSelector {
+        if let NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(op)) = &mut self.kind {
+            op
         } else {
-            panic!("expected node to be a value-proxy node")
-        }
-    }
-
-    pub fn is_reaggregation(&self) -> bool {
-        matches!(self.kind, NodeKind::Simple(SimpleNode::Reaggregation(_)))
-    }
-
-    pub fn expect_reaggregation(&self) -> &Reaggregation {
-        if let NodeKind::Simple(SimpleNode::Reaggregation(node)) = &self.kind {
-            node
-        } else {
-            panic!("expected node to be a reaggregation node")
+            panic!("expected node to be a `OpCaseToBranchSelector` node")
         }
     }
 }
@@ -1165,107 +794,20 @@ impl Connectivity for LoopNode {
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpAlloca {
-    ty: Type,
-    value_output: ValueOutput,
+pub struct IntrinsicNode<T> {
+    intrinsic: T,
+    value_inputs: SmallVec<[ValueInput; 2]>,
+    value_output: Option<ValueOutput>,
+    state: Option<State>,
 }
 
-impl OpAlloca {
-    pub fn ty(&self) -> Type {
-        self.ty
-    }
-
-    pub fn value_output(&self) -> &ValueOutput {
-        &self.value_output
-    }
-}
-
-impl Connectivity for OpAlloca {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &[]
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut []
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.value_output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.value_output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
+impl<T: Intrinsic> IntrinsicNode<T> {
+    pub fn intrinsic(&self) -> &T {
+        &self.intrinsic
     }
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpLoad {
-    ptr_input: ValueInput,
-    value_output: ValueOutput,
-    state: State,
-}
-
-impl OpLoad {
-    pub fn ptr_input(&self) -> &ValueInput {
-        &self.ptr_input
-    }
-
-    pub fn value_output(&self) -> &ValueOutput {
-        &self.value_output
-    }
-}
-
-impl Connectivity for OpLoad {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.ptr_input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.ptr_input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.value_output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.value_output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        Some(&self.state)
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        Some(&mut self.state)
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpStore {
-    value_inputs: [ValueInput; 2],
-    state: State,
-}
-
-impl OpStore {
-    pub fn ptr_input(&self) -> &ValueInput {
-        &self.value_inputs[0]
-    }
-
-    pub fn value_input(&self) -> &ValueInput {
-        &self.value_inputs[1]
-    }
-}
-
-impl Connectivity for OpStore {
+impl<T> Connectivity for IntrinsicNode<T> {
     fn value_inputs(&self) -> &[ValueInput] {
         &self.value_inputs
     }
@@ -1275,389 +817,266 @@ impl Connectivity for OpStore {
     }
 
     fn value_outputs(&self) -> &[ValueOutput] {
-        &[]
+        self.value_output.as_slice()
     }
 
     fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        &mut []
+        self.value_output.as_mut_slice()
     }
 
     fn state(&self) -> Option<&State> {
-        Some(&self.state)
+        self.state.as_ref()
     }
 
     fn state_mut(&mut self) -> Option<&mut State> {
-        Some(&mut self.state)
+        self.state.as_mut()
     }
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpPtrElementPtr {
-    element_ty: Type,
-    inputs: Vec<ValueInput>,
-    output: ValueOutput,
+macro_rules! gen_intrinsic_value_input {
+    ($name:ident, $index:literal) => {
+        pub fn $name(&self) -> &ValueInput {
+            &self.value_inputs[$index]
+        }
+    };
 }
 
-impl OpPtrElementPtr {
-    pub fn element_ty(&self) -> Type {
-        self.element_ty
-    }
-
-    pub fn ptr_input(&self) -> &ValueInput {
-        &self.inputs[0]
-    }
-
-    pub fn index_inputs(&self) -> &[ValueInput] {
-        &self.inputs[1..]
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
+macro_rules! gen_intrinsic_value_output {
+    () => {
+        pub fn value_output(&self) -> &ValueOutput {
+            self.value_output.as_ref().unwrap()
+        }
+    };
 }
 
-impl Connectivity for OpPtrElementPtr {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.inputs
+pub type OpAlloca = IntrinsicNode<intrinsic::OpAlloca>;
+
+impl OpAlloca {
+    pub fn ty(&self) -> Type {
+        self.intrinsic.ty
     }
 
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
+    gen_intrinsic_value_output!();
 }
 
-/// Takes a pointer to an enum as its input and outputs a pointer the the enum's discriminant.
-///
-/// This is a temporary node kind used by enum-replacement. To represent code that interacts with an
-/// enum's discriminant, use [OpGetDiscriminant] and [OpSetDiscriminant] instead.
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpPtrDiscriminantPtr {
-    input: ValueInput,
-    output: ValueOutput,
+pub type OpLoad = IntrinsicNode<intrinsic::OpLoad>;
+
+impl OpLoad {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
 }
 
-impl OpPtrDiscriminantPtr {
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
+pub type OpStore = IntrinsicNode<intrinsic::OpStore>;
 
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
+impl OpStore {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_input!(value_input, 1);
 }
 
-impl Connectivity for OpPtrDiscriminantPtr {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
+pub type OpExtractField = IntrinsicNode<intrinsic::OpExtractField>;
+
+impl OpExtractField {
+    pub fn field_index(&self) -> u32 {
+        self.intrinsic.field_index
     }
 
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpPtrVariantPtr {
-    variant_index: u32,
-    input: ValueInput,
-    output: ValueOutput,
-}
-
-impl OpPtrVariantPtr {
-    pub fn variant_index(&self) -> u32 {
-        self.variant_index
-    }
-
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpPtrVariantPtr {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpExtractElement {
-    element_ty: Type,
-    inputs: Vec<ValueInput>,
-    output: ValueOutput,
-}
+pub type OpExtractElement = IntrinsicNode<intrinsic::OpExtractElement>;
 
 impl OpExtractElement {
-    pub fn element_ty(&self) -> Type {
-        self.element_ty
-    }
-
-    pub fn aggregate(&self) -> &ValueInput {
-        &self.inputs[0]
-    }
-
-    pub fn indices(&self) -> &[ValueInput] {
-        &self.inputs[1..]
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_input!(index_input, 1);
+    gen_intrinsic_value_output!();
 }
 
-impl Connectivity for OpExtractElement {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.inputs
+pub type OpFieldPtr = IntrinsicNode<intrinsic::OpFieldPtr>;
+
+impl OpFieldPtr {
+    pub fn field_index(&self) -> u32 {
+        self.intrinsic.field_index
     }
 
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpGetDiscriminant {
-    input: ValueInput,
-    output: ValueOutput,
-    state: State,
+pub type OpElementPtr = IntrinsicNode<intrinsic::OpElementPtr>;
+
+impl OpElementPtr {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_input!(index_input, 1);
+    gen_intrinsic_value_output!();
 }
+
+pub type OpDiscriminantPtr = IntrinsicNode<intrinsic::OpDiscriminantPtr>;
+
+impl OpDiscriminantPtr {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpVariantPtr = IntrinsicNode<intrinsic::OpVariantPtr>;
+
+impl OpVariantPtr {
+    pub fn variant_index(&self) -> u32 {
+        self.intrinsic.variant_index
+    }
+
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpGetDiscriminant = IntrinsicNode<intrinsic::OpGetDiscriminant>;
 
 impl OpGetDiscriminant {
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
 }
 
-impl Connectivity for OpGetDiscriminant {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        Some(&self.state)
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        Some(&mut self.state)
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpSetDiscriminant {
-    variant_index: u32,
-    input: ValueInput,
-    state: State,
-}
+pub type OpSetDiscriminant = IntrinsicNode<intrinsic::OpSetDiscriminant>;
 
 impl OpSetDiscriminant {
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
     pub fn variant_index(&self) -> u32 {
-        self.variant_index
+        self.intrinsic.variant_index
     }
+
+    gen_intrinsic_value_input!(ptr_input, 0);
 }
 
-impl Connectivity for OpSetDiscriminant {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
+pub type OpOffsetSlice = IntrinsicNode<intrinsic::OpOffsetSlice>;
 
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        &[]
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        &mut []
-    }
-
-    fn state(&self) -> Option<&State> {
-        Some(&self.state)
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        Some(&mut self.state)
-    }
+impl OpOffsetSlice {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_input!(offset_input, 1);
+    gen_intrinsic_value_output!();
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpAddPtrOffset {
-    inputs: [ValueInput; 2],
-    output: ValueOutput,
+pub type OpGetSliceOffset = IntrinsicNode<intrinsic::OpGetSliceOffset>;
+
+impl OpGetSliceOffset {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
 }
 
-impl OpAddPtrOffset {
-    pub fn slice_ptr(&self) -> &ValueInput {
-        &self.inputs[0]
+pub type OpUnary = IntrinsicNode<intrinsic::OpUnary>;
+
+impl OpUnary {
+    pub fn operator(&self) -> UnaryOperator {
+        self.intrinsic.operator
     }
 
-    pub fn offset(&self) -> &ValueInput {
-        &self.inputs[1]
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
 }
 
-impl Connectivity for OpAddPtrOffset {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.inputs
+pub type OpBinary = IntrinsicNode<intrinsic::OpBinary>;
+
+impl OpBinary {
+    pub fn operator(&self) -> BinaryOperator {
+        self.intrinsic.operator
     }
 
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
+    gen_intrinsic_value_input!(lhs_input, 0);
+    gen_intrinsic_value_input!(rhs_input, 1);
+    gen_intrinsic_value_output!();
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpGetPtrOffset {
-    slice_ptr: ValueInput,
-    output: ValueOutput,
+pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
+
+impl OpVector {
+    pub fn ty(&self) -> &ty::Vector {
+        &self.intrinsic.ty
+    }
+
+    gen_intrinsic_value_output!();
 }
 
-impl OpGetPtrOffset {
-    pub fn ptr(&self) -> &ValueInput {
-        &self.slice_ptr
+pub type OpMatrix = IntrinsicNode<intrinsic::OpMatrix>;
+
+impl OpMatrix {
+    pub fn ty(&self) -> &ty::Matrix {
+        &self.intrinsic.ty
     }
 
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
+    gen_intrinsic_value_output!();
 }
 
-impl Connectivity for OpGetPtrOffset {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.slice_ptr)
+pub type OpCaseToBranchSelector = IntrinsicNode<intrinsic::OpCaseToBranchSelector>;
+
+impl OpCaseToBranchSelector {
+    pub fn cases(&self) -> &[u32] {
+        &self.intrinsic.cases
     }
 
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.slice_ptr)
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpBoolToBranchSelector = IntrinsicNode<intrinsic::OpBoolToBranchSelector>;
+
+impl OpBoolToBranchSelector {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpU32ToBranchSelector = IntrinsicNode<intrinsic::OpU32ToBranchSelector>;
+
+impl OpU32ToBranchSelector {
+    pub fn branch_count(&self) -> u32 {
+        self.intrinsic.branch_count
     }
 
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpBranchSelectorToCase = IntrinsicNode<intrinsic::OpBranchSelectorToCase>;
+
+impl OpBranchSelectorToCase {
+    pub fn cases(&self) -> &[u32] {
+        &self.intrinsic.cases
     }
 
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
 
-    fn state(&self) -> Option<&State> {
-        None
-    }
+pub type OpConvertToU32 = IntrinsicNode<intrinsic::OpConvertToU32>;
 
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
+impl OpConvertToU32 {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpConvertToI32 = IntrinsicNode<intrinsic::OpConvertToI32>;
+
+impl OpConvertToI32 {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpConvertToF32 = IntrinsicNode<intrinsic::OpConvertToF32>;
+
+impl OpConvertToF32 {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpConvertToBool = IntrinsicNode<intrinsic::OpConvertToBool>;
+
+impl OpConvertToBool {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpArrayLength = IntrinsicNode<intrinsic::OpArrayLength>;
+
+impl OpArrayLength {
+    gen_intrinsic_value_input!(ptr_input, 0);
+    gen_intrinsic_value_output!();
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
@@ -1704,245 +1123,6 @@ impl Connectivity for OpCall {
 
     fn state_mut(&mut self) -> Option<&mut State> {
         Some(&mut self.state)
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpCallBuiltin {
-    callee: BuiltinFunction,
-    value_inputs: Vec<ValueInput>,
-    value_output: Option<ValueOutput>,
-}
-
-impl OpCallBuiltin {
-    pub fn callee(&self) -> &BuiltinFunction {
-        &self.callee
-    }
-
-    pub fn argument_inputs(&self) -> &[ValueInput] {
-        &self.value_inputs
-    }
-
-    pub fn value_output(&self) -> Option<&ValueOutput> {
-        self.value_output.as_ref()
-    }
-}
-
-impl Connectivity for OpCallBuiltin {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.value_inputs
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.value_inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        self.value_output.as_slice()
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        self.value_output.as_mut_slice()
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpUnary {
-    operator: UnaryOperator,
-    input: ValueInput,
-    output: ValueOutput,
-}
-
-impl OpUnary {
-    pub fn operator(&self) -> UnaryOperator {
-        self.operator
-    }
-
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpUnary {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpBinary {
-    operator: BinaryOperator,
-    inputs: [ValueInput; 2],
-    output: ValueOutput,
-}
-
-impl OpBinary {
-    pub fn operator(&self) -> BinaryOperator {
-        self.operator
-    }
-
-    pub fn lhs_input(&self) -> &ValueInput {
-        &self.inputs[0]
-    }
-
-    pub fn rhs_input(&self) -> &ValueInput {
-        &self.inputs[1]
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpBinary {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.inputs
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpVector {
-    vector_ty: ty::Vector,
-    inputs: Vec<ValueInput>,
-    output: ValueOutput,
-}
-
-impl OpVector {
-    pub fn vector_ty(&self) -> &ty::Vector {
-        &self.vector_ty
-    }
-
-    pub fn inputs(&self) -> &[ValueInput] {
-        &self.inputs
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpVector {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.inputs
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpMatrix {
-    matrix_ty: ty::Matrix,
-    inputs: Vec<ValueInput>,
-    output: ValueOutput,
-}
-
-impl OpMatrix {
-    pub fn matrix_ty(&self) -> &ty::Matrix {
-        &self.matrix_ty
-    }
-
-    pub fn inputs(&self) -> &[ValueInput] {
-        &self.inputs
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpMatrix {
-    fn value_inputs(&self) -> &[ValueInput] {
-        &self.inputs
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        &mut self.inputs
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
     }
 }
 
@@ -2089,244 +1269,6 @@ impl Connectivity for ConstFallback {
         None
     }
 }
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpCaseToSwitchPredicate {
-    cases: Vec<u32>,
-    input: ValueInput,
-    output: ValueOutput,
-}
-
-impl OpCaseToSwitchPredicate {
-    pub fn cases(&self) -> &[u32] {
-        &self.cases
-    }
-
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpCaseToSwitchPredicate {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpBoolToSwitchPredicate {
-    input: ValueInput,
-    output: ValueOutput,
-}
-
-impl OpBoolToSwitchPredicate {
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpBoolToSwitchPredicate {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpU32ToSwitchPredicate {
-    branch_count: u32,
-    input: ValueInput,
-    output: ValueOutput,
-}
-
-impl OpU32ToSwitchPredicate {
-    pub fn branch_count(&self) -> u32 {
-        self.branch_count
-    }
-
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpU32ToSwitchPredicate {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpSwitchPredicateToCase {
-    cases: Vec<u32>,
-    input: ValueInput,
-    output: ValueOutput,
-}
-
-impl OpSwitchPredicateToCase {
-    pub fn cases(&self) -> &[u32] {
-        &self.cases
-    }
-
-    pub fn input(&self) -> &ValueInput {
-        &self.input
-    }
-
-    pub fn output(&self) -> &ValueOutput {
-        &self.output
-    }
-}
-
-impl Connectivity for OpSwitchPredicateToCase {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.input)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.input)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
-macro_rules! gen_conversion_nodes {
-    ($($name:ident),*) => {
-        $(
-            #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-            pub struct $name {
-                input: ValueInput,
-                output: ValueOutput,
-            }
-
-            impl $name {
-                pub fn input(&self) -> &ValueInput {
-                    &self.input
-                }
-
-                pub fn output(&self) -> &ValueOutput {
-                    &self.output
-                }
-            }
-
-            impl Connectivity for $name {
-                fn value_inputs(&self) -> &[ValueInput] {
-                    slice::from_ref(&self.input)
-                }
-
-                fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-                    slice::from_mut(&mut self.input)
-                }
-
-                fn value_outputs(&self) -> &[ValueOutput] {
-                    slice::from_ref(&self.output)
-                }
-
-                fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-                    slice::from_mut(&mut self.output)
-                }
-
-                fn state(&self) -> Option<&State> {
-                    None
-                }
-
-                fn state_mut(&mut self) -> Option<&mut State> {
-                    None
-                }
-            }
-        )*
-    };
-}
-
-gen_conversion_nodes!(
-    OpConvertToU32,
-    OpConvertToI32,
-    OpConvertToF32,
-    OpConvertToBool
-);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Debug)]
 pub enum ProxyKind {
@@ -2509,28 +1451,30 @@ gen_simple_node! {
     OpAlloca,
     OpLoad,
     OpStore,
-    OpPtrElementPtr,
-    OpPtrDiscriminantPtr,
-    OpPtrVariantPtr,
+    OpExtractField,
     OpExtractElement,
+    OpFieldPtr,
+    OpElementPtr,
+    OpDiscriminantPtr,
+    OpVariantPtr,
     OpGetDiscriminant,
     OpSetDiscriminant,
-    OpAddPtrOffset,
-    OpGetPtrOffset,
-    OpCall,
-    OpCallBuiltin,
+    OpOffsetSlice,
+    OpGetSliceOffset,
     OpUnary,
     OpBinary,
     OpVector,
     OpMatrix,
-    OpCaseToSwitchPredicate,
-    OpBoolToSwitchPredicate,
-    OpU32ToSwitchPredicate,
-    OpSwitchPredicateToCase,
+    OpCaseToBranchSelector,
+    OpBoolToBranchSelector,
+    OpU32ToBranchSelector,
+    OpBranchSelectorToCase,
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,
     OpConvertToBool,
+    OpArrayLength,
+    OpCall,
     ValueProxy,
     Reaggregation,
 }
@@ -3195,24 +2139,59 @@ impl Rvsdg {
         node
     }
 
-    pub fn add_op_alloca(&mut self, region: Region, ty: Type) -> Node {
-        let ptr_ty = self.ty.register(TypeKind::Ptr(ty));
+    pub fn add_intrinsic_op<T>(
+        &mut self,
+        region: Region,
+        intrinsic: T,
+        value_inputs: impl IntoIterator<Item = ValueInput>,
+        state_origin: Option<StateOrigin>,
+    ) -> Node
+    where
+        T: Intrinsic,
+        SimpleNode: From<IntrinsicNode<T>>,
+    {
+        let value_inputs: SmallVec<[ValueInput; 2]> = value_inputs.into_iter().collect();
+
+        for input in &value_inputs {
+            self.validate_node_value_input(region, input);
+        }
+
+        let output_ty = intrinsic
+            .process_args(self.ty(), value_inputs.iter().map(|i| i.ty))
+            .unwrap();
+        let value_output = output_ty.map(|ty| ValueOutput::new(ty));
+        let state = state_origin.map(|origin| {
+            State {
+                origin,
+                user: StateUser::Result, // Temp value
+            }
+        });
 
         let node = self.nodes.insert(NodeData {
             kind: NodeKind::Simple(
-                OpAlloca {
-                    ty,
-                    value_output: ValueOutput::new(ptr_ty),
+                IntrinsicNode {
+                    intrinsic,
+                    value_inputs,
+                    value_output,
+                    state,
                 }
                 .into(),
             ),
             region: Some(region),
         });
 
+        if let Some(state_origin) = state_origin {
+            self.link_state(region, node, state_origin);
+        }
+
         self.regions[region].nodes.insert(node);
         self.connect_node_value_inputs(node);
 
         node
+    }
+
+    pub fn add_op_alloca(&mut self, region: Region, ty: Type) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAlloca { ty }, [], None)
     }
 
     pub fn add_op_load(
@@ -3221,32 +2200,7 @@ impl Rvsdg {
         ptr_input: ValueInput,
         state_origin: StateOrigin,
     ) -> Node {
-        self.validate_node_value_input(region, &ptr_input);
-
-        let TypeKind::Ptr(pointee_ty) = *self.ty.kind(ptr_input.ty) else {
-            panic!("`ptr_input` must be a pointer type");
-        };
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpLoad {
-                    ptr_input,
-                    value_output: ValueOutput::new(pointee_ty),
-                    state: State {
-                        origin: state_origin,
-                        user: StateUser::Result, // Temp value
-                    },
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.link_state(region, node, state_origin);
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+        self.add_intrinsic_op(region, intrinsic::OpLoad, [ptr_input], Some(state_origin))
     }
 
     pub fn add_op_store(
@@ -3256,174 +2210,86 @@ impl Rvsdg {
         value_input: ValueInput,
         state_origin: StateOrigin,
     ) -> Node {
-        self.validate_node_value_input(region, &ptr_input);
-        self.validate_node_value_input(region, &value_input);
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpStore {
-                    value_inputs: [ptr_input, value_input],
-                    state: State {
-                        origin: state_origin,
-                        user: StateUser::Result, // Temp value
-                    },
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.link_state(region, node, state_origin);
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpStore,
+            [ptr_input, value_input],
+            Some(state_origin),
+        )
     }
 
-    pub fn add_op_ptr_element_ptr(
+    pub fn add_op_extract_field(
         &mut self,
         region: Region,
-        ptr_input: ValueInput,
-        index_inputs: impl IntoIterator<Item = ValueInput>,
+        value_input: ValueInput,
+        field_index: u32,
     ) -> Node {
-        self.validate_node_value_input(region, &ptr_input);
-
-        let TypeKind::Ptr(mut element_ty) = *self.ty.kind(ptr_input.ty) else {
-            panic!("`ptr_input` must be a pointer type");
-        };
-
-        let mut inputs = vec![ptr_input];
-
-        for (i, input) in index_inputs.into_iter().enumerate() {
-            self.validate_node_value_input(region, &input);
-
-            element_ty = self.project_index((i, &input), element_ty);
-
-            inputs.push(input);
-        }
-
-        let ptr_ty = self.ty.register(TypeKind::Ptr(element_ty));
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpPtrElementPtr {
-                    element_ty,
-                    inputs,
-                    output: ValueOutput::new(ptr_ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_ptr_discriminant_ptr(&mut self, region: Region, ptr_input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &ptr_input);
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpPtrDiscriminantPtr {
-                    input: ptr_input,
-                    output: ValueOutput::new(TY_PTR_U32),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_ptr_variant_ptr(
-        &mut self,
-        region: Region,
-        input: ValueInput,
-        variant_index: u32,
-    ) -> Node {
-        self.validate_node_value_input(region, &input);
-
-        let TypeKind::Ptr(pointee_ty) = *self.ty.kind(input.ty) else {
-            panic!("`ptr_input` must be of a pointer type")
-        };
-        let pointee_kind = self.ty.kind(pointee_ty);
-        let TypeKind::Enum(enum_data) = &*pointee_kind else {
-            panic!("`ptr_input` must point to an enum type")
-        };
-
-        let variants = &enum_data.variants;
-
-        let Some(variant_ty) = variants.get(variant_index as usize).copied() else {
-            panic!(
-                "tried to select variant `{}` on an enum that only has {} variants",
-                variant_index,
-                variants.len()
-            )
-        };
-
-        let output_ty = self.ty.register(TypeKind::Ptr(variant_ty));
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpPtrVariantPtr {
-                    variant_index,
-                    input,
-                    output: ValueOutput::new(output_ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpExtractField { field_index },
+            [value_input],
+            None,
+        )
     }
 
     pub fn add_op_extract_element(
         &mut self,
         region: Region,
-        aggregate_input: ValueInput,
-        index_inputs: impl IntoIterator<Item = ValueInput>,
+        value_input: ValueInput,
+        index_input: ValueInput,
     ) -> Node {
-        self.validate_node_value_input(region, &aggregate_input);
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpExtractElement,
+            [value_input, index_input],
+            None,
+        )
+    }
 
-        let mut element_ty = aggregate_input.ty;
+    pub fn add_op_field_ptr(
+        &mut self,
+        region: Region,
+        ptr_input: ValueInput,
+        field_index: u32,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpFieldPtr { field_index },
+            [ptr_input],
+            None,
+        )
+    }
 
-        let mut inputs = vec![aggregate_input];
+    pub fn add_op_element_ptr(
+        &mut self,
+        region: Region,
+        ptr_input: ValueInput,
+        index_input: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpElementPtr,
+            [ptr_input, index_input],
+            None,
+        )
+    }
 
-        for input in index_inputs {
-            self.validate_node_value_input(region, &input);
+    pub fn add_op_discriminant_ptr(&mut self, region: Region, ptr_input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpDiscriminantPtr, [ptr_input], None)
+    }
 
-            element_ty = self.project_index((0, &input), element_ty);
-
-            inputs.push(input);
-        }
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpExtractElement {
-                    element_ty,
-                    inputs,
-                    output: ValueOutput::new(element_ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+    pub fn add_op_variant_ptr(
+        &mut self,
+        region: Region,
+        ptr_input: ValueInput,
+        variant_index: u32,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpVariantPtr { variant_index },
+            [ptr_input],
+            None,
+        )
     }
 
     pub fn add_op_get_discriminant(
@@ -3432,28 +2298,12 @@ impl Rvsdg {
         ptr_input: ValueInput,
         state_origin: StateOrigin,
     ) -> Node {
-        self.validate_node_value_input(region, &ptr_input);
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpGetDiscriminant {
-                    input: ptr_input,
-                    output: ValueOutput::new(TY_U32),
-                    state: State {
-                        origin: state_origin,
-                        user: StateUser::Result, // Temp value
-                    },
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.link_state(region, node, state_origin);
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpGetDiscriminant,
+            [ptr_input],
+            Some(state_origin),
+        )
     }
 
     pub fn add_op_set_discriminant(
@@ -3463,74 +2313,155 @@ impl Rvsdg {
         variant_index: u32,
         state_origin: StateOrigin,
     ) -> Node {
-        self.validate_node_value_input(region, &ptr_input);
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpSetDiscriminant {
-                    input: ptr_input,
-                    variant_index,
-                    state: State {
-                        origin: state_origin,
-                        user: StateUser::Result, // Temp value
-                    },
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.link_state(region, node, state_origin);
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpSetDiscriminant { variant_index },
+            [ptr_input],
+            Some(state_origin),
+        )
     }
 
-    pub fn add_op_add_ptr_offset(
+    pub fn add_op_offset_slice(
         &mut self,
         region: Region,
-        slice_ptr: ValueInput,
-        offset: ValueInput,
+        ptr_input: ValueInput,
+        offset_input: ValueInput,
     ) -> Node {
-        self.validate_node_value_input(region, &slice_ptr);
-        self.validate_node_value_input(region, &offset);
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpAddPtrOffset {
-                    inputs: [slice_ptr, offset],
-                    output: ValueOutput::new(slice_ptr.ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpOffsetSlice,
+            [ptr_input, offset_input],
+            None,
+        )
     }
 
-    pub fn add_op_get_ptr_offset(&mut self, region: Region, slice_ptr: ValueInput) -> Node {
-        self.validate_node_value_input(region, &slice_ptr);
+    pub fn add_op_get_ptr_offset(&mut self, region: Region, ptr_input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpGetSliceOffset, [ptr_input], None)
+    }
 
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpGetPtrOffset {
-                    slice_ptr,
-                    output: ValueOutput::new(TY_U32),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
+    pub fn add_op_unary(
+        &mut self,
+        region: Region,
+        operator: UnaryOperator,
+        input: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpUnary { operator }, [input], None)
+    }
 
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
+    pub fn add_op_binary(
+        &mut self,
+        region: Region,
+        operator: BinaryOperator,
+        lhs_input: ValueInput,
+        rhs_input: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpBinary { operator },
+            [lhs_input, rhs_input],
+            None,
+        )
+    }
 
-        node
+    pub fn add_op_vector(
+        &mut self,
+        region: Region,
+        vector_ty: ty::Vector,
+        inputs: impl IntoIterator<Item = ValueInput>,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpVector { ty: vector_ty }, inputs, None)
+    }
+
+    pub fn add_op_matrix(
+        &mut self,
+        region: Region,
+        matrix_ty: ty::Matrix,
+        inputs: impl IntoIterator<Item = ValueInput>,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpMatrix { ty: matrix_ty }, inputs, None)
+    }
+
+    pub fn add_op_case_to_branch_selector(
+        &mut self,
+        region: Region,
+        input: ValueInput,
+        cases: impl IntoIterator<Item = u32>,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpCaseToBranchSelector {
+                cases: cases.into_iter().collect(),
+            },
+            [input],
+            None,
+        )
+    }
+
+    pub fn permute_op_case_to_branch_selector_cases(&mut self, node: Node, permutation: &[usize]) {
+        let mut new_cases = Vec::with_capacity(permutation.len());
+
+        let data = self.nodes[node].expect_op_case_to_branch_selector_mut();
+        let cases = data.cases();
+
+        for index in permutation {
+            new_cases.push(cases[*index]);
+        }
+
+        data.intrinsic.cases = new_cases;
+    }
+
+    pub fn add_op_bool_to_branch_selector(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpBoolToBranchSelector, [input], None)
+    }
+
+    pub fn add_op_u32_to_branch_selector(
+        &mut self,
+        region: Region,
+        branch_count: u32,
+        input: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpU32ToBranchSelector { branch_count },
+            [input],
+            None,
+        )
+    }
+
+    pub fn add_op_branch_selector_to_case(
+        &mut self,
+        region: Region,
+        input: ValueInput,
+        cases: impl IntoIterator<Item = u32>,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpBranchSelectorToCase {
+                cases: cases.into_iter().collect(),
+            },
+            [input],
+            None,
+        )
+    }
+
+    pub fn add_op_convert_to_u32(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpConvertToU32, [input], None)
+    }
+
+    pub fn add_op_convert_to_i32(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpConvertToI32, [input], None)
+    }
+
+    pub fn add_op_convert_to_f32(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpConvertToF32, [input], None)
+    }
+
+    pub fn add_op_convert_to_bool(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpConvertToBool, [input], None)
+    }
+
+    pub fn add_op_array_length(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpArrayLength, [input], None)
     }
 
     pub fn add_op_call(
@@ -3591,488 +2522,6 @@ impl Rvsdg {
         });
 
         self.link_state(region, node, state_origin);
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_call_builtin(
-        &mut self,
-        module: &Module,
-        region: Region,
-        callee: BuiltinFunction,
-        argument_inputs: impl IntoIterator<Item = ValueInput>,
-    ) -> Node {
-        let mut value_inputs = argument_inputs.into_iter().collect::<Vec<_>>();
-
-        // The total length of the value_inputs also includes the function input, so subtract `1`.
-        let arg_count = value_inputs.len();
-
-        // Validate the value input arguments
-        assert_eq!(
-            callee.arguments().len(),
-            arg_count,
-            "function expects {} arguments, but {} were provided",
-            callee.arguments().len(),
-            arg_count
-        );
-        for i in 0..arg_count {
-            let sig_arg_ty = callee.arguments()[i];
-            let value_input_ty = value_inputs[i].ty;
-
-            assert_eq!(
-                sig_arg_ty,
-                value_input_ty,
-                "argument `{}` expects a value of type `{}`, but a value input of type `{}` was provided",
-                i,
-                sig_arg_ty.to_string(self.ty()),
-                value_input_ty.to_string(self.ty())
-            );
-        }
-
-        let value_output = callee.return_type().map(|ty| ValueOutput::new(ty));
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpCallBuiltin {
-                    callee,
-                    value_inputs,
-                    value_output,
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_unary(
-        &mut self,
-        region: Region,
-        operator: UnaryOperator,
-        input: ValueInput,
-    ) -> Node {
-        self.validate_node_value_input(region, &input);
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpUnary {
-                    operator,
-                    input,
-                    output: ValueOutput::new(input.ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_binary(
-        &mut self,
-        region: Region,
-        operator: BinaryOperator,
-        lhs_input: ValueInput,
-        rhs_input: ValueInput,
-    ) -> Node {
-        self.validate_node_value_input(region, &lhs_input);
-        self.validate_node_value_input(region, &rhs_input);
-
-        let output_ty = match self
-            .ty()
-            .check_binary_op(operator, lhs_input.ty, rhs_input.ty)
-        {
-            Ok(ty) => ty,
-            Err(err) => panic!("invalid operation: {}", err),
-        };
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpBinary {
-                    operator,
-                    inputs: [lhs_input, rhs_input],
-                    output: ValueOutput::new(output_ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_vector(
-        &mut self,
-        region: Region,
-        vector_ty: ty::Vector,
-        inputs: impl IntoIterator<Item = ValueInput>,
-    ) -> Node {
-        let size = vector_ty.size.to_usize();
-        let mut elements = Vec::with_capacity(size);
-        let mut iter = inputs.into_iter();
-
-        for i in 0..size {
-            let Some(input) = iter.next() else {
-                panic!(
-                    "expected at least {} elements for a vector of type `{}` (found only {})",
-                    size, vector_ty, i
-                );
-            };
-
-            self.validate_node_value_input(region, &input);
-
-            let TypeKind::Scalar(s) = *self.ty().kind(input.ty) else {
-                panic!(
-                    "expected all vector element inputs to be `{}` values (element `{}` was of \
-                    type `{}`)",
-                    vector_ty.scalar,
-                    i,
-                    input.ty.to_string(self.ty())
-                );
-            };
-
-            if s != vector_ty.scalar {
-                panic!(
-                    "expected all vector element inputs to be `{}` values (element `{}` was of \
-                    type `{}`)",
-                    vector_ty.scalar,
-                    i,
-                    input.ty.to_string(self.ty())
-                );
-            }
-
-            elements.push(input);
-        }
-
-        if let Some(_) = iter.next() {
-            panic!(
-                "expected only {} elements for a vector of type `{}`, but more were provided",
-                size, vector_ty
-            );
-        }
-
-        let output_ty = self.ty().register(TypeKind::Vector(vector_ty));
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpVector {
-                    vector_ty,
-                    inputs: elements,
-                    output: ValueOutput::new(output_ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_matrix(
-        &mut self,
-        region: Region,
-        matrix_ty: ty::Matrix,
-        inputs: impl IntoIterator<Item = ValueInput>,
-    ) -> Node {
-        let columns = matrix_ty.columns.to_usize();
-        let expected_vector_ty = ty::Vector {
-            scalar: matrix_ty.scalar,
-            size: matrix_ty.rows,
-        };
-
-        let mut collected_inputs = Vec::with_capacity(columns);
-        let mut iter = inputs.into_iter();
-
-        for i in 0..columns {
-            let Some(input) = iter.next() else {
-                panic!(
-                    "expected at least {} columns for a matrix of type `{}` (found only {})",
-                    columns, matrix_ty, i
-                );
-            };
-
-            self.validate_node_value_input(region, &input);
-
-            let TypeKind::Vector(v) = *self.ty().kind(input.ty) else {
-                panic!(
-                    "expected all column inputs to be `{}` values (element `{}` was of type `{}`)",
-                    expected_vector_ty,
-                    i,
-                    input.ty.to_string(self.ty())
-                );
-            };
-
-            if v != expected_vector_ty {
-                panic!(
-                    "expected all column inputs to be `{}` values (element `{}` was of type `{}`)",
-                    expected_vector_ty,
-                    i,
-                    input.ty.to_string(self.ty())
-                );
-            }
-
-            collected_inputs.push(input);
-        }
-
-        if let Some(_) = iter.next() {
-            panic!(
-                "expected only {} columns for a matrix of type `{}`, but more were provided",
-                columns, matrix_ty
-            );
-        }
-
-        let output_ty = self.ty().register(TypeKind::Matrix(matrix_ty));
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpMatrix {
-                    matrix_ty,
-                    inputs: collected_inputs,
-                    output: ValueOutput::new(output_ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_case_to_switch_predicate(
-        &mut self,
-        region: Region,
-        input: ValueInput,
-        cases: impl IntoIterator<Item = u32>,
-    ) -> Node {
-        self.validate_node_value_input(region, &input);
-        assert_eq!(input.ty, TY_U32, "input must by a `u32` value");
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpCaseToSwitchPredicate {
-                    cases: cases.into_iter().collect(),
-                    input,
-                    output: ValueOutput::new(TY_PREDICATE),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn permute_op_case_to_switch_predicate_cases(&mut self, node: Node, permutation: &[usize]) {
-        let mut new_cases = Vec::with_capacity(permutation.len());
-
-        let data = self.nodes[node].expect_op_case_to_switch_predicate_mut();
-        let cases = data.cases();
-
-        for index in permutation {
-            new_cases.push(cases[*index]);
-        }
-
-        data.cases = new_cases;
-    }
-
-    pub fn add_op_bool_to_switch_predicate(&mut self, region: Region, input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &input);
-        assert_eq!(input.ty, TY_BOOL, "input must by a `bool` value");
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpBoolToSwitchPredicate {
-                    input,
-                    output: ValueOutput::new(TY_PREDICATE),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_u32_to_switch_predicate(
-        &mut self,
-        region: Region,
-        branch_count: u32,
-        input: ValueInput,
-    ) -> Node {
-        self.validate_node_value_input(region, &input);
-        assert_eq!(input.ty, TY_U32, "input must by a `u32` value");
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpU32ToSwitchPredicate {
-                    branch_count,
-                    input,
-                    output: ValueOutput::new(TY_PREDICATE),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_switch_predicate_to_case(
-        &mut self,
-        region: Region,
-        input: ValueInput,
-        cases: impl IntoIterator<Item = u32>,
-    ) -> Node {
-        self.validate_node_value_input(region, &input);
-        assert_eq!(input.ty, TY_PREDICATE, "input must by a `predicate` value");
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpSwitchPredicateToCase {
-                    cases: cases.into_iter().collect(),
-                    input,
-                    output: ValueOutput::new(TY_U32),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_convert_to_u32(&mut self, region: Region, input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &input);
-
-        if !input.ty.is_scalar() {
-            panic!(
-                "expected input to be a `u32`, `i32`, `f32` or `bool` value, but found `{}`",
-                input.ty.to_string(self.ty())
-            );
-        }
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpConvertToU32 {
-                    input,
-                    output: ValueOutput::new(input.ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_convert_to_i32(&mut self, region: Region, input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &input);
-
-        if !input.ty.is_scalar() {
-            panic!(
-                "expected input to be a `u32`, `i32`, `f32` or `bool` value, but found `{}`",
-                input.ty.to_string(self.ty())
-            );
-        }
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpConvertToI32 {
-                    input,
-                    output: ValueOutput::new(input.ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_convert_to_f32(&mut self, region: Region, input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &input);
-
-        if !input.ty.is_numeric_scalar() {
-            panic!(
-                "expected input to be a `u32`, `i32`, or `f32` value, but found `{}`",
-                input.ty.to_string(self.ty())
-            );
-        }
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpConvertToF32 {
-                    input,
-                    output: ValueOutput::new(input.ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
-
-        node
-    }
-
-    pub fn add_op_convert_to_bool(&mut self, region: Region, input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &input);
-
-        if !input.ty.is_scalar() {
-            panic!(
-                "expected input to be a `u32`, `i32`, `f32` or `bool` value, but found `{}`",
-                input.ty.to_string(self.ty())
-            );
-        }
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                OpConvertToBool {
-                    input,
-                    output: ValueOutput::new(input.ty),
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
         self.regions[region].nodes.insert(node);
         self.connect_node_value_inputs(node);
 

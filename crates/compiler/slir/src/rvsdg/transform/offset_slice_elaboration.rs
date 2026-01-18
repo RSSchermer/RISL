@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::rvsdg::NodeKind::Simple;
-use crate::rvsdg::SimpleNode::OpPtrElementPtr;
+use crate::rvsdg::SimpleNode::OpElementPtr;
 use crate::rvsdg::visit::bottom_up::{BottomUpVisitor, visit_node_bottom_up};
 use crate::rvsdg::{Node, Region, Rvsdg, ValueInput, ValueOrigin};
 use crate::ty::{TY_U32, Type, TypeKind, TypeRegistry};
@@ -15,11 +15,11 @@ fn is_slice_ptr_ty(type_registry: &TypeRegistry, ty: Type) -> bool {
     }
 }
 
-fn elaborate_ptr_element_ptr_input(rvsdg: &mut Rvsdg, node: Node) {
+fn elaborate_element_ptr_input(rvsdg: &mut Rvsdg, node: Node) {
     let region = rvsdg[node].region();
-    let data = rvsdg[node].expect_op_ptr_element_ptr();
+    let data = rvsdg[node].expect_op_element_ptr();
     let ptr_input = *data.ptr_input();
-    let index_input = data.index_inputs()[0];
+    let index_input = *data.index_input();
 
     let get_offset_node = rvsdg.add_op_get_ptr_offset(region, ptr_input);
     let add_node = rvsdg.add_op_binary(
@@ -61,7 +61,7 @@ impl Collector {
 
 impl BottomUpVisitor for Collector {
     fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
-        if let Simple(OpPtrElementPtr(op)) = rvsdg[node].kind()
+        if let Simple(OpElementPtr(op)) = rvsdg[node].kind()
             && is_slice_ptr_ty(rvsdg.ty(), op.ptr_input().ty)
             && self.seen.insert(node)
         {
@@ -83,7 +83,7 @@ impl PtrOffsetElaborator {
         }
     }
 
-    pub fn elaborate_ptr_offset_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) {
+    pub fn elaborate_offset_slice_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) {
         let body_region = rvsdg
             .get_function_node(function)
             .map(|n| rvsdg[n].expect_function().body_region());
@@ -92,7 +92,7 @@ impl PtrOffsetElaborator {
             self.collector.collect(rvsdg, body_region);
 
             while let Some(node) = self.collector.queue.pop() {
-                elaborate_ptr_element_ptr_input(rvsdg, node);
+                elaborate_element_ptr_input(rvsdg, node);
             }
         }
     }
@@ -102,6 +102,6 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
     let mut elaborator = PtrOffsetElaborator::new();
 
     for (entry_point, _) in module.entry_points.iter() {
-        elaborator.elaborate_ptr_offset_in_fn(rvsdg, entry_point);
+        elaborator.elaborate_offset_slice_in_fn(rvsdg, entry_point);
     }
 }

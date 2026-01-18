@@ -15,7 +15,7 @@ impl RegionNodesVisitor for NodeCollector<'_> {
         use SimpleNode::*;
 
         match rvsdg[node].kind() {
-            Simple(OpSwitchPredicateToCase(_)) => self.candidates.push(node),
+            Simple(OpBranchSelectorToCase(_)) => self.candidates.push(node),
             _ => (),
         }
 
@@ -105,7 +105,7 @@ impl ValueFlowVisitor for DependentFinder {
         use SimpleNode::*;
 
         match rvsdg[node].kind() {
-            Simple(OpCaseToSwitchPredicate(_)) => self.dependents.push(node),
+            Simple(OpCaseToBranchSelector(_)) => self.dependents.push(node),
             Switch(_) if input == 0 => self.dependents.push(node),
             Switch(_) | Loop(_) => visit::value_flow::visit_value_input(self, rvsdg, node, input),
             _ => unreachable!("node kind cannot take a predicate type value as input"),
@@ -131,21 +131,21 @@ impl Merger {
         use SimpleNode::*;
 
         let region = rvsdg[pred_to_case].region();
-        let data = rvsdg[pred_to_case].expect_op_switch_predicate_to_case();
-        let pred_origin = data.input().origin;
-        let user_count = data.output().users.len();
+        let data = rvsdg[pred_to_case].expect_op_branch_selector_to_case();
+        let pred_origin = data.value_input().origin;
+        let user_count = data.value_output().users.len();
 
         let mut merged_user_count = 0;
 
         for i in (0..user_count).rev() {
-            let data = rvsdg[pred_to_case].expect_op_switch_predicate_to_case();
-            let user = data.output().users[i];
+            let data = rvsdg[pred_to_case].expect_op_branch_selector_to_case();
+            let user = data.value_output().users[i];
 
             if let ValueUser::Input {
                 consumer: case_to_pred,
                 input: 0,
             } = user
-                && let Simple(OpCaseToSwitchPredicate(n)) = rvsdg[case_to_pred].kind()
+                && let Simple(OpCaseToBranchSelector(n)) = rvsdg[case_to_pred].kind()
             {
                 let case_match = self.case_matcher.match_cases(data.cases(), n.cases());
 
@@ -162,8 +162,8 @@ impl Merger {
                     {
                         match rvsdg[dependent].kind() {
                             Switch(_) => rvsdg.permute_switch_branches(dependent, permutation),
-                            Simple(OpCaseToSwitchPredicate(_)) => rvsdg
-                                .permute_op_case_to_switch_predicate_cases(dependent, permutation),
+                            Simple(OpCaseToBranchSelector(_)) => rvsdg
+                                .permute_op_case_to_branch_selector_cases(dependent, permutation),
                             _ => unreachable!(
                                 "find_dependents should not have found other node kinds"
                             ),
@@ -294,14 +294,14 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let bool_node = rvsdg.add_const_bool(region, false);
-        let bool_pred_node = rvsdg
-            .add_op_bool_to_switch_predicate(region, ValueInput::output(TY_BOOL, bool_node, 0));
-        let pred_to_case_node = rvsdg.add_op_switch_predicate_to_case(
+        let bool_pred_node =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_node, 0));
+        let pred_to_case_node = rvsdg.add_op_branch_selector_to_case(
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
             [0, 1],
         );
-        let case_to_pred_node = rvsdg.add_op_case_to_switch_predicate(
+        let case_to_pred_node = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, pred_to_case_node, 0),
             [0, 1],
@@ -394,14 +394,14 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let bool_node = rvsdg.add_const_bool(region, false);
-        let bool_pred_node = rvsdg
-            .add_op_bool_to_switch_predicate(region, ValueInput::output(TY_BOOL, bool_node, 0));
-        let pred_to_case_node = rvsdg.add_op_switch_predicate_to_case(
+        let bool_pred_node =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_node, 0));
+        let pred_to_case_node = rvsdg.add_op_branch_selector_to_case(
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
             [0, 1],
         );
-        let case_to_pred_node = rvsdg.add_op_case_to_switch_predicate(
+        let case_to_pred_node = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, pred_to_case_node, 0),
             [1, 0],

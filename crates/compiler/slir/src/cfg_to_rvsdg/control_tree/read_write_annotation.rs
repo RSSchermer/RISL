@@ -1,6 +1,9 @@
 use indexmap::IndexSet;
 
-use crate::cfg::{Assign, BasicBlock, Bind, Cfg, IntrinsicOp, LocalBinding, OpCall, StatementData, Terminator, Uninitialized, Value};
+use crate::cfg::{
+    Assign, BasicBlock, Bind, Cfg, IntrinsicOp, LocalBinding, OpCall, StatementData, Terminator,
+    Uninitialized, Value,
+};
 use crate::cfg_to_rvsdg::control_tree::control_tree::{
     BranchingNode, ControlTree, ControlTreeNode, ControlTreeNodeKind, LinearNode, LoopNode,
 };
@@ -97,6 +100,7 @@ impl_with_read_values_statement! {
     OpConvertToI32,
     OpConvertToF32,
     OpConvertToBool,
+    OpArrayLength,
 }
 
 pub trait WithWrittenValues {
@@ -134,7 +138,7 @@ impl WithWrittenValues for Uninitialized {
 impl<T> WithWrittenValues for IntrinsicOp<T> {
     fn with_written_values<F>(&self, f: F)
     where
-        F: FnMut(&LocalBinding)
+        F: FnMut(&LocalBinding),
     {
         self.maybe_result().as_ref().map(f);
     }
@@ -188,6 +192,7 @@ impl_with_written_values_statement! {
     OpConvertToI32,
     OpConvertToF32,
     OpConvertToBool,
+    OpArrayLength,
 }
 
 pub struct ReadWriteAnnotationVisitor<'a> {

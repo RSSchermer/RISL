@@ -109,6 +109,46 @@ impl InlineConst {
             InlineConst::Ptr(ptr) => ptr.ty(),
         }
     }
+
+    pub fn expect_u32(&self) -> u32 {
+        if let InlineConst::U32(v) = self {
+            *v
+        } else {
+            panic!("expected a `u32` constant")
+        }
+    }
+
+    pub fn expect_i32(&self) -> i32 {
+        if let InlineConst::I32(v) = self {
+            *v
+        } else {
+            panic!("expected an `i32` constant")
+        }
+    }
+
+    pub fn expect_f32(&self) -> f32 {
+        if let InlineConst::F32(v) = self {
+            v.0
+        } else {
+            panic!("expected an `f32` constant")
+        }
+    }
+
+    pub fn expect_bool(&self) -> bool {
+        if let InlineConst::Bool(v) = self {
+            *v
+        } else {
+            panic!("expected a `bool` constant")
+        }
+    }
+
+    pub fn expect_ptr(&self) -> ConstPtr {
+        if let InlineConst::Ptr(ptr) = self {
+            *ptr
+        } else {
+            panic!("expected a pointer constant")
+        }
+    }
 }
 
 impl From<f32> for InlineConst {
@@ -292,6 +332,10 @@ macro_rules! gen_intrinsic_result {
 pub type OpAlloca = IntrinsicOp<intrinsic::OpAlloca>;
 
 impl OpAlloca {
+    pub fn ty(&self) -> Type {
+        self.intrinsic.ty
+    }
+
     gen_intrinsic_result!();
 }
 
@@ -321,8 +365,11 @@ impl OpElementPtr {
 pub type OpFieldPtr = IntrinsicOp<intrinsic::OpFieldPtr>;
 
 impl OpFieldPtr {
+    pub fn field_index(&self) -> u32 {
+        self.intrinsic.field_index
+    }
+
     gen_intrinsic_arg!(0, ptr);
-    gen_intrinsic_arg!(1, field_index);
     gen_intrinsic_result!();
 }
 
@@ -337,16 +384,22 @@ impl OpExtractElement {
 pub type OpExtractField = IntrinsicOp<intrinsic::OpExtractField>;
 
 impl OpExtractField {
+    pub fn field_index(&self) -> u32 {
+        self.intrinsic.field_index
+    }
+
     gen_intrinsic_arg!(0, value);
-    gen_intrinsic_arg!(1, field_index);
     gen_intrinsic_result!();
 }
 
 pub type OpVariantPtr = IntrinsicOp<intrinsic::OpVariantPtr>;
 
 impl OpVariantPtr {
+    pub fn variant_index(&self) -> u32 {
+        self.intrinsic.variant_index
+    }
+
     gen_intrinsic_arg!(0, ptr);
-    gen_intrinsic_arg!(1, variant_index);
     gen_intrinsic_result!();
 }
 
@@ -360,8 +413,11 @@ impl OpGetDiscriminant {
 pub type OpSetDiscriminant = IntrinsicOp<intrinsic::OpSetDiscriminant>;
 
 impl OpSetDiscriminant {
+    pub fn variant_index(&self) -> u32 {
+        self.intrinsic.variant_index
+    }
+
     gen_intrinsic_arg!(0, ptr);
-    gen_intrinsic_arg!(1, variant_index);
     gen_intrinsic_result!();
 }
 
@@ -383,6 +439,10 @@ impl OpArrayLength {
 pub type OpUnary = IntrinsicOp<intrinsic::OpUnary>;
 
 impl OpUnary {
+    pub fn operator(&self) -> UnaryOperator {
+        self.intrinsic.operator
+    }
+
     gen_intrinsic_arg!(0, value);
     gen_intrinsic_result!();
 }
@@ -390,6 +450,10 @@ impl OpUnary {
 pub type OpBinary = IntrinsicOp<intrinsic::OpBinary>;
 
 impl OpBinary {
+    pub fn operator(&self) -> BinaryOperator {
+        self.intrinsic.operator
+    }
+
     gen_intrinsic_arg!(0, lhs);
     gen_intrinsic_arg!(1, rhs);
     gen_intrinsic_result!();
@@ -405,6 +469,10 @@ impl OpBoolToBranchSelector {
 pub type OpCaseToBranchSelector = IntrinsicOp<intrinsic::OpCaseToBranchSelector>;
 
 impl OpCaseToBranchSelector {
+    pub fn cases(&self) -> &[u32] {
+        &self.intrinsic.cases
+    }
+
     gen_intrinsic_arg!(0, value);
     gen_intrinsic_result!();
 }
@@ -513,6 +581,7 @@ gen_statement_data! {
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
     OpConvertToF32 is_op_convert_to_f32 expect_op_convert_to_f32 "convert-to-f32",
     OpConvertToBool is_op_convert_to_bool expect_op_convert_to_bool "convert-to-bool",
+    OpArrayLength is_op_array_length expect_op_array_length "array-length",
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default, Debug)]
@@ -1417,6 +1486,22 @@ impl Cfg {
             position,
             intrinsic::OpConvertToBool,
             [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_array_length(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        ptr: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpArrayLength,
+            [(ptr, "ptr")],
         );
 
         (stmt, result.unwrap())

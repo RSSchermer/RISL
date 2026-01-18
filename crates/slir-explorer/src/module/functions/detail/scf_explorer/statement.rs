@@ -38,7 +38,7 @@ pub fn Statement(statement: slir::scf::Statement) -> impl IntoView {
             <ExprBinding statement/><br/>
         }
         .into_any(),
-        StatementKind::Store(_) => view! {
+        StatementKind::OpStore(_) => view! {
             <Store statement/><br/>
         }
         .into_any(),
@@ -215,7 +215,7 @@ pub fn ExprBinding(statement: slir::scf::Statement) -> impl IntoView {
 #[component]
 pub fn Store(statement: slir::scf::Statement) -> impl IntoView {
     let module_data = use_module_data().read_value();
-    let stmt = module_data.expect_scf()[statement].kind().expect_store();
+    let stmt = module_data.expect_scf()[statement].kind().expect_op_store();
 
     view! {
         "*"<LocalBinding binding=stmt.pointer()/>
