@@ -77,7 +77,7 @@ impl PtrOffsetReplacer {
 
     fn replace_op_get_slice_offset(&mut self, rvsdg: &mut Rvsdg, node: Node) {
         let region = rvsdg[node].region();
-        let data = rvsdg[node].expect_op_offset_slice();
+        let data = rvsdg[node].expect_op_get_slice_offset();
         let ptr_origin = data.ptr_input().origin;
         let user_count = data.value_output().users.len();
         let ptr_offset = self.resolve_slice_offset(rvsdg, region, ptr_origin);

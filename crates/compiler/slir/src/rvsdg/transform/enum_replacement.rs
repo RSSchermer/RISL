@@ -594,16 +594,15 @@ mod tests {
 
         let switch_0_variant_0_node =
             rvsdg.add_op_variant_ptr(switch_0_branch_0, ValueInput::argument(enum_ptr_ty, 0), 0);
-        let switch_0_index_0_node = rvsdg.add_const_u32(switch_0_branch_0, 0);
-        let switch_0_element_0_node = rvsdg.add_op_element_ptr(
+        let switch_0_field_0_node = rvsdg.add_op_field_ptr(
             switch_0_branch_0,
             ValueInput::output(variant_0_ptr_ty, switch_0_variant_0_node, 0),
-            ValueInput::output(TY_U32, switch_0_index_0_node, 0),
+            0,
         );
         let switch_0_value_0_node = rvsdg.add_const_u32(switch_0_branch_0, 0);
         let switch_0_store_0_node = rvsdg.add_op_store(
             switch_0_branch_0,
-            ValueInput::output(TY_PTR_U32, switch_0_element_0_node, 0),
+            ValueInput::output(TY_PTR_U32, switch_0_field_0_node, 0),
             ValueInput::output(TY_U32, switch_0_value_0_node, 0),
             StateOrigin::Argument,
         );
@@ -618,16 +617,15 @@ mod tests {
 
         let switch_0_variant_1_node =
             rvsdg.add_op_variant_ptr(switch_0_branch_1, ValueInput::argument(enum_ptr_ty, 0), 1);
-        let switch_0_index_1_node = rvsdg.add_const_u32(switch_0_branch_1, 0);
-        let switch_0_element_1_node = rvsdg.add_op_element_ptr(
+        let switch_0_field_1_node = rvsdg.add_op_field_ptr(
             switch_0_branch_1,
             ValueInput::output(variant_1_ptr_ty, switch_0_variant_1_node, 0),
-            ValueInput::output(TY_U32, switch_0_index_1_node, 0),
+            0,
         );
         let switch_0_value_1_node = rvsdg.add_const_u32(switch_0_branch_1, 0);
         let switch_0_store_1_node = rvsdg.add_op_store(
             switch_0_branch_1,
-            ValueInput::output(TY_PTR_U32, switch_0_element_1_node, 0),
+            ValueInput::output(TY_PTR_U32, switch_0_field_1_node, 0),
             ValueInput::output(TY_U32, switch_0_value_1_node, 0),
             StateOrigin::Argument,
         );
@@ -661,15 +659,14 @@ mod tests {
         let switch_1_branch_0 = rvsdg.add_switch_branch(switch_1_node);
         let switch_1_variant_0_node =
             rvsdg.add_op_variant_ptr(switch_1_branch_0, ValueInput::argument(enum_ptr_ty, 0), 0);
-        let switch_1_index_0_node = rvsdg.add_const_u32(switch_1_branch_0, 0);
-        let switch_1_element_0_node = rvsdg.add_op_element_ptr(
+        let switch_1_field_0_node = rvsdg.add_op_field_ptr(
             switch_1_branch_0,
             ValueInput::output(variant_0_ptr_ty, switch_1_variant_0_node, 0),
-            ValueInput::output(TY_U32, switch_1_index_0_node, 0),
+            0,
         );
         let switch_1_load_0_node = rvsdg.add_op_load(
             switch_1_branch_0,
-            ValueInput::output(TY_PTR_U32, switch_1_element_0_node, 0),
+            ValueInput::output(TY_PTR_U32, switch_1_field_0_node, 0),
             StateOrigin::Argument,
         );
 
@@ -685,15 +682,14 @@ mod tests {
         let switch_1_branch_1 = rvsdg.add_switch_branch(switch_1_node);
         let switch_1_variant_1_node =
             rvsdg.add_op_variant_ptr(switch_1_branch_1, ValueInput::argument(enum_ptr_ty, 0), 1);
-        let switch_1_index_1_node = rvsdg.add_const_u32(switch_1_branch_1, 0);
-        let switch_1_element_1_node = rvsdg.add_op_element_ptr(
+        let switch_1_field_1_node = rvsdg.add_op_field_ptr(
             switch_1_branch_1,
             ValueInput::output(variant_1_ptr_ty, switch_1_variant_1_node, 0),
-            ValueInput::output(TY_U32, switch_1_index_1_node, 0),
+            0,
         );
         let switch_1_load_1_node = rvsdg.add_op_load(
             switch_1_branch_1,
-            ValueInput::output(TY_PTR_U32, switch_1_element_1_node, 0),
+            ValueInput::output(TY_PTR_U32, switch_1_field_1_node, 0),
             StateOrigin::Argument,
         );
 
@@ -819,13 +815,13 @@ mod tests {
         );
 
         assert_eq!(
-            rvsdg[switch_0_element_0_node]
-                .expect_op_element_ptr()
+            rvsdg[switch_0_field_0_node]
+                .expect_op_field_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(1),
-            "the ptr-element-ptr op in the first branch of the first switch should now take a \
-            pointer to the first variant's alloca"
+            "the field-ptr op in the first branch of the first switch should now take a pointer to \
+            the first variant's alloca"
         );
 
         assert!(
@@ -869,13 +865,13 @@ mod tests {
         );
 
         assert_eq!(
-            rvsdg[switch_0_element_1_node]
-                .expect_op_element_ptr()
+            rvsdg[switch_0_field_1_node]
+                .expect_op_field_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(2),
-            "the ptr-element-ptr op in the second branch of the first switch should now take a \
-            pointer to the second variant's alloca"
+            "the field-ptr op in the second branch of the first switch should now take a pointer \
+            to the second variant's alloca"
         );
 
         assert!(
@@ -944,13 +940,13 @@ mod tests {
         );
 
         assert_eq!(
-            rvsdg[switch_1_element_0_node]
-                .expect_op_element_ptr()
+            rvsdg[switch_1_field_0_node]
+                .expect_op_field_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(1),
-            "the ptr-element-ptr op in the first branch of the second switch should now take a \
-            pointer to the first variant's alloca"
+            "the field-ptr op in the first branch of the second switch should now take a pointer \
+            to the first variant's alloca"
         );
 
         assert!(
@@ -970,13 +966,13 @@ mod tests {
         );
 
         assert_eq!(
-            rvsdg[switch_1_element_1_node]
-                .expect_op_element_ptr()
+            rvsdg[switch_1_field_1_node]
+                .expect_op_field_ptr()
                 .ptr_input()
                 .origin,
             ValueOrigin::Argument(2),
-            "the ptr-element-ptr op in the second branch of the second switch should now take a \
-            pointer to the second variant's alloca"
+            "the field-ptr op in the second branch of the second switch should now take a pointer \
+            to the second variant's alloca"
         );
 
         assert!(

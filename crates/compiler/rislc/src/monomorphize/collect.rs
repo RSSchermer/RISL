@@ -1,5 +1,4 @@
 use std::cell::OnceCell;
-use std::path::PathBuf;
 
 use indexmap::{IndexMap, IndexSet};
 use rustc_data_structures::fx::FxIndexMap;
@@ -10,33 +9,21 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, DefIdMap, LocalDefId};
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::limit::Limit;
-use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
-use rustc_middle::mir::interpret::{AllocId, ErrorHandled, GlobalAlloc, Scalar};
-use rustc_middle::mir::mono::{CollectionMode, InstantiationMode, MonoItem};
-use rustc_middle::mir::visit::Visitor as MirVisitor;
-use rustc_middle::mir::{self, Location, MentionedItem, traversal};
-use rustc_middle::query::TyCtxtAt;
-use rustc_middle::ty::adjustment::{CustomCoerceUnsized, PointerCoercion};
+use rustc_middle::mir::interpret::{AllocId, GlobalAlloc, Scalar};
+use rustc_middle::mir::mono::{CollectionMode, MonoItem};
+use rustc_middle::mir::{self};
 use rustc_middle::ty::layout::ValidityRequirement;
-use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{
-    self, GenericArgs, GenericParamDefKind, Instance, InstanceKind, Ty, TyCtxt, TypeFoldable,
-    TypeVisitableExt, VtblEntry,
+    self, GenericArgs, GenericParamDefKind, Instance, InstanceKind, Ty, TyCtxt,
 };
-use rustc_middle::util::Providers;
-use rustc_middle::{bug, span_bug, traits};
-use rustc_session::config::EntryFnType;
+use rustc_middle::{bug, span_bug};
 use rustc_span::def_id::LocalModDefId;
 use rustc_span::source_map::{Spanned, dummy_spanned, respan};
-use rustc_span::symbol::sym;
-use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span, Symbol};
+use rustc_span::{DUMMY_SP, Span};
 use tracing::{debug, instrument, trace};
 
 use crate::context::RislContext as Cx;
-use crate::hir_ext::ExtendedItemKind;
-use crate::monomorphize::errors::{
-    self, EncounteredErrorWhileInstantiating, NoOptimizedMir, RecursionLimit,
-};
+use crate::monomorphize::errors::{EncounteredErrorWhileInstantiating, RecursionLimit};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MonoItemCollectionStrategy {

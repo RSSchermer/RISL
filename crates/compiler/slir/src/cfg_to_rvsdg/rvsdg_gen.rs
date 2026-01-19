@@ -999,7 +999,7 @@ mod tests {
             ValueInput::output(TY_U32, load_node, 0),
             ValueInput::argument(TY_U32, 1),
         );
-        let store_node = expected.add_op_store(
+        expected.add_op_store(
             region,
             ValueInput::argument(module.ty.register(TypeKind::Ptr(TY_U32)), 0),
             ValueInput::output(TY_U32, add_node, 0),

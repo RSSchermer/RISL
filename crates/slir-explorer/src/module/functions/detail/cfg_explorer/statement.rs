@@ -17,35 +17,32 @@ pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
         slir::cfg::StatementData::OpAlloca(_) => view! { <OpAlloca statement/> }.into_any(),
         slir::cfg::StatementData::OpLoad(_) => view! { <OpLoad statement/> }.into_any(),
         slir::cfg::StatementData::OpStore(_) => view! { <OpStore statement/> }.into_any(),
-        slir::cfg::StatementData::OpExtractValue(_) => {
-            view! { <OpExtractValue statement/> }.into_any()
+        slir::cfg::StatementData::OpExtractField(_) => {
+            view! { <OpExtractField statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpPtrElementPtr(_) => {
-            view! { <OpPtrElementPtr statement/> }.into_any()
+        slir::cfg::StatementData::OpExtractElement(_) => {
+            view! { <OpExtractElement statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpPtrVariantPtr(_) => {
-            view! { <OpPtrVariantPtr statement/> }.into_any()
-        }
+        slir::cfg::StatementData::OpFieldPtr(_) => view! { <OpFieldPtr statement/> }.into_any(),
+        slir::cfg::StatementData::OpElementPtr(_) => view! { <OpElementPtr statement/> }.into_any(),
+        slir::cfg::StatementData::OpVariantPtr(_) => view! { <OpVariantPtr statement/> }.into_any(),
         slir::cfg::StatementData::OpGetDiscriminant(_) => {
             view! { <OpGetDiscriminant statement/> }.into_any()
         }
         slir::cfg::StatementData::OpSetDiscriminant(_) => {
             view! { <OpSetDiscriminant statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpOffsetSlicePtr(_) => {
-            view! { <OpOffsetSlicePtr statement/> }.into_any()
+        slir::cfg::StatementData::OpOffsetSlice(_) => {
+            view! { <OpOffsetSlice statement/> }.into_any()
         }
         slir::cfg::StatementData::OpUnary(_) => view! { <OpUnary statement/> }.into_any(),
         slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall statement/> }.into_any(),
-        slir::cfg::StatementData::OpCallBuiltin(_) => {
-            view! { <OpCallBuiltin statement/> }.into_any()
+        slir::cfg::StatementData::OpCaseToBranchSelector(_) => {
+            view! { <OpCaseToBranchSelector statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpCaseToBranchPredicate(_) => {
-            view! { <OpCaseToBranchPredicate statement/> }.into_any()
-        }
-        slir::cfg::StatementData::OpBoolToBranchPredicate(_) => {
-            view! { <OpBoolToBranchPredicate statement/> }.into_any()
+        slir::cfg::StatementData::OpBoolToBranchSelector(_) => {
+            view! { <OpBoolToBranchSelector statement/> }.into_any()
         }
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 statement/> }.into_any()
@@ -58,6 +55,9 @@ pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
         }
         slir::cfg::StatementData::OpConvertToBool(_) => {
             view! { <OpConvertToBool statement/> }.into_any()
+        }
+        slir::cfg::StatementData::OpArrayLength(_) => {
+            view! { <OpArrayLength statement/> }.into_any()
         }
     };
 
@@ -117,7 +117,7 @@ pub fn OpLoad(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
     let stmt = data.cfg[statement].expect_op_load();
     let binding = stmt.result();
-    let pointer = stmt.pointer();
+    let pointer = stmt.ptr();
 
     view! {
         <Value value=binding.into()/> " = load "<Value value=pointer/>
@@ -128,7 +128,7 @@ pub fn OpLoad(statement: slir::cfg::Statement) -> impl IntoView {
 pub fn OpStore(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
     let stmt = data.cfg[statement].expect_op_store();
-    let pointer = stmt.pointer();
+    let pointer = stmt.ptr();
     let value = stmt.value();
 
     view! {
@@ -137,51 +137,67 @@ pub fn OpStore(statement: slir::cfg::Statement) -> impl IntoView {
 }
 
 #[component]
-pub fn OpExtractValue(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpExtractField(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_extract_value();
-    let aggregate = stmt.aggregate();
-    let indices = stmt.indices().to_vec();
+    let stmt = data.cfg[statement].expect_op_extract_field();
+    let aggregate = stmt.value();
+    let field_index = stmt.field_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value=aggregate/>
-        {move || {
-            indices.iter().map(|i| view! {
-                "."<Value value=*i/>
-            }).collect_view()
-        }}
+        <Value value=binding.into()/>" = "<Value value=aggregate/>"._"{field_index}
     }
 }
 
 #[component]
-pub fn OpPtrElementPtr(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpExtractElement(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_ptr_element_ptr();
-    let pointer = stmt.pointer();
-    let indices = stmt.indices().to_vec();
+    let stmt = data.cfg[statement].expect_op_extract_element();
+    let aggregate = stmt.value();
+    let index = stmt.element_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = &"<Value value=pointer/>
-        {move || {
-            indices.iter().map(|i| view! {
-                "."<Value value=*i/>
-            }).collect_view()
-        }}
+        <Value value=binding.into()/>" = "<Value value=aggregate/>"["<Value value=index/>"]"
     }
 }
 
 #[component]
-pub fn OpPtrVariantPtr(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpFieldPtr(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_ptr_variant_ptr();
-    let pointer = stmt.pointer();
+    let stmt = data.cfg[statement].expect_op_field_ptr();
+    let ptr = stmt.ptr();
+    let field_index = stmt.field_index();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = "<Value value=ptr/>"._"{field_index}
+    }
+}
+
+#[component]
+pub fn OpElementPtr(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_element_ptr();
+    let ptr = stmt.ptr();
+    let index = stmt.element_index();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = &"<Value value=ptr/>"["<Value value=index/>"]"
+    }
+}
+
+#[component]
+pub fn OpVariantPtr(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_variant_ptr();
+    let ptr = stmt.ptr();
     let variant_index = stmt.variant_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = variant-ptr "<Value value=pointer/>":"{variant_index}
+        <Value value=binding.into()/>" = variant-ptr "<Value value=ptr/>":"{variant_index}
     }
 }
 
@@ -189,11 +205,11 @@ pub fn OpPtrVariantPtr(statement: slir::cfg::Statement) -> impl IntoView {
 pub fn OpGetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
     let stmt = data.cfg[statement].expect_op_get_discriminant();
-    let pointer = stmt.pointer();
+    let ptr = stmt.ptr();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = get-discriminant "<Value value=pointer/>
+        <Value value=binding.into()/>" = get-discriminant "<Value value=ptr/>
     }
 }
 
@@ -201,26 +217,26 @@ pub fn OpGetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
 pub fn OpSetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
     let stmt = data.cfg[statement].expect_op_set_discriminant();
-    let pointer = stmt.pointer();
+    let ptr = stmt.ptr();
     let variant_index = stmt.variant_index();
 
     view! {
-        "set-discriminant "{variant_index}" on "<Value value=pointer/>
+        "set-discriminant "{variant_index}" on "<Value value=ptr/>
     }
 }
 
 #[component]
-pub fn OpOffsetSlicePtr(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpOffsetSlice(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
     let stmt = data.cfg[statement].expect_op_offset_slice_ptr();
-    let pointer = stmt.pointer();
+    let ptr = stmt.ptr();
     let offset = stmt.offset();
     let binding = stmt.result();
 
     view! {
         <Value value=binding.into()/>
         " = offset "
-        <Value value=pointer/>
+        <Value value=ptr/>
         " by "
         <Value value=offset/>
     }
@@ -230,12 +246,12 @@ pub fn OpOffsetSlicePtr(statement: slir::cfg::Statement) -> impl IntoView {
 pub fn OpUnary(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
     let stmt = data.cfg[statement].expect_op_unary();
-    let operand = stmt.operand();
+    let value = stmt.value();
     let operator = stmt.operator();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>{format!(" = {}", operator)}<Value value=operand/>
+        <Value value=binding.into()/>{format!(" = {}", operator)}<Value value/>
     }
 }
 
@@ -287,38 +303,9 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
 }
 
 #[component]
-pub fn OpCallBuiltin(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpCaseToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_call_builtin();
-    let callee = stmt.callee();
-    let binding = stmt.result();
-
-    let mut arg_views = Vec::new();
-    let mut is_first = true;
-
-    for arg in stmt.arguments().iter().copied() {
-        if !is_first {
-            arg_views.push(view! {", "}.into_any());
-        }
-
-        arg_views.push(view! { <Value value=arg/> }.into_any());
-
-        is_first = false;
-    }
-
-    view! {
-        {{move || binding.map(|binding | view! {
-            <Value value=binding.into()/>" = "
-        })}}
-
-        {callee.ident().as_str()} "(" {arg_views} ")"
-    }
-}
-
-#[component]
-pub fn OpCaseToBranchPredicate(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_case_to_branch_predicate();
+    let stmt = data.cfg[statement].expect_op_case_to_branch_selector();
     let value = stmt.value();
     let cases = stmt
         .cases()
@@ -334,9 +321,9 @@ pub fn OpCaseToBranchPredicate(statement: slir::cfg::Statement) -> impl IntoView
 }
 
 #[component]
-pub fn OpBoolToBranchPredicate(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpBoolToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView {
     let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_bool_to_branch_predicate();
+    let stmt = data.cfg[statement].expect_op_bool_to_branch_selector();
     let value = stmt.value();
     let binding = stmt.result();
 
@@ -390,5 +377,17 @@ pub fn OpConvertToBool(statement: slir::cfg::Statement) -> impl IntoView {
 
     view! {
         <Value value=binding.into()/>" = bool("<Value value/>")"
+    }
+}
+
+#[component]
+pub fn OpArrayLength(statement: slir::cfg::Statement) -> impl IntoView {
+    let data = use_module_data().read_value();
+    let stmt = data.cfg[statement].expect_op_array_length();
+    let value = stmt.ptr();
+    let binding = stmt.result();
+
+    view! {
+        <Value value=binding.into()/>" = array-length("<Value value/>")"
     }
 }

@@ -106,18 +106,13 @@ pub fn annotate_demand(
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::cfg::{
-        Assign, BlockPosition, Branch, Cfg, FunctionBody, InlineConst, LocalBindingData, OpBinary,
-        Terminator,
-    };
+    use crate::cfg::{BlockPosition, Cfg, Terminator};
     use crate::cfg_to_rvsdg::control_flow_restructuring::{
         Graph, restructure_branches, restructure_loops,
     };
     use crate::cfg_to_rvsdg::control_tree::read_write_annotation::annotate_read_write;
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
+    use crate::ty::{TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]

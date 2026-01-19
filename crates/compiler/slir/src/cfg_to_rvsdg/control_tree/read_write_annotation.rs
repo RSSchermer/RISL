@@ -340,16 +340,12 @@ pub fn annotate_read_write(
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::cfg::{
-        Assign, BlockPosition, Branch, InlineConst, LocalBindingData, OpBinary, Terminator,
-    };
+    use crate::cfg::{BlockPosition, Terminator};
     use crate::cfg_to_rvsdg::control_flow_restructuring::{
         Graph, restructure_branches, restructure_loops,
     };
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
+    use crate::ty::{TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]

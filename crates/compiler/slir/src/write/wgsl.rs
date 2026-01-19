@@ -11,15 +11,15 @@ use crate::scf::analyze::local_binding_use::count_local_binding_use;
 use crate::scf::analyze::struct_use::collect_used_structs;
 use crate::scf::{
     Alloca, Block, ExprBinding, Expression, ExpressionKind, GlobalPtr, If, IntrinsicOp,
-    LocalBinding, LocalBindingKind, Loop, LoopControl, OpBinary, OpConvertToBool, OpConvertToF32,
-    OpConvertToI32, OpConvertToU32, OpElementPtr, OpExtractElement, OpExtractField, OpFieldPtr,
-    OpLoad, OpMatrix, OpStore, OpUnary, OpVector, Return, Scf, Statement, StatementKind, Switch,
+    LocalBinding, LocalBindingKind, Loop, LoopControl, OpBinary, OpElementPtr, OpExtractElement,
+    OpExtractField, OpFieldPtr, OpLoad, OpMatrix, OpStore, OpUnary, OpVector, Return, Scf,
+    Statement, StatementKind, Switch,
 };
 use crate::ty::{ScalarKind, Struct, StructField, Type, TypeKind, VectorSize};
 use crate::{
     BinaryOperator, BlendSrc, Constant, ConstantKind, EntryPointKind, Function, Interpolation,
     InterpolationSampling, InterpolationType, Module, OverridableConstantKind, ResourceBinding,
-    ShaderIOBinding, StorageBinding, Symbol, UnaryOperator, UniformBinding, WorkgroupBinding, ty,
+    ShaderIOBinding, StorageBinding, UnaryOperator, UniformBinding, WorkgroupBinding, ty,
 };
 
 const INDENT: &'static str = "    ";

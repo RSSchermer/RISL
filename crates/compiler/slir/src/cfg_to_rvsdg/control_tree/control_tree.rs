@@ -263,17 +263,12 @@ impl Index<ControlTreeNode> for ControlTree {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::cfg::{
-        Assign, BlockPosition, Branch, Cfg, FunctionBody, InlineConst, LocalBindingData, OpBinary,
-        StatementData, Terminator, Value,
-    };
+    use crate::cfg::{BlockPosition, Cfg, Terminator};
     use crate::cfg_to_rvsdg::control_flow_restructuring::{
         restructure_branches, restructure_loops,
     };
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
+    use crate::ty::{TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]

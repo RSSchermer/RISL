@@ -340,10 +340,9 @@ pub fn restructure_branches(
 #[cfg(test)]
 mod tests {
     use rustc_hash::FxHashSet;
-    use smallvec::smallvec;
 
     use super::*;
-    use crate::cfg::{Branch, Cfg, FunctionBody, Terminator};
+    use crate::cfg::{Cfg, Terminator};
     use crate::ty::TY_DUMMY;
     use crate::{FnArg, FnSig, Function, Module, Symbol};
 

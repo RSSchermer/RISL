@@ -4,9 +4,7 @@ use rustc_public::abi::{PassMode, ValueAbi};
 use rustc_public::crate_def::Attribute;
 use rustc_public::mir::mono::{Instance, MonoItem};
 use slir::BinaryOperator;
-use slir::builtin_function::BuiltinFunction;
 use slir::cfg::{BlockPosition, LocalBinding, Terminator};
-use slir::ty::TY_U32;
 
 use crate::slir_build::context::CodegenContext;
 use crate::stable_cg::traits::MiscCodegenMethods;
@@ -160,12 +158,7 @@ fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {
         let (_, len_ptr) =
             cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, alloca_ptr.into(), 1);
         let (_, len) = cfg.add_stmt_op_array_length(bb, BlockPosition::Append, ptr_arg.into());
-        cfg.add_stmt_op_store(
-            bb,
-            BlockPosition::Append,
-            len_ptr.into(),
-            len.unwrap().into(),
-        );
+        cfg.add_stmt_op_store(bb, BlockPosition::Append, len_ptr.into(), len.into());
 
         let (_, pair) = cfg.add_stmt_op_load(bb, BlockPosition::Append, alloca_ptr.into());
 

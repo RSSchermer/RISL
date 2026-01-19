@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_sized_struct_layout() {
-        let mut module = Module::new(Symbol::from_ref(""));
+        let module = Module::new(Symbol::from_ref(""));
 
         let element_ty = module.ty.register(TypeKind::Struct(Struct {
             fields: vec![
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn test_unsized_struct_layout() {
-        let mut module = Module::new(Symbol::from_ref(""));
+        let module = Module::new(Symbol::from_ref(""));
 
         let element_ty = module.ty.register(TypeKind::Struct(Struct {
             fields: vec![

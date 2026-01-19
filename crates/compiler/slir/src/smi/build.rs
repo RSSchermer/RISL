@@ -592,7 +592,7 @@ mod tests {
             writable: false,
         });
         // Not used by any function.
-        let storage_1 = module.storage_bindings.register(StorageBindingData {
+        let _storage_1 = module.storage_bindings.register(StorageBindingData {
             ty: TY_F32,
             resource_binding: ResourceBinding {
                 group: 1,

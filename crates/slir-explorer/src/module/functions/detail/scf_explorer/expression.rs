@@ -78,46 +78,28 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "bool("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
-        ExpressionKind::OpPtrElementPtr(op) => view! {
-            "&"<LocalBinding binding=op.ptr()/>
-
-            {
-                op.indices()
-                    .iter()
-                .copied()
-                    .map(|binding| view! {
-                        "."<LocalBinding binding/>
-                    }.into_any())
-                    .collect::<Vec<_>>()
-            }
+        ExpressionKind::OpFieldPtr(op) => view! {
+            "&"<LocalBinding binding=op.ptr()/>"._"{op.field_index()}
+        }
+        .into_any(),
+        ExpressionKind::OpElementPtr(op) => view! {
+            "&"<LocalBinding binding=op.ptr()/>"["<LocalBinding binding=op.index()/>"]"
+        }
+        .into_any(),
+        ExpressionKind::OpExtractField(op) => view! {
+            <LocalBinding binding=op.value()/>"._"{op.field_index()}
         }
         .into_any(),
         ExpressionKind::OpExtractElement(op) => view! {
-            <LocalBinding binding=op.value()/>
-
-            {
-                op.indices()
-                    .iter()
-                .copied()
-                    .map(|binding| view! {
-                        "."<LocalBinding binding/>
-                    }.into_any())
-                    .collect::<Vec<_>>()
-            }
+            <LocalBinding binding=op.value()/>"["<LocalBinding binding=op.index()/>"]"
         }
         .into_any(),
-        ExpressionKind::OpLoad(pointer) => view! {
-            "*"<LocalBinding binding=*pointer/>
+        ExpressionKind::OpLoad(op) => view! {
+            "*"<LocalBinding binding=op.ptr()/>
         }
         .into_any(),
-        ExpressionKind::OpCallBuiltin(op) => view! {
-            {op.callee().ident().as_str()}"("{
-                op.arguments().iter().copied().map(|binding| view! {
-                    <LocalBinding binding/>
-                }.into_any())
-                .intersperse_with(|| view! {", "}.into_any())
-                .collect_view()
-            }")"
+        ExpressionKind::OpArrayLength(op) => view! {
+            "array-length("<LocalBinding binding=op.ptr()/>")"
         }
         .into_any(),
     }

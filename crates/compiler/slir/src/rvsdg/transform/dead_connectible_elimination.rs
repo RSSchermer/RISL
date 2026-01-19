@@ -300,7 +300,7 @@ mod tests {
     use std::iter;
 
     use super::*;
-    use crate::rvsdg::{StateOrigin, ValueInput, ValueOutput};
+    use crate::rvsdg::{ValueInput, ValueOutput};
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 

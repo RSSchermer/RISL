@@ -212,10 +212,8 @@ impl DerefMut for Graph<'_> {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::cfg::{Branch, Terminator};
+    use crate::cfg::Terminator;
     use crate::ty::{TY_BOOL, TY_DUMMY};
     use crate::{FnArg, FnSig, Module, Symbol};
 

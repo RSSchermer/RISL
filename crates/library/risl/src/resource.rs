@@ -1,5 +1,3 @@
-use std::{marker, mem};
-
 pub use risl_macros::resource;
 
 pub(crate) mod seal {

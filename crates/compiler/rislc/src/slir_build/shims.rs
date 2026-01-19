@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use rustc_public::mir::mono::{Instance, MonoItem};
 use slir::BinaryOperator;
-use slir::cfg::{BlockPosition, InlineConst, Terminator};
+use slir::cfg::{BlockPosition, Terminator};
 
 use crate::slir_build::context::CodegenContext;
 use crate::stable_cg::traits::MiscCodegenMethods;

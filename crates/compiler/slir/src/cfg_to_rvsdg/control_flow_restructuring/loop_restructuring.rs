@@ -171,10 +171,8 @@ fn restructure_loop_tail(
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::cfg::{Branch, Cfg, FunctionBody, Terminator};
+    use crate::cfg::{Cfg, Terminator};
     use crate::ty::TY_DUMMY;
     use crate::{FnArg, FnSig, Function, Module, Symbol};
 

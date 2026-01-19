@@ -271,7 +271,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::{ValueInput, ValueOutput};
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_U32};
-    use crate::{BinaryOperator, FnArg, FnSig, Symbol};
+    use crate::{BinaryOperator, FnSig, Symbol};
 
     #[test]
     fn test_merge_same_stratum_switch_nodes() {

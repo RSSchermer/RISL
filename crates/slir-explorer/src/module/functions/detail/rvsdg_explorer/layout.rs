@@ -987,30 +987,35 @@ impl NodeLayout {
                 SimpleNode::OpAlloca(_) => NodeContent::PlainText("alloca".into()),
                 SimpleNode::OpLoad(_) => NodeContent::PlainText("load".into()),
                 SimpleNode::OpStore(_) => NodeContent::PlainText("store".into()),
-                SimpleNode::OpPtrElementPtr(_) => NodeContent::PlainText("el-ptr".into()),
-                SimpleNode::OpPtrDiscriminantPtr(_) => NodeContent::PlainText("discr-ptr".into()),
-                SimpleNode::OpPtrVariantPtr(op) => {
+                SimpleNode::OpFieldPtr(op) => {
+                    NodeContent::PlainText(format!("&field:{}", op.field_index()).into())
+                }
+                SimpleNode::OpElementPtr(_) => NodeContent::PlainText("&element".into()),
+                SimpleNode::OpDiscriminantPtr(_) => NodeContent::PlainText("discr-ptr".into()),
+                SimpleNode::OpVariantPtr(op) => {
                     NodeContent::PlainText(format!("vrnt-ptr:{}", op.variant_index()).into())
                 }
                 SimpleNode::OpGetDiscriminant(_) => NodeContent::PlainText("get-discr".into()),
                 SimpleNode::OpSetDiscriminant(op) => {
                     NodeContent::PlainText(format!("set-discr:{}", op.variant_index()).into())
                 }
-                SimpleNode::OpAddPtrOffset(_) => NodeContent::PlainText("add-ptr-offset".into()),
-                SimpleNode::OpGetPtrOffset(_) => NodeContent::PlainText("get-ptr-offset".into()),
-                SimpleNode::OpExtractElement(_) => NodeContent::PlainText("extract".into()),
-                SimpleNode::OpCall(op) => NodeContent::FnCall("call".into(), op.resolve_fn(module)),
-                SimpleNode::OpCallBuiltin(op) => {
-                    NodeContent::PlainText(op.callee().ident().as_str().into())
+                SimpleNode::OpOffsetSlice(_) => NodeContent::PlainText("offset-slice".into()),
+                SimpleNode::OpGetSliceOffset(_) => {
+                    NodeContent::PlainText("get-slice-offset".into())
                 }
+                SimpleNode::OpExtractField(op) => {
+                    NodeContent::PlainText(format!("field:{}", op.field_index()).into())
+                }
+                SimpleNode::OpExtractElement(_) => NodeContent::PlainText("element".into()),
+                SimpleNode::OpCall(op) => NodeContent::FnCall("call".into(), op.resolve_fn(module)),
                 SimpleNode::OpUnary(op) => NodeContent::PlainText(op.operator().to_string().into()),
                 SimpleNode::OpBinary(op) => {
                     NodeContent::PlainText(op.operator().to_string().into())
                 }
                 SimpleNode::OpVector(_) => NodeContent::PlainText("vector".into()),
                 SimpleNode::OpMatrix(_) => NodeContent::PlainText("matrix".into()),
-                SimpleNode::OpCaseToSwitchPredicate(n) => {
-                    let tooltip = n
+                SimpleNode::OpCaseToBranchSelector(op) => {
+                    let tooltip = op
                         .cases()
                         .iter()
                         .map(|v| v.to_string())
@@ -1019,12 +1024,10 @@ impl NodeLayout {
 
                     NodeContent::PlainText(TextElement::from("pred-case").with_tooltip(tooltip))
                 }
-                SimpleNode::OpBoolToSwitchPredicate(_) => {
-                    NodeContent::PlainText("pred-bool".into())
-                }
-                SimpleNode::OpU32ToSwitchPredicate(_) => NodeContent::PlainText("pred-u32".into()),
-                SimpleNode::OpSwitchPredicateToCase(n) => {
-                    let tooltip = n
+                SimpleNode::OpBoolToBranchSelector(_) => NodeContent::PlainText("pred-bool".into()),
+                SimpleNode::OpU32ToBranchSelector(_) => NodeContent::PlainText("pred-u32".into()),
+                SimpleNode::OpBranchSelectorToCase(op) => {
+                    let tooltip = op
                         .cases()
                         .iter()
                         .map(|v| v.to_string())
@@ -1037,6 +1040,7 @@ impl NodeLayout {
                 SimpleNode::OpConvertToI32(_) => NodeContent::PlainText("to-i32".into()),
                 SimpleNode::OpConvertToF32(_) => NodeContent::PlainText("to-f32".into()),
                 SimpleNode::OpConvertToBool(_) => NodeContent::PlainText("to-bool".into()),
+                SimpleNode::OpArrayLength(_) => NodeContent::PlainText("array-len".into()),
                 SimpleNode::ValueProxy(_) => NodeContent::PlainText("proxy".into()),
                 SimpleNode::Reaggregation(_) => NodeContent::PlainText("reaggregation".into()),
             },

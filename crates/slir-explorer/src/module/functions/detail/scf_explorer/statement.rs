@@ -42,10 +42,6 @@ pub fn Statement(statement: slir::scf::Statement) -> impl IntoView {
             <Store statement/><br/>
         }
         .into_any(),
-        StatementKind::CallBuiltin(_) => view! {
-            <CallBuiltin statement/><br/>
-        }
-        .into_any(),
     }
 }
 
@@ -218,26 +214,8 @@ pub fn Store(statement: slir::scf::Statement) -> impl IntoView {
     let stmt = module_data.expect_scf()[statement].kind().expect_op_store();
 
     view! {
-        "*"<LocalBinding binding=stmt.pointer()/>
+        "*"<LocalBinding binding=stmt.ptr()/>
         " = "
         <LocalBinding binding=stmt.value()/>";"
-    }
-}
-
-#[component]
-pub fn CallBuiltin(statement: slir::scf::Statement) -> impl IntoView {
-    let module_data = use_module_data().read_value();
-    let stmt = module_data.expect_scf()[statement]
-        .kind()
-        .expect_call_builtin();
-
-    view! {
-        {stmt.callee().ident().as_str()}"("{
-            stmt.arguments().iter().copied().map(|binding| view! {
-                <LocalBinding binding/>
-            }.into_any())
-            .intersperse_with(|| view! {", "}.into_any())
-            .collect_view()
-        }")"
     }
 }

@@ -20,7 +20,7 @@ use crate::stable_cg::traits::{
 };
 use crate::stable_cg::{
     AtomicOrdering, AtomicRmwBinOp, IntPredicate, OperandRef, OperandValue, PlaceRef, PlaceValue,
-    RealPredicate, Scalar, SynchronizationScope, TyAndLayout,
+    RealPredicate, SynchronizationScope, TyAndLayout,
 };
 
 pub struct Builder<'a, 'tcx> {

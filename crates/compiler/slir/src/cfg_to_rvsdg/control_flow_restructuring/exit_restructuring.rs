@@ -1,5 +1,5 @@
 use crate::Function;
-use crate::cfg::{Assign, BasicBlock, BlockPosition, Branch, Cfg, FunctionBody, Terminator};
+use crate::cfg::{BasicBlock, BlockPosition, Branch, Cfg, Terminator};
 
 pub fn restructure_exit(cfg: &mut Cfg, function: Function) -> BasicBlock {
     let body = cfg
@@ -53,10 +53,8 @@ pub fn restructure_exit(cfg: &mut Cfg, function: Function) -> BasicBlock {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::*;
-    use crate::ty::{TY_BOOL, TY_DUMMY, TypeRegistry};
+    use crate::ty::{TY_BOOL, TY_DUMMY};
     use crate::{FnArg, FnSig, Module, Symbol};
 
     #[test]

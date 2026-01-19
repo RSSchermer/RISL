@@ -2,12 +2,11 @@ use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use crate::rvsdg::analyse::element_index::ElementIndex;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
     ValueOutput,
 };
-use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind};
 
 /// A variable pointer emulation program description.
 #[derive(Clone, Debug)]
@@ -1630,7 +1629,6 @@ mod tests {
             stride: 4,
         });
         let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
-        let ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let array_alloca_node = rvsdg.add_op_alloca(region, array_ty);
         let index_node = rvsdg.add_const_u32(region, 1);
@@ -1724,7 +1722,7 @@ mod tests {
         let ValueOrigin::Output {
             producer: emulation_0_ep_node,
             output: 0,
-        } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
+        } = emulation_0_load_data.ptr_input().origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
@@ -1858,7 +1856,6 @@ mod tests {
             stride: 4,
         });
         let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
-        let ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let array_alloca_node = rvsdg.add_op_alloca(region, array_ty);
 
@@ -1952,7 +1949,7 @@ mod tests {
         let ValueOrigin::Output {
             producer: emulation_0_ep_node,
             output: 0,
-        } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
+        } = emulation_0_load_data.ptr_input().origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
@@ -2212,7 +2209,7 @@ mod tests {
         let ValueOrigin::Output {
             producer: emulation_0_ep1_node,
             output: 0,
-        } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
+        } = emulation_0_load_data.ptr_input().origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
@@ -2234,7 +2231,7 @@ mod tests {
         let ValueOrigin::Output {
             producer: emulation_0_ep0_node,
             output: 0,
-        } = emulation_ep1_data.index_input().origin
+        } = emulation_ep1_data.ptr_input().origin
         else {
             panic!(
                 "the second element-pointer node input should connect to the first output of a \
@@ -3297,7 +3294,7 @@ mod tests {
         let ValueOrigin::Output {
             producer: emulation_0_ep_1_node,
             output: 0,
-        } = rvsdg[emulation_0_load_node].value_inputs()[0].origin
+        } = emulation_0_load_data.ptr_input().origin
         else {
             panic!("the load node in branch `0` should connect to the first output of a node")
         };
@@ -3312,7 +3309,7 @@ mod tests {
         let ValueOrigin::Output {
             producer: emulation_0_ep_0_node,
             output: 0,
-        } = emulation_0_ep1_data.index_input().origin
+        } = emulation_0_ep1_data.ptr_input().origin
         else {
             panic!(
                 "the second element-ptr node in branch `0` should connect to the first output of a \
