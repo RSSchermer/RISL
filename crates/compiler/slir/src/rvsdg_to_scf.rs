@@ -332,7 +332,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             // either if statements or switch statements with the approprate cases. Therefore,
             // though these operations are implemented as RVSDG intrinsics, they get special
             // treatment here.
-            OpBoolToBranchSelector(_) => self.visit_op_case_to_branch_selector(node),
+            OpCaseToBranchSelector(_) => self.visit_op_case_to_branch_selector(node),
             OpBoolToBranchSelector(_) => self.visit_op_bool_to_branch_selector(node),
             OpU32ToBranchSelector(_) => self.visit_op_u32_to_branch_selector(node),
             _ => {
