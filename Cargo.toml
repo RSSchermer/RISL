@@ -25,7 +25,6 @@ default-members = [
     "crates/library/risl",
     "crates/library/risl_macros",
     "crates/slir-explorer",
-#    "tests/behavioral",
 ]
 
 [workspace.package]

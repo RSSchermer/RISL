@@ -66,10 +66,10 @@ impl slir::dependencies::DependencyLoader for RlibDependencyLoader<'_, '_> {
 }
 
 pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
-    let (free_items, shader_modules) = collect_shader_module_codegen_units(cx);
-    let mut dependency_loader = RlibDependencyLoader { rcx: cx };
-
     run(cx.tcx(), || {
+        let (free_items, shader_modules) = collect_shader_module_codegen_units(cx);
+        let mut dependency_loader = RlibDependencyLoader { rcx: cx };
+
         // We create a separate SLIR artifact for every shader module in the current crate (every
         // `mod` item with a `#[risl::shader_module]` attribute). These artifacts are the basis for the
         // final compilation step (e.g. to WGSL, SPIRV, HLSL, etc.), which is typically done by a macro
