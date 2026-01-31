@@ -1,13 +1,13 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{LazyLock, Once};
+use std::sync::{LazyLock, OnceLock};
 
 use rustc_hash::FxHashMap;
 use rustc_hir::{ItemId, Mod};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE, LocalDefId, LocalModDefId};
 
-use crate::core_shim::is_core_shim_crate;
+use crate::core_shim::{ShimDefLookup, is_core_shim_crate, resolve_shim_def_lookup};
 use crate::hir_ext::{ExtendedItem, HirExt, ModExt};
 use crate::hir_ext_build;
 
@@ -37,6 +37,7 @@ pub struct RislContext<'tcx> {
     hir_ext: HirExt,
     crate_slir_module_name_to_crate_num: FxHashMap<String, CrateNum>,
     current_crate_is_core_shim_crate: bool,
+    shim_def_lookup: OnceLock<ShimDefLookup>,
 }
 
 impl<'tcx> RislContext<'tcx> {
@@ -46,11 +47,17 @@ impl<'tcx> RislContext<'tcx> {
             hir_ext: hir_ext_build::build(tcx),
             crate_slir_module_name_to_crate_num: generate_crate_slir_module_name_to_crate_num(tcx),
             current_crate_is_core_shim_crate: is_core_shim_crate(tcx),
+            shim_def_lookup: OnceLock::new(),
         }
     }
 
     pub fn tcx(&self) -> TyCtxt<'tcx> {
         self.tcx
+    }
+
+    pub fn shim_def_lookup(&self) -> &ShimDefLookup {
+        self.shim_def_lookup
+            .get_or_init(|| resolve_shim_def_lookup(self.tcx(), &self.hir_ext))
     }
 
     /// Whether the current crate is the core-shim crate.

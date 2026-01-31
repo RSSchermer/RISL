@@ -907,6 +907,10 @@ impl<'a, 'tcx> LayoutTypeCodegenMethods for CodegenContext<'a, 'tcx> {
 
 impl<'a, 'tcx> MiscCodegenMethods for CodegenContext<'a, 'tcx> {
     fn get_fn(&self, instance: &Instance) -> Self::Function {
+        let instance = self
+            .rcx
+            .shim_def_lookup()
+            .maybe_shimmed(self.rcx.tcx(), *instance);
         let name = slir::Symbol::from_ref(instance.mangled_name().as_str());
 
         // To facilitate function resolution in SLIR, we store the module name as part of the

@@ -155,8 +155,8 @@ fn collect_items_root(
 }
 
 fn maybe_shimmed(cx: &Cx, item: MonoItem) -> MonoItem {
-    if let MonoItem::Fn(instance) = &item {
-        item
+    if let MonoItem::Fn(instance) = item {
+        MonoItem::Fn(cx.shim_def_lookup().maybe_shimmed(cx.tcx(), instance))
     } else {
         // We only do shims for functions, so for other mono-item kinds we always return the
         // original item.

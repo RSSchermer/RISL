@@ -23,6 +23,7 @@ use rustc_span::def_id::{CrateNum, LOCAL_CRATE};
 use crate::abi;
 use crate::codegen::codegen_shader_modules;
 use crate::context::RislContext;
+use crate::core_shim::ShimDefLookup;
 
 /// The header used in an `rlib` archive for the crate's "free items" SLIR-CFG module.
 ///
@@ -33,6 +34,11 @@ pub const LIB_MODULE_HEADER: &str = "lib.slir";
 
 /// The header used in an `rlib` archive for the crate's shader-module-artifact-mapping.
 pub const SMAM_HEADER: &str = "lib.smam";
+
+/// The header used in an `rlib` archive for the std/core shim lookup table.
+///
+/// This is only present in the `rlib` for the `risl` standard library crate.
+pub const SHIM_LOOKUP_HEADER: &str = "lib.shim";
 
 /// The attribute tool namespace used to attach RISL metadata to Rust nodes.
 pub const ATTRIBUTE_NAMESPACE: &'static str = "rislc";
@@ -458,6 +464,7 @@ fn create_rlib(
     tcx: TyCtxt,
     lib_module: &(slir::Module, slir::cfg::Cfg),
     smam: FxHashMap<u32, OsString>,
+    shim_lookup: Option<&ShimDefLookup>,
 ) {
     let filename = out_filename(
         tcx.sess,
@@ -468,13 +475,17 @@ fn create_rlib(
 
     let out_file = File::create(filename.as_path()).unwrap();
 
-    let mut builder = GnuBuilder::new(
-        out_file,
-        [METADATA_FILENAME, LIB_MODULE_HEADER, SMAM_HEADER]
-            .iter()
-            .map(|name| name.as_bytes().to_vec())
-            .collect(),
-    );
+    let mut headers = vec![
+        METADATA_FILENAME.as_bytes().to_vec(),
+        LIB_MODULE_HEADER.as_bytes().to_vec(),
+        SMAM_HEADER.as_bytes().to_vec(),
+    ];
+
+    if shim_lookup.is_some() {
+        headers.push(SHIM_LOOKUP_HEADER.as_bytes().to_vec());
+    }
+
+    let mut builder = GnuBuilder::new(out_file, headers);
 
     let metadata = encode_and_write_metadata(tcx);
     let raw_metadata = metadata.full();
@@ -506,6 +517,21 @@ fn create_rlib(
             raw_smam.as_slice(),
         )
         .unwrap();
+
+    if let Some(shim_lookup) = shim_lookup {
+        let raw_shim =
+            bincode::serde::encode_to_vec(shim_lookup, bincode::config::standard()).unwrap();
+
+        builder
+            .append(
+                &Header::new(
+                    SHIM_LOOKUP_HEADER.as_bytes().to_vec(),
+                    raw_shim.len() as u64,
+                ),
+                raw_shim.as_slice(),
+            )
+            .unwrap();
+    }
 
     builder.into_inner().unwrap();
 }
@@ -571,7 +597,10 @@ fn compile_risl(tcx: TyCtxt) {
     let cx = RislContext::new(tcx);
     let lib_module = codegen_shader_modules(&cx);
     let smam = cx.local_smam();
+    let shim_lookup = cx
+        .current_crate_is_core_shim_crate()
+        .then_some(cx.shim_def_lookup());
 
-    create_rlib(tcx, &lib_module, smam);
+    create_rlib(tcx, &lib_module, smam, shim_lookup);
     create_shader_request_lookup(&cx);
 }
