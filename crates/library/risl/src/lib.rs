@@ -6,6 +6,9 @@ pub mod resource;
 pub mod smi;
 pub mod workgroup;
 
+#[doc(hidden)]
+pub mod core_shim;
+
 pub use risl_macros::gpu;
 
 pub mod prelude {

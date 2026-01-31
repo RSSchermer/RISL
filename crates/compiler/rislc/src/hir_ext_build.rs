@@ -1,11 +1,9 @@
-use std::convert::identity;
-
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::{
-    Arm, ConstBlock, Expr, ExprField, ExprKind, FieldDef, ForeignItem, GenericParam, HirId, Impl,
-    ImplItem, ImplItemKind, Item, ItemKind, MethodKind, Param, PatField, QPath, Stmt, StmtKind,
-    Target, TyKind, UseKind, UsePath, Variant, intravisit,
+    Arm, ExprField, FieldDef, ForeignItem, GenericParam, HirId, Impl, ImplItem, ImplItemKind, Item,
+    ItemKind, MethodKind, Param, PatField, QPath, Stmt, Target, TraitFn, TraitItem, TraitItemKind,
+    TyKind, UsePath, Variant, intravisit,
 };
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::TyCtxt;
@@ -18,30 +16,44 @@ use crate::attr::{
     InterpolationTypeName, collect_risl_attributes,
 };
 use crate::hir_ext::{
-    BlendSrc, ConstExt, EntryPoint, EntryPointKind, EnumExt, FieldExt, FnExt, HirExt, ImplExt,
-    Interpolation, InterpolationSampling, InterpolationType, ModExt, OverrideId, ParamExt,
+    BlendSrc, ConstExt, EntryPoint, EntryPointKind, EnumExt, FieldExt, FnExt, GpuFnExt, HirExt,
+    ImplExt, Interpolation, InterpolationSampling, InterpolationType, ModExt, OverrideId, ParamExt,
     ResourceBinding, ShaderIOBinding, ShaderRequest, ShaderRequestKind, StaticExt, StructExt,
     TraitExt, WorkgroupSize,
 };
 
-// Borrowed from https://github.com/Rust-GPU/rust-gpu
+// Modified from a similar function in https://github.com/Rust-GPU/rust-gpu
 fn target_from_impl_item(tcx: TyCtxt<'_>, impl_item: &ImplItem<'_>) -> Target {
     match impl_item.kind {
         ImplItemKind::Const(..) => Target::AssocConst,
         ImplItemKind::Fn(..) => {
             let parent_owner_id = tcx.hir_get_parent_item(impl_item.hir_id());
             let containing_item = tcx.hir_expect_item(parent_owner_id.def_id);
+
             let containing_impl_is_for_trait = match &containing_item.kind {
                 ItemKind::Impl(Impl { of_trait, .. }) => of_trait.is_some(),
                 _ => unreachable!("parent of an ImplItem must be an Impl"),
             };
+
             if containing_impl_is_for_trait {
-                Target::Method(MethodKind::Trait { body: true })
+                Target::Method(MethodKind::TraitImpl)
             } else {
                 Target::Method(MethodKind::Inherent)
             }
         }
         ImplItemKind::Type(..) => Target::AssocTy,
+    }
+}
+
+fn target_from_trait_item(tcx: TyCtxt<'_>, trait_item: &TraitItem<'_>) -> Target {
+    match trait_item.kind {
+        TraitItemKind::Const(..) => Target::AssocConst,
+        TraitItemKind::Fn(_, trait_fn) => {
+            let body = matches!(trait_fn, TraitFn::Provided(_));
+
+            Target::Method(MethodKind::Trait { body })
+        }
+        TraitItemKind::Type(..) => Target::AssocTy,
     }
 }
 
@@ -321,7 +333,11 @@ impl<'a, 'tcx> Locator<'a, 'tcx> {
         let def_id = item.owner_id.def_id;
 
         if attrs.gpu.is_some() {
-            self.hir_ext.fn_ext.insert(def_id, FnExt::GpuFn);
+            let core_shim_for = attrs.core_shim.as_ref().map(|a| a.target);
+
+            self.hir_ext
+                .fn_ext
+                .insert(def_id, FnExt::GpuFn(GpuFnExt { core_shim_for }));
         }
 
         if attrs.vertex.is_some() {
@@ -399,6 +415,28 @@ impl<'a, 'tcx> Locator<'a, 'tcx> {
             self.hir_ext.impl_ext.insert(item.item_id(), ImplExt {});
         }
     }
+
+    fn visit_impl_item_fn(&mut self, impl_item: &ImplItem<'tcx>, attrs: &Attributes) {
+        if let Some(core_shim) = &attrs.core_shim {
+            self.hir_ext.impl_fn_ext.insert(
+                impl_item.hir_id(),
+                GpuFnExt {
+                    core_shim_for: Some(core_shim.target),
+                },
+            );
+        }
+    }
+
+    fn visit_trait_item_fn(&mut self, trait_item: &TraitItem<'tcx>, attrs: &Attributes) {
+        if let Some(core_shim) = &attrs.core_shim {
+            self.hir_ext.impl_fn_ext.insert(
+                trait_item.hir_id(),
+                GpuFnExt {
+                    core_shim_for: Some(core_shim.target),
+                },
+            );
+        }
+    }
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for Locator<'a, 'tcx> {
@@ -415,18 +453,48 @@ impl<'a, 'tcx> Visitor<'tcx> for Locator<'a, 'tcx> {
         attrs.check_target(self.tcx, &Target::from_item(item));
 
         match &item.kind {
-            ItemKind::Static(_, _, _, _) => self.visit_item_static(item, &attrs),
-            ItemKind::Const(_, _, _, _) => self.visit_item_const(item, &attrs),
+            ItemKind::Static(..) => self.visit_item_static(item, &attrs),
+            ItemKind::Const(..) => self.visit_item_const(item, &attrs),
             ItemKind::Fn { .. } => self.visit_item_fn(item, &attrs),
-            ItemKind::Mod(_, _) => self.visit_item_mod(item, &attrs),
-            ItemKind::Struct(_, _, _) => self.visit_item_struct(item, &attrs),
-            ItemKind::Enum(_, _, _) => self.visit_item_enum(item, &attrs),
-            ItemKind::Trait(_, _, _, _, _, _, _) => self.visit_item_trait(item, &attrs),
+            ItemKind::Mod(..) => self.visit_item_mod(item, &attrs),
+            ItemKind::Struct(..) => self.visit_item_struct(item, &attrs),
+            ItemKind::Enum(..) => self.visit_item_enum(item, &attrs),
+            ItemKind::Trait(..) => self.visit_item_trait(item, &attrs),
             ItemKind::Impl(_) => self.visit_item_impl(item, &attrs),
             _ => (),
         }
 
         intravisit::walk_item(self, item)
+    }
+
+    fn visit_impl_item(&mut self, impl_item: &'tcx ImplItem<'tcx>) {
+        let attrs = self.tcx.hir_attrs(impl_item.hir_id());
+        let attrs = collect_risl_attributes(self.tcx, attrs);
+        let target = target_from_impl_item(self.tcx, impl_item);
+
+        attrs.check_target(self.tcx, &target);
+
+        match &impl_item.kind {
+            ImplItemKind::Fn(..) => {
+                self.visit_impl_item_fn(impl_item, &attrs);
+            }
+            _ => (),
+        }
+    }
+
+    fn visit_trait_item(&mut self, trait_item: &'tcx TraitItem<'tcx>) -> Self::Result {
+        let attrs = self.tcx.hir_attrs(trait_item.hir_id());
+        let attrs = collect_risl_attributes(self.tcx, attrs);
+        let target = target_from_trait_item(self.tcx, trait_item);
+
+        attrs.check_target(self.tcx, &target);
+
+        match &trait_item.kind {
+            TraitItemKind::Fn(..) => {
+                self.visit_trait_item_fn(trait_item, &attrs);
+            }
+            _ => (),
+        }
     }
 
     fn visit_use(&mut self, path: &'tcx UsePath<'tcx>, hir_id: HirId) -> Self::Result {
@@ -553,8 +621,14 @@ impl<'a, 'tcx> Visitor<'tcx> for Locator<'a, 'tcx> {
     }
 }
 
-pub fn build(hir_ext: &mut HirExt, tcx: TyCtxt<'_>) {
-    let mut locator = Locator { tcx, hir_ext };
+pub fn build(tcx: TyCtxt<'_>) -> HirExt {
+    let mut hir_ext = HirExt::new();
+    let mut locator = Locator {
+        tcx,
+        hir_ext: &mut hir_ext,
+    };
 
     tcx.hir_visit_all_item_likes_in_crate(&mut locator);
+
+    hir_ext
 }

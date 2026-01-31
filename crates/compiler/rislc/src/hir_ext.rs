@@ -1,8 +1,8 @@
 use indexmap::IndexMap;
 use rustc_ast::{IsAuto, Mutability};
 use rustc_hir::{
-    BodyId, ConstItemRhs, Constness, EnumDef, FnSig, GenericBounds, Generics, HirId, Impl, Item,
-    ItemId, ItemKind, Mod, Safety, TraitItemId, Ty, VariantData,
+    BodyId, ConstItemRhs, Constness, EnumDef, FnSig, GenericBounds, Generics, HirId, Impl,
+    ImplItemId, Item, ItemId, ItemKind, Mod, Safety, TraitItemId, Ty, VariantData,
 };
 use rustc_span::def_id::{DefId, LocalDefId, LocalModDefId};
 use rustc_span::source_map::Spanned;
@@ -12,6 +12,8 @@ pub struct HirExt {
     pub shader_requests: Vec<ShaderRequest>,
     pub mod_ext: IndexMap<LocalModDefId, ModExt>,
     pub fn_ext: IndexMap<LocalDefId, FnExt>,
+    pub impl_fn_ext: IndexMap<HirId, GpuFnExt>,
+    pub trait_fn_ext: IndexMap<HirId, GpuFnExt>,
     pub struct_ext: IndexMap<ItemId, StructExt>,
     pub enum_ext: IndexMap<ItemId, EnumExt>,
     pub trait_ext: IndexMap<ItemId, TraitExt>,
@@ -29,6 +31,8 @@ impl HirExt {
             shader_requests: vec![],
             mod_ext: Default::default(),
             fn_ext: Default::default(),
+            impl_fn_ext: Default::default(),
+            trait_fn_ext: Default::default(),
             struct_ext: Default::default(),
             enum_ext: Default::default(),
             trait_ext: Default::default(),
@@ -391,6 +395,11 @@ pub enum ExtendedItemKind<'hir, 'ext> {
 }
 
 #[derive(Debug)]
+pub struct GpuFnExt {
+    pub core_shim_for: Option<Symbol>,
+}
+
+#[derive(Debug)]
 pub struct EntryPoint {
     pub name: Symbol,
     pub kind: EntryPointKind,
@@ -405,7 +414,7 @@ pub enum EntryPointKind {
 
 #[derive(Debug)]
 pub enum FnExt {
-    GpuFn,
+    GpuFn(GpuFnExt),
     EntryPoint(EntryPoint),
 }
 

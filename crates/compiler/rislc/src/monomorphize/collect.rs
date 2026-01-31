@@ -127,7 +127,7 @@ impl Extend<Spanned<MonoItem>> for MonoItems {
 }
 
 fn collect_items_root(
-    tcx: TyCtxt,
+    cx: &Cx,
     starting_item: Spanned<MonoItem>,
     state: &SharedState,
     recursion_limit: Limit,
@@ -145,7 +145,7 @@ fn collect_items_root(
     let mut recursion_depths = FxHashMap::default();
 
     collect_items_rec(
-        tcx,
+        cx,
         starting_item,
         state,
         &mut recursion_depths,
@@ -154,14 +154,24 @@ fn collect_items_root(
     );
 }
 
+fn maybe_shimmed(cx: &Cx, item: MonoItem) -> MonoItem {
+    if let MonoItem::Fn(instance) = &item {
+        item
+    } else {
+        // We only do shims for functions, so for other mono-item kinds we always return the
+        // original item.
+
+        item
+    }
+}
+
 /// Collect all monomorphized items reachable from `starting_point`, and emit a note diagnostic if a
 /// post-monomorphization error is encountered during a collection step.
 ///
 /// `mode` determined whether we are scanning for [used items][CollectionMode::UsedItems]
 /// or [mentioned items][CollectionMode::MentionedItems].
-#[instrument(skip(tcx, state, recursion_depths, recursion_limit), level = "debug")]
 fn collect_items_rec(
-    tcx: TyCtxt,
+    cx: &Cx,
     starting_item: Spanned<MonoItem>,
     state: &SharedState,
     recursion_depths: &mut FxHashMap<DefId, usize>,
@@ -195,7 +205,7 @@ fn collect_items_rec(
     // current step of mono items collection.
     //
     // FIXME: don't rely on global state, instead bubble up errors. Note: this is very hard to do.
-    let error_count = tcx.dcx().err_count();
+    let error_count = cx.tcx().dcx().err_count();
 
     // In `mentioned_items` we collect items that were mentioned in this MIR but possibly do not
     // need to be monomorphized. This is done to ensure that optimizing away function calls does not
@@ -215,7 +225,7 @@ fn collect_items_rec(
         MonoItem::Fn(instance) => {
             // Keep track of the monomorphization recursion depth
             recursion_depth_reset = Some(check_recursion_limit(
-                tcx,
+                cx.tcx(),
                 instance,
                 starting_item.span,
                 recursion_depths,
@@ -223,18 +233,18 @@ fn collect_items_rec(
             ));
 
             rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                let instance = internal(tcx, instance);
+                let instance = internal(cx.tcx(), instance);
 
-                let Ok((used, mentioned)) = tcx.items_of_instance((instance, mode)) else {
+                let Ok((used, mentioned)) = cx.tcx().items_of_instance((instance, mode)) else {
                     // Normalization errors here are usually due to trait solving overflow.
                     // FIXME: I assume that there are few type errors at post-analysis stage, but not
                     // entirely sure.
                     // We have to emit the error outside of `items_of_instance` to access the
                     // span of the `starting_item`.
                     let def_id = instance.def_id();
-                    let def_span = tcx.def_span(def_id);
-                    let def_path_str = tcx.def_path_str(def_id);
-                    tcx.dcx().emit_fatal(RecursionLimit {
+                    let def_span = cx.tcx().def_span(def_id);
+                    let def_path_str = cx.tcx().def_path_str(def_id);
+                    cx.tcx().dcx().emit_fatal(RecursionLimit {
                         span: starting_item.span,
                         instance: instance.to_string(),
                         def_span,
@@ -244,7 +254,7 @@ fn collect_items_rec(
 
                 used_items.extend(used.iter().map(|spanned| Spanned {
                     span: spanned.span,
-                    node: stable(&spanned.node),
+                    node: maybe_shimmed(cx, stable(&spanned.node)),
                 }));
                 mentioned_items.extend(mentioned.iter().map(|spanned| Spanned {
                     span: spanned.span,
@@ -260,22 +270,30 @@ fn collect_items_rec(
         }
     };
 
-    let node = internal(tcx, &starting_item.node);
+    let node = internal(cx.tcx(), &starting_item.node);
 
     // Check for PMEs and emit a diagnostic if one happened. To try to show relevant edges of the
     // mono item graph.
-    if tcx.dcx().err_count() > error_count && node.is_generic_fn() && node.is_user_defined() {
+    if cx.tcx().dcx().err_count() > error_count && node.is_generic_fn() && node.is_user_defined() {
         match starting_item.node {
-            MonoItem::Fn(instance) => tcx.dcx().emit_note(EncounteredErrorWhileInstantiating {
-                span: starting_item.span,
-                kind: "fn",
-                instance: instance.name().to_string(),
-            }),
-            MonoItem::Static(def_id) => tcx.dcx().emit_note(EncounteredErrorWhileInstantiating {
-                span: starting_item.span,
-                kind: "static",
-                instance: def_id.name().to_string(),
-            }),
+            MonoItem::Fn(instance) => {
+                cx.tcx()
+                    .dcx()
+                    .emit_note(EncounteredErrorWhileInstantiating {
+                        span: starting_item.span,
+                        kind: "fn",
+                        instance: instance.name().to_string(),
+                    })
+            }
+            MonoItem::Static(def_id) => {
+                cx.tcx()
+                    .dcx()
+                    .emit_note(EncounteredErrorWhileInstantiating {
+                        span: starting_item.span,
+                        kind: "static",
+                        instance: def_id.name().to_string(),
+                    })
+            }
             MonoItem::GlobalAsm(_) => {
                 bug!(
                     "RISL does not support inline ASM; should have been caught during the analysis \
@@ -325,7 +343,7 @@ fn collect_items_rec(
     } else {
         for used_item in used_items {
             collect_items_rec(
-                tcx,
+                cx,
                 used_item,
                 state,
                 recursion_depths,
@@ -339,7 +357,7 @@ fn collect_items_rec(
     // the loop above has fully collected it, so this loop will skip it.
     for mentioned_item in mentioned_items {
         collect_items_rec(
-            tcx,
+            cx,
             mentioned_item,
             state,
             recursion_depths,
@@ -836,7 +854,7 @@ fn collect_mono_items(
         // way of getting that parallelism back with rustc_public?
 
         for root in roots {
-            collect_items_root(tcx, dummy_spanned(root), &state, recursion_limit);
+            collect_items_root(cx, dummy_spanned(root), &state, recursion_limit);
         }
     });
 

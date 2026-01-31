@@ -1,5 +1,5 @@
 use rustc_ast::{AttrKind, ast};
-use rustc_hir::Target;
+use rustc_hir::{MethodKind, Target};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::{ErrorGuaranteed, Span, Symbol};
 
@@ -217,6 +217,31 @@ impl Attr for AttrGpu {
             | Target::Impl { .. }
             | Target::Struct
             | Target::Enum => true,
+            _ => false,
+        }
+    }
+}
+
+/// Decorates `fn` items, `fn` impl-items or `fn` trait-items to indicate that the function is a
+/// shim implementation for a whitelisted function in Rust's `core` library.
+///
+/// The [target] field identifies the `core` function that is being shimmed.
+#[derive(Debug)]
+pub struct AttrCoreShim {
+    pub target: Symbol,
+    pub span: Span,
+}
+
+impl Attr for AttrCoreShim {
+    impl_attr_from_ast_single_string_arg!(AttrCoreShim, target, "core_shim");
+
+    fn valid_target(&self, target: &Target) -> bool {
+        // Functions that have a body
+        match target {
+            Target::Fn
+            | Target::Method(MethodKind::Inherent)
+            | Target::Method(MethodKind::TraitImpl) => true,
+            Target::Method(MethodKind::Trait { body }) => *body,
             _ => false,
         }
     }
@@ -742,6 +767,7 @@ register_attributes!(
     shader_module_interface => AttrShaderModuleInterface,
     shader_module => AttrShaderModule,
     gpu => AttrGpu,
+    core_shim => AttrCoreShim,
     resource => AttrResource,
     workgroup_shared => AttrWorkgroupShared,
     override_ => AttrOverride,

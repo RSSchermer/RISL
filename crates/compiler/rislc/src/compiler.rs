@@ -568,10 +568,7 @@ fn create_shader_request_lookup(cx: &RislContext) {
 }
 
 fn compile_risl(tcx: TyCtxt) {
-    let mut cx = RislContext::new(tcx);
-
-    cx.build_hir_ext();
-
+    let cx = RislContext::new(tcx);
     let lib_module = codegen_shader_modules(&cx);
     let smam = cx.local_smam();
 

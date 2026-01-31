@@ -36,6 +36,7 @@ mod check;
 mod codegen;
 mod compiler;
 mod context;
+mod core_shim;
 mod hir_ext;
 mod hir_ext_build;
 mod monomorphize;

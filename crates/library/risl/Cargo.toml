@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 risl-macros = { version = "0.1.0", path = "../risl_macros" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rislc)'] }

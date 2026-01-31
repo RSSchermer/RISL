@@ -1,15 +1,13 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::{LazyLock, Once};
 
 use rustc_hash::FxHashMap;
 use rustc_hir::{ItemId, Mod};
 use rustc_middle::ty::TyCtxt;
-use rustc_middle::ty::layout::MaybeResult;
-use rustc_span::Symbol;
 use rustc_span::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE, LocalDefId, LocalModDefId};
-use serde::ser::SerializeTuple;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::core_shim::is_core_shim_crate;
 use crate::hir_ext::{ExtendedItem, HirExt, ModExt};
 use crate::hir_ext_build;
 
@@ -38,19 +36,26 @@ pub struct RislContext<'tcx> {
     tcx: TyCtxt<'tcx>,
     hir_ext: HirExt,
     crate_slir_module_name_to_crate_num: FxHashMap<String, CrateNum>,
+    current_crate_is_core_shim_crate: bool,
 }
 
 impl<'tcx> RislContext<'tcx> {
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
         RislContext {
             tcx,
-            hir_ext: HirExt::new(),
+            hir_ext: hir_ext_build::build(tcx),
             crate_slir_module_name_to_crate_num: generate_crate_slir_module_name_to_crate_num(tcx),
+            current_crate_is_core_shim_crate: is_core_shim_crate(tcx),
         }
     }
 
     pub fn tcx(&self) -> TyCtxt<'tcx> {
         self.tcx
+    }
+
+    /// Whether the current crate is the core-shim crate.
+    pub fn current_crate_is_core_shim_crate(&self) -> bool {
+        self.current_crate_is_core_shim_crate
     }
 
     pub fn crate_slir_module_name(&self, crate_num: CrateNum) -> String {
@@ -62,10 +67,6 @@ impl<'tcx> RislContext<'tcx> {
             .crate_slir_module_name_to_crate_num
             .get(name)
             .expect("crate not found")
-    }
-
-    pub fn build_hir_ext(&mut self) {
-        hir_ext_build::build(&mut self.hir_ext, self.tcx);
     }
 
     pub fn hir_ext(&self) -> &HirExt {
