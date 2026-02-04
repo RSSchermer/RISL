@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Read;
+use std::sync::RwLock;
 
 use ar::Archive;
 use rustc_hash::FxHashMap;
@@ -12,20 +13,19 @@ use rustc_span::Symbol;
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::SHIM_LOOKUP_HEADER;
-use crate::context::RislContext;
 use crate::hir_ext::{FnExt, GpuFnExt, HirExt};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ShimDefLookup {
     shim_crate_num: usize,
-    mapping: FxHashMap<String, usize>,
+    mapping: RwLock<FxHashMap<String, usize>>,
 }
 
 impl ShimDefLookup {
     pub fn new(shim_crate_num: CrateNum) -> Self {
         ShimDefLookup {
             shim_crate_num: shim_crate_num.as_usize(),
-            mapping: FxHashMap::default(),
+            mapping: RwLock::new(FxHashMap::default()),
         }
     }
 
@@ -38,29 +38,62 @@ impl ShimDefLookup {
             .0
             .name();
 
-        self.mapping
-            .get(&def_path)
-            .copied()
-            .map(|index| {
-                let shimmed_def_id = DefId {
-                    krate: CrateNum::from_usize(self.shim_crate_num),
-                    index: DefIndex::from_usize(index),
-                };
+        // The def_paths with items that originate from the `core` crate may instead refer to them
+        // as if in `std` (I still don't quite understand why this happens). For the core-shim
+        // mapping names in `risl::core_shim` we adopt the convention of always using `core` in
+        // item paths. That means that we may have to replace instances of `std::` with `core::` in
+        // our lookup keys for our lookup to resolve correctly. However, string replacement is
+        // somewhat expensive, so we adopt a caching approach:
+        //
+        // - First try to look up the def_path as is.
+        // - If we don't find a match, check for instances of `std::` in the def_path. If we find
+        //   any, perform the actual string replacement and try another lookup. If we actually find
+        //   a match now, cache the new string as an entry in our mapping with the same index we
+        //   just found.
+        //
+        let index = if let Some(index) = self.mapping.read().unwrap().get(&def_path).copied() {
+            Some(index)
+        } else if def_path.contains("std::") {
+            // We use an exact match here. Technically that can match path segments other than `std`
+            // as that may match a path segment that ends in "std" but is preceded by other
+            // characters. However, that should never produce a def_path that will incorrectly match
+            // an entry in our mapping; it will always result in a `None` lookup result.
+            let def_path = def_path.replace("std::", "core::");
 
-                let instance = internal(tcx, instance);
-                let shimmed_instance = rustc_middle::ty::Instance {
-                    def: rustc_middle::ty::InstanceKind::Item(shimmed_def_id),
-                    args: instance.args,
-                };
+            if let Some(index) = self.mapping.read().unwrap().get(&def_path).copied() {
+                self.mapping.write().unwrap().insert(def_path, index);
 
-                stable(&shimmed_instance)
-            })
-            .unwrap_or(instance)
+                Some(index)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(index) = index {
+            let shimmed_def_id = DefId {
+                krate: CrateNum::from_usize(self.shim_crate_num),
+                index: DefIndex::from_usize(index),
+            };
+
+            let instance = internal(tcx, instance);
+            let shimmed_instance = rustc_middle::ty::Instance {
+                def: rustc_middle::ty::InstanceKind::Item(shimmed_def_id),
+                args: instance.args,
+            };
+
+            stable(&shimmed_instance)
+        } else {
+            instance
+        }
     }
 
     pub fn register_gpu_fn_ext(&mut self, def_id: DefId, gpu_fn_ext: &GpuFnExt) {
         if let Some(target) = gpu_fn_ext.core_shim_for {
             self.mapping
+                .get_mut()
+                .unwrap()
                 .insert(target.to_string(), def_id.index.as_usize());
         }
     }
@@ -78,11 +111,9 @@ pub fn resolve_shim_def_lookup(tcx: TyCtxt, hir_ext: &HirExt) -> ShimDefLookup {
     }
 
     for &crate_num in tcx.crates(()) {
-        let is_shim_crate = tcx
-            .get_attrs(crate_num.as_def_id(), Symbol::intern("rislc"))
-            .any(|attr| {
-                attr.path_matches(&[Symbol::intern("rislc"), Symbol::intern("core_shim_crate")])
-            });
+        let is_shim_crate = tcx.get_all_attrs(crate_num.as_def_id()).iter().any(|attr| {
+            attr.path_matches(&[Symbol::intern("rislc"), Symbol::intern("core_shim_crate")])
+        });
 
         if is_shim_crate {
             return load_shim_def_lookup(tcx, crate_num);
@@ -106,11 +137,13 @@ fn load_shim_def_lookup(tcx: TyCtxt, dependency: CrateNum) -> ShimDefLookup {
 
             entry.read_to_end(&mut bytes).unwrap();
 
-            let (lookup, _) = bincode::serde::decode_from_slice::<ShimDefLookup, _>(
+            let (mut lookup, _) = bincode::serde::decode_from_slice::<ShimDefLookup, _>(
                 bytes.as_slice(),
                 bincode::config::standard(),
             )
             .unwrap();
+
+            lookup.shim_crate_num = dependency.as_usize();
 
             return lookup;
         }

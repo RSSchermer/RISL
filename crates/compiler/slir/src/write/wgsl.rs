@@ -590,7 +590,7 @@ impl WgslModuleWriter {
         self.write_function_id(cx, function);
         self.w.push_str("(");
 
-        let last_arg_index = sig.args.len() - 1;
+        let last_arg_index = sig.args.len().saturating_sub(1);
 
         for (i, (arg, binding)) in sig.args.iter().zip(body.argument_bindings()).enumerate() {
             if let Some(io_binding) = &arg.shader_io_binding {

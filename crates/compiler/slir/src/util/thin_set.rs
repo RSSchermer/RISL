@@ -1,5 +1,6 @@
+use std::fmt::Formatter;
 use std::ops::Index;
-use std::slice;
+use std::{fmt, slice};
 
 use serde::{Deserialize, Serialize};
 use thin_vec::ThinVec;
@@ -8,7 +9,7 @@ use thin_vec::ThinVec;
 ///
 /// Intended for very small sets only (where linear searching the entire set is cheap), e.g. RVSDG
 /// output-value users.
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ThinSet<T> {
     inner: ThinVec<T>,
 }
@@ -101,6 +102,15 @@ where
         }
 
         true
+    }
+}
+
+impl<T> fmt::Debug for ThinSet<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.iter()).finish()
     }
 }
 

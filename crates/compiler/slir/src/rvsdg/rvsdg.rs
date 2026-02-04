@@ -1860,7 +1860,9 @@ impl Rvsdg {
 
             if !arguments[arg].users.is_empty() {
                 panic!(
-                    "cannot remove an input if one of the corresponding arguments still has users"
+                    "cannot remove input {input} for switch node `{switch_node:?}`, because \
+                    argument {arg} in branch {branch_index} still has users ({:?})",
+                    &arguments[arg].users
                 );
             }
 

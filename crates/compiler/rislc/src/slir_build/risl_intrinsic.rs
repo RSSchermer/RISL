@@ -20,6 +20,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::Sub => define_sub(instance, cx),
             RislIntrinsic::Mul => define_mul(instance, cx),
             RislIntrinsic::Div => define_div(instance, cx),
+            RislIntrinsic::SliceElementRef => define_slice_element_ref(instance, cx),
+            RislIntrinsic::SliceRange => define_slice_range(instance, cx),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
         }
 
@@ -35,6 +37,8 @@ pub enum RislIntrinsic {
     Sub,
     Mul,
     Div,
+    SliceElementRef,
+    SliceRange,
     MemResourceAsRef,
 }
 
@@ -54,6 +58,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(sub)]" => RislIntrinsic::Sub,
         "#[rislc::intrinsic(mul)]" => RislIntrinsic::Mul,
         "#[rislc::intrinsic(div)]" => RislIntrinsic::Div,
+        "#[rislc::intrinsic(slice_element_ref)]" => RislIntrinsic::SliceElementRef,
+        "#[rislc::intrinsic(slice_range)]" => RislIntrinsic::SliceRange,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
@@ -121,6 +127,89 @@ fn define_mul(instance: Instance, cx: &CodegenContext) {
 
 fn define_div(instance: Instance, cx: &CodegenContext) {
     define_arith_op(instance, cx, BinaryOperator::Div);
+}
+
+fn define_slice_element_ref(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let slice_ptr = body.argument_values()[0];
+    // Note: rustc generates 2 arguments to represent the "fat" slice pointer; first the actual
+    // pointer, and then the length. We don't make use of the length argument here, so we skip over
+    // it.
+    let index = body.argument_values()[2];
+
+    let bb = body.entry_block();
+
+    let (_, elem_ptr) =
+        cfg.add_stmt_op_element_ptr(bb, BlockPosition::Append, slice_ptr.into(), index.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(elem_ptr.into()));
+}
+
+fn define_slice_range(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+    let ret_ty = cx.module.borrow().fn_sigs[function]
+        .ret_ty
+        .expect("should have a return value");
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let in_slice_ptr = body.argument_values()[0];
+    let in_slice_len = body.argument_values()[1];
+    let start = body.argument_values()[2];
+    let end = body.argument_values()[3];
+
+    // Note that this intrinsic assumes that `start <= end` and `end <= in_slice_len`. All uses of
+    // this intrinsic in the `risl` crate should observe these invariants.
+
+    let bb = body.entry_block();
+
+    // We represent fat-pointer (ptr, len) pair values as structs in SLIR. We don't currently have a
+    // way to create or manipulate a struct value directly in SLIR. Instead we add an alloca
+    // statement here, construct the return value in the alloca, then load the value and return it.
+    // The memory-to-value-flow transform we apply to the SLIR will eliminate the alloca later.
+    let (_, alloca_ptr) = cfg.add_stmt_op_alloca(bb, BlockPosition::Append, ret_ty);
+
+    // Compute the new slice pointer
+    let (_, out_slice_ptr) =
+        cfg.add_stmt_op_offset_slice(bb, BlockPosition::Append, in_slice_ptr.into(), start.into());
+    // Store the new slice pointer
+    let (_, out_slice_ptr_ptr) =
+        cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, alloca_ptr.into(), 0);
+    cfg.add_stmt_op_store(
+        bb,
+        BlockPosition::Append,
+        out_slice_ptr_ptr.into(),
+        out_slice_ptr.into(),
+    );
+    // Compute the new len.
+    let (_, out_len) = cfg.add_stmt_op_binary(
+        bb,
+        BlockPosition::Append,
+        BinaryOperator::Sub,
+        end.into(),
+        start.into(),
+    );
+    // Store the new len
+    let (_, out_len_ptr) =
+        cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, alloca_ptr.into(), 1);
+    cfg.add_stmt_op_store(
+        bb,
+        BlockPosition::Append,
+        out_len_ptr.into(),
+        out_len.into(),
+    );
+    let (_, ret_value) = cfg.add_stmt_op_load(bb, BlockPosition::Append, alloca_ptr.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(ret_value.into()));
 }
 
 fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {

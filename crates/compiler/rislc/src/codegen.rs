@@ -101,15 +101,15 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
 
             artifact_builder.maybe_add_rvsdg_transformed(&rvsdg);
 
-            let mut scf = slir::rvsdg_to_scf::rvsdg_entry_points_to_scf(&module, &rvsdg);
-
-            scf::transform::transform(&mut module, &mut scf);
-
-            artifact_builder.add_scf(&scf);
-
-            let wgsl = slir::write::wgsl::write_wgsl(&module, &scf);
-
-            artifact_builder.maybe_add_wgsl(&wgsl);
+            // let mut scf = slir::rvsdg_to_scf::rvsdg_entry_points_to_scf(&module, &rvsdg);
+            //
+            // scf::transform::transform(&mut module, &mut scf);
+            //
+            // artifact_builder.add_scf(&scf);
+            //
+            // let wgsl = slir::write::wgsl::write_wgsl(&module, &scf);
+            //
+            // artifact_builder.maybe_add_wgsl(&wgsl);
 
             let smi = slir::smi::build_smi(&module, &cfg);
 

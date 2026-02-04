@@ -1,4 +1,5 @@
-#![feature(core_intrinsics)]
+#![feature(core_intrinsics, custom_inner_attributes)]
+#![cfg_attr(rislc, rislc::core_shim_crate)]
 
 pub mod mem;
 pub mod primitive;
@@ -8,6 +9,8 @@ pub mod workgroup;
 
 #[doc(hidden)]
 pub mod core_shim;
+
+mod intrinsic;
 
 pub use risl_macros::gpu;
 
