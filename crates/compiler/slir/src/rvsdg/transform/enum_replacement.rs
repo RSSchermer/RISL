@@ -293,6 +293,10 @@ impl<'a> EnumAllocaReplacer<'a> {
 
         // Finally, split the output
         self.visit_users(node, result, &split_output);
+
+        // Disconnect the original region result for the provoking branch, as its users have been
+        // replaced by the split results
+        self.rvsdg.disconnect_region_result(branch, result);
     }
 
     fn split_loop_input(&mut self, node: Node, input: u32, split_input: &[ValueInput]) {
@@ -1079,5 +1083,96 @@ mod tests {
             "the ptr-variant-ptr node in the second branch of the second switch node should no \
             longer be live"
         );
+    }
+
+    #[test]
+    fn test_enum_replacement_switch_passthrough() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_PREDICATE,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let variant_0_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![StructField {
+                offset: 0,
+                ty: TY_U32,
+                io_binding: None,
+            }],
+        }));
+
+        let variant_1_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![StructField {
+                offset: 0,
+                ty: TY_U32,
+                io_binding: None,
+            }],
+        }));
+
+        let enum_ty = module.ty.register(TypeKind::Enum(Enum {
+            variants: vec![variant_0_ty, variant_1_ty],
+        }));
+        let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
+
+        let alloca_node = rvsdg.add_op_alloca(region, enum_ty);
+        let set_discr_node = rvsdg.add_op_set_discriminant(
+            region,
+            ValueInput::output(enum_ptr_ty, alloca_node, 0),
+            1,
+            StateOrigin::Argument,
+        );
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(enum_ptr_ty, alloca_node, 0),
+            ],
+            vec![ValueOutput::new(enum_ptr_ty)],
+            Some(StateOrigin::Node(set_discr_node)),
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch_node);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueOrigin::Argument(0));
+
+        let branch_1 = rvsdg.add_switch_branch(switch_node);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueOrigin::Argument(0));
+
+        let get_discr_node = rvsdg.add_op_get_discriminant(
+            region,
+            ValueInput::output(enum_ptr_ty, switch_node, 0),
+            StateOrigin::Node(switch_node),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: get_discr_node,
+                output: 0,
+            },
+        );
+
+        replace_enum_alloca(&mut rvsdg, alloca_node, |_, _| ());
+
+        // This test was added because the "pass-through" of a ptr to an enum of an alloca through
+        // a switch node was causing enum-replacement to panic. This test then simply verifies that
+        // the fix no longer causes a panic; hence no further assertions.
     }
 }
