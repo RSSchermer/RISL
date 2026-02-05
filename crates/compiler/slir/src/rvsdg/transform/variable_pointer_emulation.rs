@@ -378,11 +378,11 @@ impl EmulationContext {
         let value_input = *data.value_input();
         let info = self.resolve_pointer_emulation_info(rvsdg, outer_region, ptr_origin);
 
-        let gen_op_load = |rvsdg: &mut Rvsdg,
-                           region: Region,
-                           ptr_input: ValueInput,
-                           additional_inputs: &[ValueInput],
-                           state_origin: StateOrigin| {
+        let gen_op_store = |rvsdg: &mut Rvsdg,
+                            region: Region,
+                            ptr_input: ValueInput,
+                            additional_inputs: &[ValueInput],
+                            state_origin: StateOrigin| {
             rvsdg.add_op_store(region, ptr_input, additional_inputs[0], state_origin)
         };
 
@@ -392,7 +392,7 @@ impl EmulationContext {
             state_origin,
             pointer_ty,
             output_ty: None,
-            op_gen: gen_op_load,
+            op_gen: gen_op_store,
             additional_values: &[value_input],
         };
 
@@ -445,8 +445,8 @@ impl EmulationContext {
                 Simple(ConstFallback(_)) => self.create_fallback_info(rvsdg, producer),
                 Simple(OpOffsetSlice(_)) => self.create_add_offset_slice_info(rvsdg, producer),
                 Simple(OpLoad(_)) => panic!(
-                    "cannot emulate a pointer for which the access chain \
-                information cannot be tracked through value-flow"
+                    "cannot emulate a pointer for which the access chain information cannot be \
+                    tracked through value-flow"
                 ),
                 _ => unreachable!("node kind cannot output a value of a pointer type"),
             },
