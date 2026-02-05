@@ -32,7 +32,7 @@ pub fn RvsdgExplorer(stage: RvsdgStage) -> impl IntoView {
             rvsdg.get_function_node(function).map(|node| {
                 let region = rvsdg[node].expect_function().body_region();
 
-                RegionLayout::generate(&Config::default(), &module_data.module, rvsdg, region)
+                RegionLayout::generate(&Config::default(), rvsdg, region)
             })
         })
     });

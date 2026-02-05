@@ -121,7 +121,7 @@ pub fn inline_function(module: &mut Module, rvsdg: &mut Rvsdg, call_node: Node) 
     let value_output_count = node_data.value_outputs().len();
     let call_data = node_data.expect_op_call();
 
-    let function = call_data.resolve_fn(module);
+    let function = call_data.resolve_fn(rvsdg.ty());
     let function_node = rvsdg
         .get_function_node(function)
         .expect("cannot call an unregistered function");

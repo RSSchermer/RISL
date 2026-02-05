@@ -9,7 +9,7 @@ use slir::rvsdg::{
     ValueUser,
 };
 use slir::ty::Type;
-use slir::{Function, Module, Symbol};
+use slir::Function;
 use smallvec::SmallVec;
 
 pub struct Config {
@@ -177,10 +177,10 @@ struct RegionLayoutBuilder<'a> {
 }
 
 impl<'a> RegionLayoutBuilder<'a> {
-    fn init(config: &'a Config, module: &Module, rvsdg: &'a Rvsdg, region: Region) -> Self {
+    fn init(config: &'a Config, rvsdg: &'a Rvsdg, region: Region) -> Self {
         let strata = stratify_nodes(rvsdg, region)
             .into_iter()
-            .map(|nodes| Stratum::init(config, module, rvsdg, nodes))
+            .map(|nodes| Stratum::init(config, rvsdg, nodes))
             .collect::<Vec<_>>();
         let traverser_zones = vec![TraverserZone::default(); strata.len() + 1];
 
@@ -709,8 +709,8 @@ pub struct RegionLayout {
 }
 
 impl RegionLayout {
-    pub fn generate(config: &Config, module: &Module, rvsdg: &Rvsdg, region: Region) -> Self {
-        let mut builder = RegionLayoutBuilder::init(config, module, rvsdg, region);
+    pub fn generate(config: &Config, rvsdg: &Rvsdg, region: Region) -> Self {
+        let mut builder = RegionLayoutBuilder::init(config, rvsdg, region);
 
         builder.build_argument_edges();
         while builder.build_current_stratum_edges() {}
@@ -859,7 +859,6 @@ struct Stratum {
 impl Stratum {
     fn init(
         config: &Config,
-        module: &Module,
         rvsdg: &Rvsdg,
         nodes: impl IntoIterator<Item = Node>,
     ) -> Self {
@@ -868,7 +867,7 @@ impl Stratum {
         let mut height = 0.0;
 
         for (i, node) in nodes.into_iter().enumerate() {
-            let mut layout = NodeLayout::init(config, module, rvsdg, node);
+            let mut layout = NodeLayout::init(config, rvsdg, node);
 
             if i > 0 {
                 nodes_width += config.node_spacing;
@@ -944,7 +943,6 @@ impl Stratum {
 #[derive(Clone, PartialEq, Debug)]
 pub struct NodeLayout {
     node: Node,
-    module_name: Symbol,
     content: NodeContent,
     input_connectors: Vec<ConnectorElement>,
     output_connectors: Vec<ConnectorElement>,
@@ -955,7 +953,7 @@ pub struct NodeLayout {
 }
 
 impl NodeLayout {
-    pub fn init(config: &Config, module: &Module, rvsdg: &Rvsdg, node: Node) -> Self {
+    pub fn init(config: &Config, rvsdg: &Rvsdg, node: Node) -> Self {
         let data = &rvsdg[node];
 
         let content = match data.kind() {
@@ -963,14 +961,14 @@ impl NodeLayout {
                 let region_layouts = node
                     .branches()
                     .iter()
-                    .map(|b| RegionLayout::generate(config, module, rvsdg, *b))
+                    .map(|b| RegionLayout::generate(config, rvsdg, *b))
                     .collect();
 
                 NodeContent::Switch("switch".into(), region_layouts)
             }
             NodeKind::Loop(node) => {
                 let region_layout =
-                    RegionLayout::generate(config, module, rvsdg, node.loop_region());
+                    RegionLayout::generate(config, rvsdg, node.loop_region());
 
                 NodeContent::Loop("loop".into(), region_layout)
             }
@@ -1007,7 +1005,9 @@ impl NodeLayout {
                     NodeContent::PlainText(format!("field:{}", op.field_index()).into())
                 }
                 SimpleNode::OpExtractElement(_) => NodeContent::PlainText("element".into()),
-                SimpleNode::OpCall(op) => NodeContent::FnCall("call".into(), op.resolve_fn(module)),
+                SimpleNode::OpCall(op) => {
+                    NodeContent::FnCall("call".into(), op.resolve_fn(rvsdg.ty()))
+                }
                 SimpleNode::OpUnary(op) => NodeContent::PlainText(op.operator().to_string().into()),
                 SimpleNode::OpBinary(op) => {
                     NodeContent::PlainText(op.operator().to_string().into())
@@ -1072,7 +1072,6 @@ impl NodeLayout {
 
         let mut layout = NodeLayout {
             node,
-            module_name: module.name,
             content,
             input_connectors,
             output_connectors,
@@ -1086,10 +1085,6 @@ impl NodeLayout {
         layout.update_height(config);
 
         layout
-    }
-
-    pub fn module_name(&self) -> Symbol {
-        self.module_name
     }
 
     pub fn width(&self) -> f32 {

@@ -4,6 +4,7 @@ use leptos::{component, IntoView};
 use crate::module::functions::detail::rvsdg_explorer::connector::{Connector, ToolTipPosition};
 use crate::module::functions::detail::rvsdg_explorer::layout::{NodeContent, NodeLayout};
 use crate::module::functions::detail::rvsdg_explorer::region::Region;
+use crate::module::use_module_data;
 use crate::module::url::function_url;
 
 // It seems that if we set the font-size to e.g. 15px, the text element's height will get some
@@ -96,10 +97,11 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                         }
                         NodeContent::FnCall(text, f) => {
                             let [x, y] = text.translation();
+                            let module_data = use_module_data();
 
                             view! {
                                 <g>
-                                    <a href=function_url(node.module_name(), *f)>
+                                    <a href=move || function_url(module_data.read_value().module.name, *f)>
                                         <text x=x y=y+TEXT_ADJUST>
                                             {text.text().to_owned()}
                                         </text>

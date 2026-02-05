@@ -1095,8 +1095,8 @@ impl OpCall {
         &self.value_inputs[1..]
     }
 
-    pub fn resolve_fn(&self, module: &Module) -> Function {
-        *module.ty.kind(self.value_inputs[0].ty).expect_fn()
+    pub fn resolve_fn(&self, ty_registry: &TypeRegistry) -> Function {
+        *ty_registry.kind(self.value_inputs[0].ty).expect_fn()
     }
 }
 
