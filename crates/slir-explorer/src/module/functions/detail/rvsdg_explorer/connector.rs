@@ -1,13 +1,12 @@
 use leptos::prelude::*;
 use leptos::{component, IntoView};
-use slir::ty::{Type, TypeKind};
-use slir::Module;
+use slir::ty::{Type, TypeKind, TypeRegistry};
 
 use crate::module::functions::detail::rvsdg_explorer::layout::ConnectorElement;
-use crate::module::use_module_data;
+use crate::module::functions::detail::rvsdg_explorer::use_region_viewer_context;
 
-fn ty_str(module: &Module, ty: Type) -> String {
-    match &*module.ty.kind(ty) {
+fn ty_str(ty_registry: &TypeRegistry, ty: Type) -> String {
+    match &*ty_registry.kind(ty) {
         TypeKind::Scalar(s) => s.to_string(),
         TypeKind::Atomic(s) => format!("atomic<{}>", s),
         TypeKind::Vector(v) => v.to_string(),
@@ -15,16 +14,18 @@ fn ty_str(module: &Module, ty: Type) -> String {
         TypeKind::Array {
             element_ty, count, ..
         } => {
-            format!("array<{}, {}>", ty_str(module, *element_ty), count)
+            format!("array<{}, {}>", ty_str(ty_registry, *element_ty), count)
         }
-        TypeKind::Slice { element_ty, .. } => format!("array<{}>", ty_str(module, *element_ty)),
+        TypeKind::Slice { element_ty, .. } => {
+            format!("array<{}>", ty_str(ty_registry, *element_ty))
+        }
         TypeKind::Struct(_) => {
             format!("S_{}", ty.registration_id().unwrap_or_default())
         }
         TypeKind::Enum(_) => {
             format!("E_{}", ty.registration_id().unwrap_or_default())
         }
-        TypeKind::Ptr(pointee_ty) => format!("ptr<{}>", ty_str(module, *pointee_ty)),
+        TypeKind::Ptr(pointee_ty) => format!("ptr<{}>", ty_str(ty_registry, *pointee_ty)),
         TypeKind::Function(_) => "fn".to_owned(),
         TypeKind::Predicate => "predicate".to_owned(),
         TypeKind::Dummy => "dummy".to_owned(),
@@ -48,11 +49,12 @@ const TOOLTIP_PADDING: f32 = 5.0;
 
 #[component]
 pub fn Connector(connector: ConnectorElement, tooltip_position: ToolTipPosition) -> impl IntoView {
-    let module_data = use_module_data();
+    let ctx = use_region_viewer_context();
     let rect = connector.rect;
 
     let tooltip = connector.ty.map(|ty| {
-        let ty_str = ty_str(&module_data.module.read_value(), ty);
+        let rvsdg = ctx.rvsdg.read_value();
+        let ty_str = ty_str(rvsdg.ty(), ty);
         let text_width = ty_str.len() as f32 * TOOLTIP_FONT_HEIGHT * TOOLTIP_FONT_RATIO;
 
         ToolTip {

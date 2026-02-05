@@ -4,8 +4,7 @@ use leptos::{component, IntoView};
 use crate::module::functions::detail::rvsdg_explorer::connector::{Connector, ToolTipPosition};
 use crate::module::functions::detail::rvsdg_explorer::layout::{NodeContent, NodeLayout};
 use crate::module::functions::detail::rvsdg_explorer::region::Region;
-use crate::module::url::function_url;
-use crate::module::use_module_data;
+use crate::module::functions::detail::rvsdg_explorer::use_region_viewer_context;
 
 // It seems that if we set the font-size to e.g. 15px, the text element's height will get some
 // top and bottom padding, even if we try to nullify that in CSS or try setting the CSS line-height
@@ -97,12 +96,12 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                         }
                         NodeContent::FnCall(text, f) => {
                             let [x, y] = text.translation();
-                            let module_data = use_module_data();
+                            let ctx = use_region_viewer_context();
                             let f = *f;
 
                             view! {
                                 <g>
-                                    <a href=move || function_url(module_data.module.read_value().name, f)>
+                                    <a href=move || (ctx.gen_function_url)(f)>
                                         <text x=x y=y+TEXT_ADJUST>
                                             {text.text().to_owned()}
                                         </text>
