@@ -61,6 +61,7 @@ fn collect_candidate_allocas(rvsdg: &Rvsdg, candidates: &mut VecDeque<Job>, regi
 pub enum AnalysisResult {
     Replace,
     NeedsPromotionPass,
+    NeedsSwitchOutputReplacement,
     Ignore,
 }
 
@@ -94,6 +95,7 @@ struct AggregateAllocaAnalyzer {
     was_loaded: bool,
     has_nonlocal_use: bool,
     is_stored_value: bool,
+    needs_switch_output_replacement: bool,
 }
 
 impl AggregateAllocaAnalyzer {
@@ -103,6 +105,7 @@ impl AggregateAllocaAnalyzer {
             was_loaded: false,
             has_nonlocal_use: false,
             is_stored_value: false,
+            needs_switch_output_replacement: false,
         }
     }
 
@@ -112,6 +115,7 @@ impl AggregateAllocaAnalyzer {
         self.has_nonlocal_use = false;
         self.is_stored_value = false;
         self.was_loaded = false;
+        self.needs_switch_output_replacement = false;
 
         // Perform the analysis
         self.visit_value_output(rvsdg, alloca_node, 0);
@@ -121,6 +125,8 @@ impl AggregateAllocaAnalyzer {
             AnalysisResult::Ignore
         } else if self.is_stored_value {
             AnalysisResult::NeedsPromotionPass
+        } else if self.needs_switch_output_replacement {
+            AnalysisResult::NeedsSwitchOutputReplacement
         } else {
             AnalysisResult::Replace
         }
@@ -147,7 +153,9 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
         use NodeKind::*;
         use SimpleNode::*;
 
-        match rvsdg[node].kind() {
+        let kind = rvsdg[node].kind();
+
+        match kind {
             Simple(OpCall(_)) => {
                 self.has_nonlocal_use = true;
             }
@@ -178,95 +186,16 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
                 // These operations take a pointer to an aggregate as input, but splitting does not
                 // propagate past these node kinds, so we end the search
             }
+            Simple(Reaggregation(_)) => {
+                self.needs_switch_output_replacement = true;
+            }
             Switch(_) | Loop(_) | Simple(OpOffsetSlice(_)) => {
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
-            _ => unreachable!("node kind cannot take (a pointer to) an aggregate value as input"),
+            _ => unreachable!(
+                "node `{node:?}` ({kind:?}) cannot take (a pointer to) an aggregate value as input"
+            ),
         }
-    }
-}
-
-/// Analyzes whether a pointer to an alloca'd aggregate is used as the value input to an [OpStore].
-struct StoredValueAnalyzer<'a, 'b> {
-    rvsdg: &'a Rvsdg,
-    visited: &'b mut FxHashSet<Node>,
-    node: Node,
-    function_body_region: Region,
-}
-
-impl<'a, 'b> StoredValueAnalyzer<'a, 'b> {
-    // TODO: loop results should check loop inputs
-
-    fn is_stored_value(&mut self) -> bool {
-        self.visited.clear();
-
-        let node_data = &self.rvsdg[self.node];
-        let region = node_data.region();
-        let node_data = node_data.expect_op_alloca();
-
-        self.check_value_output(region, node_data.value_output())
-    }
-
-    fn check_value_output(&mut self, region: Region, output: &ValueOutput) -> bool {
-        for user in output.users.iter().copied() {
-            if self.check_value_user(region, user) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn check_value_user(&mut self, region: Region, user: ValueUser) -> bool {
-        match user {
-            ValueUser::Result(_) => region == self.function_body_region,
-            ValueUser::Input { consumer, input } => self.check_node_input(region, consumer, input),
-        }
-    }
-
-    fn check_node_input(&mut self, region: Region, node: Node, input: u32) -> bool {
-        if self.rvsdg[node].is_op_call() {
-            return true;
-        }
-
-        if self.visited.insert(node) {
-            match self.rvsdg[node].kind() {
-                NodeKind::Switch(n) => {
-                    for branch in n.branches() {
-                        if self.check_region_argument(*branch, input - 1) {
-                            return true;
-                        }
-                    }
-                }
-                NodeKind::Loop(n) => {
-                    if self.check_region_argument(n.loop_region(), input) {
-                        return true;
-                    }
-                }
-                NodeKind::Simple(SimpleNode::OpLoad(op)) => {
-                    if self.check_value_output(region, op.value_output()) {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        false
-    }
-
-    fn check_region_argument(&mut self, region: Region, argument: u32) -> bool {
-        for user in self.rvsdg[region].value_arguments()[argument as usize]
-            .users
-            .iter()
-            .copied()
-        {
-            if self.check_value_user(region, user) {
-                return true;
-            }
-        }
-
-        false
     }
 }
 
@@ -498,8 +427,8 @@ impl Replacer<'_, '_, '_> {
             NodeKind::Switch(_) => self.split_switch_result(region, result, split_input),
             NodeKind::Loop(_) => self.split_loop_result(region, result, split_input),
             NodeKind::Function(_) => panic!(
-                "cannot split function result; \
-            non-local-use analyses should have rejected the alloca"
+                "cannot split function result; non-local-use analyses should have rejected the \
+                alloca"
             ),
             _ => unreachable!("node kind cannot be a region owner"),
         }
@@ -585,7 +514,7 @@ impl Replacer<'_, '_, '_> {
                     None,
                 );
 
-                for (i, input) in split_input.iter().enumerate() {
+                for i in 0..split_input.len() {
                     let branch = self.rvsdg.add_switch_branch(switch);
                     let origin = ValueOrigin::Argument(i as u32);
 
@@ -1418,6 +1347,7 @@ impl AggregateReplacementContext {
                         self.candidates.swap_remove_back(i);
                     }
                     AnalysisResult::NeedsPromotionPass => i += 1,
+                    AnalysisResult::NeedsSwitchOutputReplacement => i += 1,
                     AnalysisResult::Ignore => {
                         self.candidates.swap_remove_back(i);
                     }
