@@ -16,7 +16,7 @@ pub fn List() -> impl IntoView {
 
             <ul>
                 {move || {
-                    module_data.read_value().module.workgroup_bindings.keys().map(|b| view! {
+                    module_data.module.read_value().workgroup_bindings.keys().map(|b| view! {
                         <li>
                             <Link href=format!("workgroup_bindings/{}", b.data().as_ffi())>
                                 {workgroup_binding_name(b)}

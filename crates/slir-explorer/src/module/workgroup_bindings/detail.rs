@@ -30,8 +30,8 @@ pub fn Detail() -> impl IntoView {
         let binding = WorkgroupBinding::from(KeyData::from_ffi(id()));
 
         module_data
-            .read_value()
             .module
+            .read_value()
             .workgroup_bindings
             .contains(binding)
             .then_some(binding)
@@ -63,8 +63,8 @@ struct Model {
 #[component]
 fn WorkgroupBindingInfo(binding: WorkgroupBinding) -> impl IntoView {
     let model = Memo::new(move |_| {
-        let module_data = use_module_data().read_value();
-        let binding_data = &module_data.module.workgroup_bindings[binding];
+        let module_data = use_module_data();
+        let binding_data = &module_data.module.read_value().workgroup_bindings[binding];
 
         Model {
             ty: binding_data.ty,

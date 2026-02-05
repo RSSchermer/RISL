@@ -30,7 +30,7 @@ pub fn CfgExplorer() -> impl IntoView {
             </div>
             <ul class="param-list">
                 {move || {
-                    module_data.read_value().cfg[function].argument_values().iter().map(|p| view! {
+                    module_data.cfg.read_value()[function].argument_values().iter().map(|p| view! {
                         <li><Value value=(*p).into()/></li>
                     }).collect_view()
                 }}
@@ -38,7 +38,7 @@ pub fn CfgExplorer() -> impl IntoView {
         </div>
 
         {move || {
-            module_data.read_value().cfg[function].basic_blocks().iter().copied().map(|bb| view! {
+            module_data.cfg.read_value()[function].basic_blocks().iter().copied().map(|bb| view! {
                 <BasicBlock bb/>
             }).collect_view()
         }}

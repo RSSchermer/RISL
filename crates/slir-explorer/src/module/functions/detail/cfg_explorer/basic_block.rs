@@ -16,14 +16,14 @@ pub fn BasicBlock(bb: slir::cfg::BasicBlock) -> impl IntoView {
             </div>
             <div class="basic-block-body">
             {move || {
-                module_data.read_value().cfg[bb].statements().iter().copied().map(|statement| {
+                module_data.cfg.read_value()[bb].statements().iter().copied().map(|statement| {
                     view! { <Statement statement/> }
                 }).collect_view()
             }}
             </div>
             <div class="basic-block-terminator">
             {move || {
-                let terminator = module_data.read_value().cfg[bb].terminator().clone();
+                let terminator = module_data.cfg.read_value()[bb].terminator().clone();
 
                 view! { <Terminator terminator/> }
             }}

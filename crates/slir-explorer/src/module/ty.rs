@@ -3,14 +3,13 @@ use slir::ty::TypeKind;
 use thaw::*;
 use urlencoding::encode as urlencode;
 
-use crate::module::ModuleData;
+use crate::module::use_module_data;
 
 #[component]
 pub fn Type(ty: slir::ty::Type) -> impl IntoView {
-    let m = use_context::<StoredValue<ModuleData>>()
-        .expect("component can only be used in a module context");
+    let m = use_module_data();
 
-    match &*m.read_value().module.ty.kind(ty) {
+    match &*m.module.read_value().ty.kind(ty) {
         TypeKind::Scalar(s) => view! {{s.to_string()}}.into_any(),
         TypeKind::Atomic(s) => view! {{format!("atomic<{}>", s)}}.into_any(),
         TypeKind::Vector(v) => view! {{v.to_string()}}.into_any(),
@@ -25,7 +24,7 @@ pub fn Type(ty: slir::ty::Type) -> impl IntoView {
             let id = ty.registration_id().unwrap_or_default();
 
             view! {
-                <Link href=format!("/{}/adts/{}", urlencode(m.read_value().module.name.as_str()), id)>
+                <Link href=format!("/{}/adts/{}", urlencode(m.module.read_value().name.as_str()), id)>
                     {format!("S_{}", id)}
                 </Link>
             }.into_any()
@@ -34,7 +33,7 @@ pub fn Type(ty: slir::ty::Type) -> impl IntoView {
             let id = ty.registration_id().unwrap_or_default();
 
             view! {
-                <Link href=format!("/{}/adts/{}", urlencode(m.read_value().module.name.as_str()), id)>
+                <Link href=format!("/{}/adts/{}", urlencode(m.module.read_value().name.as_str()), id)>
                     {format!("E_{}", id)}
                 </Link>
             }.into_any()

@@ -52,7 +52,7 @@ pub fn Connector(connector: ConnectorElement, tooltip_position: ToolTipPosition)
     let rect = connector.rect;
 
     let tooltip = connector.ty.map(|ty| {
-        let ty_str = ty_str(&module_data.read_value().module, ty);
+        let ty_str = ty_str(&module_data.module.read_value(), ty);
         let text_width = ty_str.len() as f32 * TOOLTIP_FONT_HEIGHT * TOOLTIP_FONT_RATIO;
 
         ToolTip {

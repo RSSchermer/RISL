@@ -16,7 +16,7 @@ pub fn List() -> impl IntoView {
 
             <ul>
                 {move || {
-                    module_data.read_value().module.uniform_bindings.keys().map(|b| view! {
+                    module_data.module.read_value().uniform_bindings.keys().map(|b| view! {
                         <li>
                             <Link href=format!("uniform_bindings/{}", b.data().as_ffi())>
                                 {uniform_binding_name(b)}

@@ -77,8 +77,8 @@ pub fn Detail() -> impl IntoView {
         };
 
         module_data
-            .read_value()
             .module
+            .read_value()
             .fn_sigs
             .contains(function)
             .then_some(function)
@@ -155,7 +155,7 @@ fn FnSig(function: Function) -> impl IntoView {
                     let mut arg_views = Vec::new();
                     let mut is_first = true;
 
-                    for arg in &module_data.read_value().module.fn_sigs[function].args {
+                    for arg in &module_data.module.read_value().fn_sigs[function].args {
                         if !is_first {
                             arg_views.push(view! {", "}.into_any());
                         }
@@ -170,7 +170,7 @@ fn FnSig(function: Function) -> impl IntoView {
             </span>
             ")"
             {move || {
-                module_data.read_value().module.fn_sigs[function].ret_ty.map(|ty| {
+                module_data.module.read_value().fn_sigs[function].ret_ty.map(|ty| {
                     view! {
                         " -> " <Type ty/>
                     }

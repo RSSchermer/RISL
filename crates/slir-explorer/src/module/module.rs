@@ -15,17 +15,18 @@ use urlencoding::{decode as urldecode, encode as urlencode};
 
 use crate::module::url::function_url;
 
-pub fn use_module_data() -> StoredValue<ModuleData> {
-    use_context::<StoredValue<ModuleData>>().expect("should be used inside a module context")
+pub fn use_module_data() -> ModuleData {
+    use_context::<ModuleData>().expect("should be used inside a module context")
 }
 
+#[derive(Clone, Copy)]
 pub struct ModuleData {
-    pub module: Module,
-    pub cfg: Cfg,
-    pub rvsdg_initial: Option<Rvsdg>,
-    pub rvsdg_transformed: Option<Rvsdg>,
-    pub scf: Option<Scf>,
-    pub wgsl: Option<String>,
+    pub module: StoredValue<Module>,
+    pub cfg: StoredValue<Cfg>,
+    pub rvsdg_initial: Option<StoredValue<Rvsdg>>,
+    pub rvsdg_transformed: Option<StoredValue<Rvsdg>>,
+    pub scf: Option<StoredValue<Scf>>,
+    pub wgsl: Option<StoredValue<String>>,
 }
 
 impl ModuleData {
@@ -105,17 +106,17 @@ impl ModuleData {
         let scf = scf.map(|data| Scf::from_ty_and_data(module.ty.clone(), data));
 
         Ok(ModuleData {
-            module,
-            cfg,
-            rvsdg_initial,
-            rvsdg_transformed,
-            scf,
-            wgsl,
+            module: StoredValue::new(module),
+            cfg: StoredValue::new(cfg),
+            rvsdg_initial: rvsdg_initial.map(StoredValue::new),
+            rvsdg_transformed: rvsdg_transformed.map(StoredValue::new),
+            scf: scf.map(StoredValue::new),
+            wgsl: wgsl.map(StoredValue::new),
         })
     }
 
-    pub fn expect_scf(&self) -> &Scf {
-        self.scf.as_ref().expect("SCF data is not present")
+    pub fn expect_scf(&self) -> StoredValue<Scf> {
+        self.scf.expect("SCF data is not present")
     }
 }
 
@@ -139,9 +140,7 @@ pub fn Module() -> impl IntoView {
         get_module_bytes(module_name).await
     });
 
-    let module_data = move || {
-        module_bytes.and_then(|bytes| ModuleData::decode(bytes).map(|d| StoredValue::new(d)))
-    };
+    let module_data = move || module_bytes.and_then(|bytes| ModuleData::decode(&bytes));
 
     view! {
         {move || match module_data() {
@@ -185,13 +184,13 @@ pub fn Module() -> impl IntoView {
 }
 
 #[component]
-pub fn ModuleNav(module_data: StoredValue<ModuleData>) -> impl IntoView {
-    let module_name = module_data.read_value().module.name;
+pub fn ModuleNav(module_data: ModuleData) -> impl IntoView {
+    let module_name = module_data.module.read_value().name;
 
     let functions = move || {
         let mut functions = module_data
-            .read_value()
             .module
+            .read_value()
             .fn_sigs
             .keys()
             .collect::<Vec<_>>();
@@ -210,7 +209,7 @@ pub fn ModuleNav(module_data: StoredValue<ModuleData>) -> impl IntoView {
                 <NavCategoryItem slot>
                     "Uniform Bindings"
                 </NavCategoryItem>
-                {module_data.read_value().module.uniform_bindings.keys().map(|b| view! {
+                {module_data.module.read_value().uniform_bindings.keys().map(|b| view! {
                     <NavSubItem
                         value=format!("u{}", b.data().as_ffi())
                         href=format!("/{}/uniform_bindings/{}", urlencode(&module_name.as_str()), b.data().as_ffi())
@@ -223,7 +222,7 @@ pub fn ModuleNav(module_data: StoredValue<ModuleData>) -> impl IntoView {
                 <NavCategoryItem slot>
                     "Storage Bindings"
                 </NavCategoryItem>
-                {module_data.read_value().module.storage_bindings.keys().map(|b| view! {
+                {module_data.module.read_value().storage_bindings.keys().map(|b| view! {
                     <NavSubItem
                         value=format!("s{}", b.data().as_ffi())
                         href=format!("/{}/storage_bindings/{}", urlencode(&module_name.as_str()), b.data().as_ffi())
@@ -236,7 +235,7 @@ pub fn ModuleNav(module_data: StoredValue<ModuleData>) -> impl IntoView {
                 <NavCategoryItem slot>
                     "Workgroup Bindings"
                 </NavCategoryItem>
-                {module_data.read_value().module.workgroup_bindings.keys().map(|b| view! {
+                {module_data.module.read_value().workgroup_bindings.keys().map(|b| view! {
                     <NavSubItem
                         value=format!("w{}", b.data().as_ffi())
                         href=format!("/{}/workgroup_bindings/{}", urlencode(&module_name.as_str()), b.data().as_ffi())

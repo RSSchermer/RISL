@@ -12,16 +12,16 @@ pub fn Block(block: slir::scf::Block) -> impl IntoView {
     view! {
         <div class="scf-block scf-indent">
             {move || {
-                let m = module_data.read_value();
-                let block = &m.expect_scf()[block];
+                let scf = module_data.expect_scf().read_value();
+                let block = &scf[block];
 
                 block.statements().iter().map(|stmt| {
                     view! { <Statement statement=*stmt/> }
                 }).collect_view()
             }}
             {move || {
-                let m = module_data.read_value();
-                let block = &m.expect_scf()[block];
+                let scf = module_data.expect_scf().read_value();
+                let block = &scf[block];
 
                 block.control_flow_var_iter().map(|(var, value)| {
                     view! {

@@ -8,7 +8,7 @@ use crate::module::url::function_url;
 pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
     let module_data = use_module_data();
 
-    let inner = match &module_data.read_value().cfg[statement] {
+    let inner = match &module_data.cfg.read_value()[statement] {
         slir::cfg::StatementData::Assign(_) => view! { <Assign statement/> }.into_any(),
         slir::cfg::StatementData::Bind(_) => view! { <Bind statement/> }.into_any(),
         slir::cfg::StatementData::Uninitialized(_) => {
@@ -68,8 +68,9 @@ pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn Assign(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_assign();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_assign();
     let binding = stmt.local_binding();
     let value = stmt.value();
 
@@ -80,8 +81,9 @@ pub fn Assign(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn Bind(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_bind();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_bind();
     let binding = stmt.local_binding();
     let value = stmt.value();
 
@@ -92,8 +94,9 @@ pub fn Bind(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn Uninitialized(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_uninitialized();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_uninitialized();
     let binding = stmt.local_binding();
 
     view! {
@@ -103,8 +106,9 @@ pub fn Uninitialized(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpAlloca(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_alloca();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_alloca();
     let binding = stmt.result();
 
     view! {
@@ -114,8 +118,9 @@ pub fn OpAlloca(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpLoad(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_load();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_load();
     let binding = stmt.result();
     let pointer = stmt.ptr();
 
@@ -126,8 +131,9 @@ pub fn OpLoad(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpStore(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_store();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_store();
     let pointer = stmt.ptr();
     let value = stmt.value();
 
@@ -138,8 +144,9 @@ pub fn OpStore(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpExtractField(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_extract_field();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_extract_field();
     let aggregate = stmt.value();
     let field_index = stmt.field_index();
     let binding = stmt.result();
@@ -151,8 +158,9 @@ pub fn OpExtractField(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpExtractElement(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_extract_element();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_extract_element();
     let aggregate = stmt.value();
     let index = stmt.element_index();
     let binding = stmt.result();
@@ -164,8 +172,9 @@ pub fn OpExtractElement(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpFieldPtr(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_field_ptr();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_field_ptr();
     let ptr = stmt.ptr();
     let field_index = stmt.field_index();
     let binding = stmt.result();
@@ -177,8 +186,9 @@ pub fn OpFieldPtr(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpElementPtr(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_element_ptr();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_element_ptr();
     let ptr = stmt.ptr();
     let index = stmt.element_index();
     let binding = stmt.result();
@@ -190,8 +200,9 @@ pub fn OpElementPtr(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpVariantPtr(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_variant_ptr();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_variant_ptr();
     let ptr = stmt.ptr();
     let variant_index = stmt.variant_index();
     let binding = stmt.result();
@@ -203,8 +214,9 @@ pub fn OpVariantPtr(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpGetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_get_discriminant();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_get_discriminant();
     let ptr = stmt.ptr();
     let binding = stmt.result();
 
@@ -215,8 +227,9 @@ pub fn OpGetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpSetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_set_discriminant();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_set_discriminant();
     let ptr = stmt.ptr();
     let variant_index = stmt.variant_index();
 
@@ -227,8 +240,9 @@ pub fn OpSetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpOffsetSlice(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_offset_slice_ptr();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_offset_slice_ptr();
     let ptr = stmt.ptr();
     let offset = stmt.offset();
     let binding = stmt.result();
@@ -244,8 +258,9 @@ pub fn OpOffsetSlice(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpUnary(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_unary();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_unary();
     let value = stmt.value();
     let operator = stmt.operator();
     let binding = stmt.result();
@@ -257,8 +272,9 @@ pub fn OpUnary(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpBinary(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_binary();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_binary();
     let operator = stmt.operator();
     let lhs = stmt.lhs();
     let rhs = stmt.rhs();
@@ -271,9 +287,10 @@ pub fn OpBinary(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let module_name = data.module.name;
-    let stmt = data.cfg[statement].expect_op_call();
+    let module_data = use_module_data();
+    let module_name = module_data.module.read_value().name;
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_call();
     let callee = stmt.callee();
     let binding = stmt.maybe_result();
 
@@ -304,8 +321,9 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpCaseToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_case_to_branch_selector();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_case_to_branch_selector();
     let value = stmt.value();
     let cases = stmt
         .cases()
@@ -322,8 +340,9 @@ pub fn OpCaseToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView 
 
 #[component]
 pub fn OpBoolToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_bool_to_branch_selector();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_bool_to_branch_selector();
     let value = stmt.value();
     let binding = stmt.result();
 
@@ -334,8 +353,9 @@ pub fn OpBoolToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView 
 
 #[component]
 pub fn OpConvertToU32(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_convert_to_u32();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_convert_to_u32();
     let value = stmt.value();
     let binding = stmt.result();
 
@@ -346,8 +366,9 @@ pub fn OpConvertToU32(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpConvertToI32(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_convert_to_i32();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_convert_to_i32();
     let value = stmt.value();
     let binding = stmt.result();
 
@@ -358,8 +379,9 @@ pub fn OpConvertToI32(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpConvertToF32(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_convert_to_f32();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_convert_to_f32();
     let value = stmt.value();
     let binding = stmt.result();
 
@@ -370,8 +392,9 @@ pub fn OpConvertToF32(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpConvertToBool(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_convert_to_bool();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_convert_to_bool();
     let value = stmt.value();
     let binding = stmt.result();
 
@@ -382,8 +405,9 @@ pub fn OpConvertToBool(statement: slir::cfg::Statement) -> impl IntoView {
 
 #[component]
 pub fn OpArrayLength(statement: slir::cfg::Statement) -> impl IntoView {
-    let data = use_module_data().read_value();
-    let stmt = data.cfg[statement].expect_op_array_length();
+    let module_data = use_module_data();
+    let cfg = module_data.cfg.read_value();
+    let stmt = cfg[statement].expect_op_array_length();
     let value = stmt.ptr();
     let binding = stmt.result();
 

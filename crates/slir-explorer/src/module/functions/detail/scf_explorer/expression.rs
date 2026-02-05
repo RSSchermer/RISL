@@ -8,10 +8,9 @@ use crate::module::use_module_data;
 
 #[component]
 pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
-    let module_data = use_module_data().read_value();
-    let expr_data = &module_data.scf.as_ref().unwrap()[expr_binding]
-        .expect_expr_binding()
-        .expression();
+    let module_data = use_module_data();
+    let scf = module_data.expect_scf().read_value();
+    let expr_data = &scf[expr_binding].expect_expr_binding().expression();
 
     match expr_data.kind() {
         ExpressionKind::FallbackValue => "fallback".into_any(),

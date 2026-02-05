@@ -98,10 +98,11 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                         NodeContent::FnCall(text, f) => {
                             let [x, y] = text.translation();
                             let module_data = use_module_data();
+                            let f = *f;
 
                             view! {
                                 <g>
-                                    <a href=move || function_url(module_data.read_value().module.name, *f)>
+                                    <a href=move || function_url(module_data.module.read_value().name, f)>
                                         <text x=x y=y+TEXT_ADJUST>
                                             {text.text().to_owned()}
                                         </text>
@@ -111,11 +112,12 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                         }
                         NodeContent::Loop(text, region) => {
                             let [x, y] = text.translation();
+                            let region = region.clone();
 
                             view! {
                                 <text x=x y=y+TEXT_ADJUST>{text.text().to_owned()}</text>
 
-                                <Region region=region.clone() />
+                                <Region region />
                             }.into_any()
                         }
                         NodeContent::Switch(text, regions) => {

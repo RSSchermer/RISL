@@ -11,8 +11,8 @@ pub fn List() -> impl IntoView {
 
     let functions = move || {
         let mut functions = module_data
-            .read_value()
             .module
+            .read_value()
             .fn_sigs
             .keys()
             .collect::<Vec<_>>();

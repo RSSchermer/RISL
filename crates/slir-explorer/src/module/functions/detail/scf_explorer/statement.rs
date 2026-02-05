@@ -10,8 +10,9 @@ use crate::module::use_module_data;
 
 #[component]
 pub fn Statement(statement: slir::scf::Statement) -> impl IntoView {
-    let module_data = use_module_data().read_value();
-    let stmt_data = &module_data.scf.as_ref().unwrap()[statement];
+    let module_data = use_module_data();
+    let scf = module_data.expect_scf().read_value();
+    let stmt_data = &scf[statement];
 
     match stmt_data.kind() {
         StatementKind::If(_) => view! {
@@ -48,16 +49,16 @@ pub fn Statement(statement: slir::scf::Statement) -> impl IntoView {
 #[component]
 pub fn If(statement: slir::scf::Statement) -> impl IntoView {
     let module_data = use_module_data();
-    let m = module_data.read_value();
-    let stmt = m.expect_scf()[statement].kind().expect_if();
+    let scf = module_data.expect_scf().read_value();
+    let stmt = scf[statement].kind().expect_if();
 
     view! {
         {move || {
-            let m = module_data.read_value();
-            let stmt = m.expect_scf()[statement].kind().expect_if();
+            let scf = module_data.expect_scf().read_value();
+            let stmt = scf[statement].kind().expect_if();
 
             stmt.out_vars().iter().map(|var| {
-                let ty = m.scf.as_ref().unwrap()[*var].ty();
+                let ty = scf[*var].ty();
 
                 view!{
                     "var "<LocalBinding binding=*var/>": "<Type ty/>";"<br/>
@@ -69,8 +70,8 @@ pub fn If(statement: slir::scf::Statement) -> impl IntoView {
             <Block block=stmt.then_block()/>
         "} "
         {move || {
-            let m = module_data.read_value();
-            let stmt = m.expect_scf()[statement].kind().expect_if();
+            let scf = module_data.expect_scf().read_value();
+            let stmt = scf[statement].kind().expect_if();
 
             stmt.else_block().map(|else_block| {
                 view! {
@@ -86,16 +87,16 @@ pub fn If(statement: slir::scf::Statement) -> impl IntoView {
 #[component]
 pub fn Switch(statement: slir::scf::Statement) -> impl IntoView {
     let module_data = use_module_data();
-    let m = module_data.read_value();
-    let stmt = m.expect_scf()[statement].kind().expect_switch();
+    let scf = module_data.expect_scf().read_value();
+    let stmt = scf[statement].kind().expect_switch();
 
     view! {
         {move || {
-            let m = module_data.read_value();
-            let stmt = m.expect_scf()[statement].kind().expect_switch();
+            let scf = module_data.expect_scf().read_value();
+            let stmt = scf[statement].kind().expect_switch();
 
             stmt.out_vars().iter().map(|var| {
-                let ty = m.scf.as_ref().unwrap()[*var].ty();
+                let ty = scf[*var].ty();
 
                 view!{
                     "var "<LocalBinding binding=*var/>": "<Type ty/>";"<br/>
@@ -106,8 +107,8 @@ pub fn Switch(statement: slir::scf::Statement) -> impl IntoView {
         "switch " <LocalBinding binding=stmt.on()/> " {"<br/>
             <div class="scf-indent">
                 {move || {
-                    let m = module_data.read_value();
-                    let stmt = m.expect_scf()[statement].kind().expect_switch();
+                    let scf = module_data.expect_scf().read_value();
+                    let stmt = scf[statement].kind().expect_switch();
 
                     stmt.cases().iter().map(|case| {
                         view! {
@@ -131,8 +132,8 @@ pub fn Loop(statement: slir::scf::Statement) -> impl IntoView {
 
     view! {
         {move || {
-            let m = module_data.read_value();
-            let stmt = m.expect_scf()[statement].kind().expect_loop();
+            let scf = module_data.expect_scf().read_value();
+            let stmt = scf[statement].kind().expect_loop();
 
             stmt.loop_vars().iter().map(|var| {
                 view!{
@@ -143,8 +144,8 @@ pub fn Loop(statement: slir::scf::Statement) -> impl IntoView {
         }}
         <br/>
         {move || {
-            let m = module_data.read_value();
-            let stmt = m.expect_scf()[statement].kind().expect_loop();
+            let scf = module_data.expect_scf().read_value();
+            let stmt = scf[statement].kind().expect_loop();
 
             match stmt.control() {
                 LoopControl::Head(binding) => view!{
@@ -169,8 +170,9 @@ pub fn Loop(statement: slir::scf::Statement) -> impl IntoView {
 
 #[component]
 pub fn Return(statement: slir::scf::Statement) -> impl IntoView {
-    let m = use_module_data().read_value();
-    let stmt = m.expect_scf()[statement].kind().expect_return();
+    let module_data = use_module_data();
+    let scf = module_data.expect_scf().read_value();
+    let stmt = scf[statement].kind().expect_return();
 
     if let Some(binding) = stmt.value() {
         view! {
@@ -187,8 +189,9 @@ pub fn Return(statement: slir::scf::Statement) -> impl IntoView {
 
 #[component]
 pub fn Alloca(statement: slir::scf::Statement) -> impl IntoView {
-    let module_data = use_module_data().read_value();
-    let stmt = module_data.expect_scf()[statement].kind().expect_alloca();
+    let module_data = use_module_data();
+    let scf = module_data.expect_scf().read_value();
+    let stmt = scf[statement].kind().expect_alloca();
 
     view! {
         "let "<LocalBinding binding=stmt.binding()/>" = alloca;"
@@ -197,10 +200,9 @@ pub fn Alloca(statement: slir::scf::Statement) -> impl IntoView {
 
 #[component]
 pub fn ExprBinding(statement: slir::scf::Statement) -> impl IntoView {
-    let module_data = use_module_data().read_value();
-    let stmt = module_data.expect_scf()[statement]
-        .kind()
-        .expect_expr_binding();
+    let module_data = use_module_data();
+    let scf = module_data.expect_scf().read_value();
+    let stmt = scf[statement].kind().expect_expr_binding();
 
     view! {
         "let "<LocalBinding binding=stmt.binding()/>
@@ -210,8 +212,9 @@ pub fn ExprBinding(statement: slir::scf::Statement) -> impl IntoView {
 
 #[component]
 pub fn Store(statement: slir::scf::Statement) -> impl IntoView {
-    let module_data = use_module_data().read_value();
-    let stmt = module_data.expect_scf()[statement].kind().expect_op_store();
+    let module_data = use_module_data();
+    let scf = module_data.expect_scf().read_value();
+    let stmt = scf[statement].kind().expect_op_store();
 
     view! {
         "*"<LocalBinding binding=stmt.ptr()/>

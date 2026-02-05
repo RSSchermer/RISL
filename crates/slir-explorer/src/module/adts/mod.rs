@@ -29,7 +29,7 @@ pub fn Adt() -> impl IntoView {
 
     view! {
         {move || {
-            match *module_data.read_value().module.ty.kind(ty()) {
+            match *module_data.module.read_value().ty.kind(ty()) {
                 TypeKind::Struct(_) => view! {
                     <Struct ty=ty()/>
                 }.into_any(),
@@ -56,7 +56,7 @@ pub fn Struct(ty: slir::ty::Type) -> impl IntoView {
             <h2>"Fields:"</h2>
 
             <ul>
-                {module_data.read_value().module.ty.kind(ty).expect_struct().fields.iter().map(|f| {
+                {module_data.module.read_value().ty.kind(ty).expect_struct().fields.iter().map(|f| {
                     view! {
                         <li>
                             <Type ty=f.ty/>
@@ -80,7 +80,7 @@ pub fn Enum(ty: slir::ty::Type) -> impl IntoView {
             <h2>"Variants:"</h2>
 
             <ul>
-                {module_data.read_value().module.ty.kind(ty).expect_enum().variants.iter().map(|s| {
+                {module_data.module.read_value().ty.kind(ty).expect_enum().variants.iter().map(|s| {
                     let s = s.registration_id().unwrap_or_default();
 
                     view! {

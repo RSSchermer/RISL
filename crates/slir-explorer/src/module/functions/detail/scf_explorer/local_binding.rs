@@ -9,7 +9,8 @@ use crate::module::use_module_data;
 
 #[component]
 pub fn LocalBinding(binding: slir::scf::LocalBinding) -> impl IntoView {
-    let ty = use_module_data().read_value().scf.as_ref().unwrap()[binding].ty();
+    let module_data = use_module_data();
+    let ty = module_data.expect_scf().read_value()[binding].ty();
     let (get_highlight, set_highlight) =
         use_context::<HighlightSignal>().expect("can only be used inside the SCF explorer");
 

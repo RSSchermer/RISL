@@ -48,7 +48,7 @@ fn LocalValue(value: slir::cfg::LocalBinding) -> impl IntoView {
                 </span>
             </PopoverTrigger>
 
-            <Type ty=module_data.read_value().cfg[value].ty()/>
+            <Type ty=module_data.cfg.read_value()[value].ty()/>
         </Popover>
     }
 }

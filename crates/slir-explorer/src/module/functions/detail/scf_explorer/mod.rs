@@ -25,11 +25,9 @@ pub fn ScfExplorer() -> impl IntoView {
 
     provide_context(highlight);
 
-    let m = module_data.read_value();
-    let body = m
+    let body = module_data
         .scf
-        .as_ref()
-        .and_then(|scf| scf.get_function_body(function).cloned());
+        .and_then(|scf| scf.read_value().get_function_body(function).cloned());
 
     if let Some(body) = body {
         let body_block = body.block();
@@ -50,8 +48,8 @@ pub fn ScfExplorer() -> impl IntoView {
 
                 <div class="scf-function-body">
                     {move || {
-                        let m = module_data.read_value();
-                        let block = &m.expect_scf()[body_block];
+                        let scf = module_data.expect_scf().read_value();
+                        let block = &scf[body_block];
 
                         block.statements().iter().map(|stmt| {
                             view! { <Statement statement=*stmt/> }

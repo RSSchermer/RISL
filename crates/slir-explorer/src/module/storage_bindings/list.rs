@@ -16,7 +16,7 @@ pub fn List() -> impl IntoView {
 
             <ul>
                 {move || {
-                    module_data.read_value().module.storage_bindings.keys().map(|b| view! {
+                    module_data.module.read_value().storage_bindings.keys().map(|b| view! {
                         <li>
                             <Link href=format!("storage_bindings/{}", b.data().as_ffi())>
                                 {storage_binding_name(b)}

@@ -21,18 +21,18 @@ pub fn RvsdgExplorer(stage: RvsdgStage) -> impl IntoView {
     let function = use_function();
 
     let region_layout = Memo::new(move |_| {
-        let module_data = module_data.read_value();
-
         let rvsdg = match stage {
-            RvsdgStage::Initial => module_data.rvsdg_initial.as_ref(),
-            RvsdgStage::Transformed => module_data.rvsdg_transformed.as_ref(),
+            RvsdgStage::Initial => module_data.rvsdg_initial,
+            RvsdgStage::Transformed => module_data.rvsdg_transformed,
         };
 
         rvsdg.and_then(|rvsdg| {
+            let rvsdg = rvsdg.read_value();
+
             rvsdg.get_function_node(function).map(|node| {
                 let region = rvsdg[node].expect_function().body_region();
 
-                RegionLayout::generate(&Config::default(), rvsdg, region)
+                RegionLayout::generate(&Config::default(), &rvsdg, region)
             })
         })
     });

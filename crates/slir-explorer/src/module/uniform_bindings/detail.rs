@@ -30,8 +30,8 @@ pub fn Detail() -> impl IntoView {
         let binding = UniformBinding::from(KeyData::from_ffi(id()));
 
         module_data
-            .read_value()
             .module
+            .read_value()
             .uniform_bindings
             .contains(binding)
             .then_some(binding)
@@ -65,8 +65,8 @@ struct Model {
 #[component]
 fn UniformBindingInfo(binding: UniformBinding) -> impl IntoView {
     let model = Memo::new(move |_| {
-        let module_data = use_module_data().read_value();
-        let binding_data = &module_data.module.uniform_bindings[binding];
+        let module_data = use_module_data();
+        let binding_data = &module_data.module.read_value().uniform_bindings[binding];
 
         Model {
             ty: binding_data.ty,
