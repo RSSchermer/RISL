@@ -857,11 +857,7 @@ struct Stratum {
 }
 
 impl Stratum {
-    fn init(
-        config: &Config,
-        rvsdg: &Rvsdg,
-        nodes: impl IntoIterator<Item = Node>,
-    ) -> Self {
+    fn init(config: &Config, rvsdg: &Rvsdg, nodes: impl IntoIterator<Item = Node>) -> Self {
         let mut nodes_map = IndexMap::new();
         let mut nodes_width = 0.0;
         let mut height = 0.0;
@@ -967,8 +963,7 @@ impl NodeLayout {
                 NodeContent::Switch("switch".into(), region_layouts)
             }
             NodeKind::Loop(node) => {
-                let region_layout =
-                    RegionLayout::generate(config, rvsdg, node.loop_region());
+                let region_layout = RegionLayout::generate(config, rvsdg, node.loop_region());
 
                 NodeContent::Loop("loop".into(), region_layout)
             }

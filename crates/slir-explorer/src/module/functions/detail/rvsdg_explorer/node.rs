@@ -4,8 +4,8 @@ use leptos::{component, IntoView};
 use crate::module::functions::detail::rvsdg_explorer::connector::{Connector, ToolTipPosition};
 use crate::module::functions::detail::rvsdg_explorer::layout::{NodeContent, NodeLayout};
 use crate::module::functions::detail::rvsdg_explorer::region::Region;
-use crate::module::use_module_data;
 use crate::module::url::function_url;
+use crate::module::use_module_data;
 
 // It seems that if we set the font-size to e.g. 15px, the text element's height will get some
 // top and bottom padding, even if we try to nullify that in CSS or try setting the CSS line-height
