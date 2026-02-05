@@ -16,6 +16,7 @@ ordered-float = { workspace = true, features = ["serde"] }
 risl-smi = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 slotmap = { workspace = true, features = ["serde"] }
 smallvec = { workspace = true, features = ["serde"] }
 thin-vec = { workspace = true, features = ["serde"] }

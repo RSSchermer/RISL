@@ -1558,6 +1558,17 @@ impl Rvsdg {
         }
     }
 
+    /// Serializes the RVSDG to a JSON format and writes it to the given writer.
+    ///
+    /// This is useful for debugging purposes, as the resulting JSON file can be loaded and
+    /// visualized by the `slir-explorer` to view a rendered SVG version of the RVSDG graph.
+    pub fn dump(&self, writer: impl std::io::Write) -> std::io::Result<()> {
+        serde_json::to_writer(writer, self)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))?;
+
+        Ok(())
+    }
+
     pub fn ty(&self) -> &TypeRegistry {
         &self.ty
     }
