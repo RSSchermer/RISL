@@ -1,3 +1,180 @@
+//! Replaces alloca nodes of aggregate types with multiple alloca nodes, one for each of the
+//! aggregate's parts.
+//!
+//! We'll also refer to this as "splitting" an alloca node.
+//!
+//! The following types are considered aggregate types: struct types, array types, slice (unsized
+//! array) types, and enum types. We don't support alloca nodes for unsized types, so we will not
+//! have to consider the case of splitting a slice alloca node; we only ever split alloca nodes
+//! for struct types, array types, and enum types.
+//!
+//! For a struct type, its parts are its fields. For an array type, its parts are its elements. For
+//! an enum type, its parts are first its discriminant, then a sequence of each of its variants.
+//! Note that a part of an aggregate may itself be an aggregate: a struct field may itself be a
+//! struct/array/enum; the elements of an array may be structs/arrays/enums; the variants of an enum
+//! are currently always structs. If the splitting of an alloca results in new "part" alloca nodes
+//! that are also of aggregate types, then we may split these "part" alloca nodes recursively. We
+//! don't do this all at once; rather, scalar-replacement uses a queue system and "part" allocas
+//! for aggregate types will be pushed onto the end of the queue to await their turn.
+//!
+//! # Optimization and legalization
+//!
+//! Why split alloca nodes? Scalar replacement of aggregates is a common pass in optimizing
+//! compilers. While scalar replacement in itself does not typically result in a performance
+//! improvement, other compiler passes are much more straightforward to implement against simple
+//! scalar values. As such, scalar replacement is a key transformation for enabling some of the
+//! other passes in the compiler pipeline.
+//!
+//! However, for this compiler specifically, we may also need to split alloca nodes for reasons of
+//! "legalization". Our primary output target, WGSL, does not allow aggregate types to contain
+//! pointers (or "pointer-likes" such as texture handles): their parts may not be of a pointer type
+//! or an aggregate type that contains pointer types (recursively). If we encounter such an alloca
+//! node, splitting is not optional; we must find a way to split out the pointers it contains into
+//! scalar values.
+//!
+//! # Value-flow splitting
+//!
+//! We cannot simply split alloca nodes in isolation. Alloca nodes have a single output value that
+//! represents a pointer to its data. We split the alloca with the goal of eliminating the original
+//! aggregate alloca node and replacing it with its "part" alloca nodes. We must then somehow adjust
+//! the users of the original alloca node's output value so that they no longer need to consume the
+//! output of the original alloca node, directly or indirectly: the original alloca node's output
+//! value must become "userless" (except for [OpOffsetSlice] nodes as we'll expand on below) and its
+//! users must be adjusted to now use the "part" alloca output values.
+//!
+//! If an [OpStore] node was a user of the alloca node's output value, then we replace the [OpStore]
+//! node with multiple [OpStore] nodes: one for each part. An [OpStore] node does not have an output
+//! value, so no further splitting is required.
+//!
+//! If an [OpLoad] node was a user of the alloca node's output value, then we replace the [OpLoad]
+//! node with multiple [OpLoad] nodes: one for each part. However, the original [OpLoad] node *does*
+//! have a value output; it represents a copy of the aggregate value contained in the alloca node.
+//! Further splitting is now required: to eliminate the alloca node, we must eliminate all its
+//! users, which means eliminating the original [OpLoad] node, which means the original [OpLoad]
+//! node must be made "user-less" and its users must be adjusted to now use the outputs of the new
+//! "part" [OpLoad] nodes.
+//!
+//! In general, we cannot simply split the original alloca node or its direct consumers; we have to
+//! split the entire value-flow that originates from that alloca node. If a "split value" flows into
+//! a [Loop] node, then we must split that loop-input and its corresponding argument, result and
+//! output. If a "split value" flows into a [Switch] node, then we must split that switch-input and
+//! its corresponding argument, and if it continues to flow to a branch result, then we must split
+//! that branch-result and its corresponding output.
+//!
+//! However, not all node kinds that may consume a pointer to an aggregate value also output a
+//! pointer to an aggregate. As discussed above [OpStore] has no output value at all, so no
+//! downstream adjustments will need to be made. [OpFieldPtr], [OpElementPtr], [OpExtractField],
+//! [OpExtractElement], [OpDiscriminantPtr] and [OpVariantPtr] all output a pointer to a part of the
+//! aggregate; we'll call these "part-selector" nodes. These may all be adjusted by connecting their
+//! users directly to the appropriate split part value and removing the part-selector node. As the
+//! element index for [OpElementPtr] and may be runtime-dynamic, we introduce a new [Switch] node to
+//! select the appropriate part, using the index value as the [Switch] node's branch selector. An
+//! [OpGetDiscriminant] node may be replaced by an [OpLoad] node that uses the discriminant-part
+//! value of an enum alloca's value-flow. An [OpSetDiscriminant] may be replaced by an [OpStore]
+//! node that uses the discriminant-part value of an enum alloca's value-flow. All of these node
+//! kinds act as terminators of the alloca's value-flow; no further down-stream splitting is
+//! required after one of these node kinds.
+//!
+//! [OpOffsetSlice] and [OpGetSliceOffset] nodes form an exception. We don't split these nodes and
+//! instead keep them attached to the original value-flow from the alloca node. We do this because
+//! we don't keep track of the slice offset as a separate value, the value-flow chain itself
+//! represents the current slice offset. This will be adjusted in the offset-slice-replacement pass,
+//! but this pass runs after the memory-promotion-and-legalization pass (of which scalar-replacement
+//! is a part) as it relies on variable-pointer-emulation having completed. Since
+//! [OpGetSliceOffset] would act as a terminator anyway, this case is simple. [OpOffsetSlice],
+//! however, may have users that need to be adjusted. We simply adjust these users up around the
+//! [OpOffsetSlice] node, to its input, as if the [OpOffsetSlice] node does not exist. Its purpose
+//! is now only to track the offset and no longer to provide the slice pointer value. This means
+//! that the original alloca node we're trying to split does not become userless in this case and
+//! cannot yet be removed. It will become userless after the offset-slice-replacement pass and can
+//! then be removed by a dead-connectible-elimination pass.
+//!
+//! # Splitting switch node results and output
+//!
+//! Switch nodes may have (and typically do have) multiple branches. If a result for one branch
+//! region needs to be split, then the results for all other branch regions will also need to be
+//! split. This makes switch node output splitting a complex task that requires careful handling.
+//!
+//! There are two cases we handle separately. This first is the case where the type of the output
+//! that is to be split is a struct type, an array type, or an enum type. In this case, we know
+//! exactly what parts to split the output into, and consequently, what parts to split each of the
+//! corresponding branch results into. We add the new "part outputs" to the switch node. This
+//! creates corresponding "part results" for each of the branches, which will initially connect to
+//! placeholder values. We'll have to replace the placeholder connections with actual connections.
+//!
+//! There is always one branch that will be the initial branch that triggers the switch node output
+//! split. For this branch, part values will already be available, so we can connect the new branch
+//! results to their corresponding part values. For the other branches we can use part-selector
+//! nodes to provide values for the new part-results:
+//!
+//! - For a struct value we can add a series of [OpExtractField] nodes, one for each field.
+//! - For a pointer-to-a-struct value we can add a series of [OpFieldPtr] nodes, one for each field.
+//! - For an array value we can add a series of [OpExtractElement] nodes, one for each element.
+//! - For a pointer-to-an-array value we can add a series of [OpElementPtr] nodes, one for each
+//!   element.
+//! - For a pointer-to-an-enum value we can add an [OpDiscriminantPtr] node for the discriminant
+//!   part and a series of [OpVariantPtr] nodes for each of the variant parts.
+//!
+//! If a later alloca replacement ends up replacing the original value in one of the other branches,
+//! then these part-selector nodes will be removed as described above. Note that not all branches
+//! necessarily need to end up splitting the original value for that branch: a branch's aggregate
+//! value need not originate from an alloca node at all; it may originate from a global binding.
+//! This is not a problem, and we don't need to do any special analysis to detect this case, since
+//! at no point did we leave any of the branches in an invalid state.
+//!
+//! The second case is where the switch node output type is a slice pointer. How many parts do we
+//! split the switch output into? For the various branches the split value may (and typically will)
+//! originate from different originating alloca nodes, that may all have different array lengths.
+//! Moreover, the split value may also originate from global bindings, where the array length may
+//! be very large and may even be runtime-dynamic (for storage bindings).
+//!
+//! Fortunately, a constraint on global-binding values helps us avoid the latter scenario: global
+//! binding values may not contain pointer values. Though the originating arrays for the various
+//! result values associated with a single slice output value may all have different lengths, they
+//! must all have the same element type. For element types that don't contain pointer types, scalar
+//! replacement is never required for legalization. Conversely, if scalar replacement would be
+//! required for the legalization of an alloca node, then we know there can never be a downstream
+//! switch output for which another branch originates from a global binding; pointer-containing
+//! results always originate from an alloca node, for all branches. For now, we opt to leverage this
+//! constraint by never splitting array alloca nodes if they don't contain pointers values, and thus
+//! splitting is not required for legalization. This ensures that we never have to split switch
+//! output values for which one or more branches originate from global bindings; for all branches
+//! the result is always guaranteed to originate from an alloca node. (We may be able to add
+//! analysis to detect switch output values for which all results originate from alloca nodes, even
+//! if the values don't contain pointers, for potential optimization purposes.)
+//!
+//! We are then assured to be able to resolve the length of the originating array for each of the
+//! branch results. The number of parts to split the output (and each of the results) into is then
+//! chosen to be the "max" of these originating array lengths. Rather than run a value-flow analysis
+//! to resolve these lengths, we instead adopt a lazy approach. We keep processing alloca nodes for
+//! splitting. When the splitting of the value-flow of an alloca node would require us to split
+//! a switch branch result, rather than attempt to proceed with a split immediately, we instead
+//! "pause" the splitting of that value-flow path by inserting a [Reaggregation] node. This node
+//! kind recombines the split values into a single aggregate again, so that we may connect the
+//! original branch result to this [Reaggregation] node and keep it unsplit for the time being. We
+//! then add the corresponding switch output to a marker table, where we keep track of the number of
+//! branches that have pending [Reaggregation] nodes. As we proceed to process more alloca nodes,
+//! we'll also insert such [Reaggregation] nodes for the other branches, incrementing the branch
+//! count in the marker table each time. When the branch count in the marker table becomes equal to
+//! the total branch count of the switch node, we know the switch output is ready to be split. At
+//! this point we split the switch output and remove each branch's [Reaggregation] node,
+//! reconnecting their inputs to the newly created result values. We then proceed with processing
+//! the consumers of the switch output.
+//!
+//! There is one final problem to address. Since each of the branches may have originating arrays of
+//! different lengths, they consequently may have varying numbers of part values. If a branch's part
+//! count is equal to the max part count (and thus equal to the number of parts that we split the
+//! output/branch-results into), then each new result-part has an obvious corresponding input-part.
+//! However, for branches with fewer part values, we're left with result-parts that have no
+//! corresponding input-part. What input do we provide for such result-parts? Accessing
+//! out-of-bounds array elements is Undefined Behavior. Therefore, any input value of the correct
+//! type would be a valid input value. Since all parts of an array have the same type, we opt to
+//! simply connect all remaining input-less result-parts to the last element part of the array. It
+//! is then up to valid (UB-free) programs to (runtime-dynamically) ensure (e.g., with bounds
+//! checks) that values flowing from such result-parts are never actually accessed. In RISL, it
+//! would be impossible to write a successfully compiling program that accesses such values without
+//! using `unsafe` code (e.g., `slice::get_unchecked`).
+
 use std::collections::VecDeque;
 use std::ops::Deref;
 
@@ -402,8 +579,8 @@ impl Replacer<'_, '_, '_> {
             .users
             .len();
 
-        // We iterate over users in reverse order, so that users may more themselves from the user
-        // set, without disrupting iteration
+        // We iterate over users in reverse order, so that users may remove themselves from the user
+        // set without disrupting iteration
         for i in (0..user_count).rev() {
             let user = self.rvsdg[node].value_outputs()[output as usize].users[i];
 
