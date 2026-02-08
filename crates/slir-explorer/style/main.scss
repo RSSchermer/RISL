@@ -42,10 +42,47 @@ main {
 	padding: 8px;
 }
 
-.module-explorer-container {
+.module-explorer-container, .rvsdg-dump-viewer-container {
 	height: 100%;
 	display: flex;
 	flex-direction: row;
+}
+
+.rvsdg-dump-sider {
+    background: #f0f2f5;
+    padding: 10px;
+    border-right: 1px solid #e8e8e8;
+    width: 300px;
+}
+
+.rvsdg-dump-file-input-container {
+    margin-bottom: 20px;
+}
+
+.rvsdg-dump-function-item {
+    cursor: pointer;
+
+    &.selected {
+        font-weight: bold;
+    }
+}
+
+.rvsdg-dump-content-layout {
+    padding: 20px;
+    overflow: auto;
+    flex: 1;
+    height: 100%;
+}
+
+.rvsdg-dump-content-container {
+    padding: 20px;
+}
+
+.rvsdg-dump-placeholder {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
 }
 
 .module-items-container {

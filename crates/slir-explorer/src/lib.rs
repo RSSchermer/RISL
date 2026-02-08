@@ -5,6 +5,7 @@ pub mod app;
 pub mod module;
 pub mod no_module_selected;
 pub mod not_found;
+pub mod rvsdg_dump;
 
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]

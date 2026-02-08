@@ -1511,9 +1511,8 @@ pub struct RvsdgData {
     function_node: FxHashMap<Function, Node>,
 }
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Rvsdg {
-    #[serde(skip_serializing)]
     ty: TypeRegistry,
     regions: SlotMap<Region, RegionData>,
     nodes: SlotMap<Node, NodeData>,
@@ -1564,8 +1563,11 @@ impl Rvsdg {
     /// This is useful for debugging purposes, as the resulting bincode file can be loaded and
     /// visualized by the `slir-explorer` to view a rendered SVG version of the RVSDG graph.
     pub fn dump<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        bincode::serde::encode_into_std_write(self, writer, bincode::config::standard())
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))?;
+        bincode::serde::encode_into_std_write(self, writer, bincode::config::standard()).map_err(
+            |err: bincode::error::EncodeError| {
+                std::io::Error::new(std::io::ErrorKind::Other, err.to_string())
+            },
+        )?;
 
         Ok(())
     }
@@ -1715,6 +1717,10 @@ impl Rvsdg {
         }
 
         (node, region)
+    }
+
+    pub fn registered_functions(&self) -> impl Iterator<Item = (Function, Node)> {
+        self.function_node.iter().map(|(f, n)| (*f, *n))
     }
 
     pub fn get_function_node(&self, function: Function) -> Option<Node> {

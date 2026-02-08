@@ -6,11 +6,11 @@ use crate::module::functions::detail::rvsdg_explorer::layout::RegionLayout;
 use crate::module::functions::detail::rvsdg_explorer::node::Node;
 
 #[component]
-pub fn Region(region: RegionLayout) -> impl IntoView {
-    let translation = region.translation();
-    let rect = region.rect();
+pub fn Region(region_layout: RegionLayout) -> impl IntoView {
+    let translation = region_layout.translation();
+    let rect = region_layout.rect();
 
-    let region = StoredValue::new(region);
+    let region = StoredValue::new(region_layout);
 
     view! {
         <g transform=format!("translate({} {})", translation[0], translation[1])>

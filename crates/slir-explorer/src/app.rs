@@ -8,6 +8,7 @@ use urlencoding::encode as urlencode;
 use crate::module;
 use crate::no_module_selected::NoModuleSelected;
 use crate::not_found::NotFound;
+use crate::rvsdg_dump::RvsdgDumpView;
 
 pub const MODULE_DIR: &'static str = "target/debug/deps/risl";
 
@@ -30,10 +31,16 @@ pub fn App() -> impl IntoView {
                 <div class="app-container">
                     <nav class="nav-main">
                         <Button on:click=move |_| open_module_list.set(true)><Icon icon=icondata::BiFileFindRegular/> "Select Module"</Button>
+                        <Button on:click=move |_| {
+                            let navigate = leptos_router::hooks::use_navigate();
+                            navigate("/rvsdg-dump", Default::default());
+                        }>"View RVSDG Dump"</Button>
                     </nav>
 
                     <main>
                         <Routes fallback=NotFound>
+                            <Route path=path!("rvsdg-dump") view=RvsdgDumpView/>
+
                             <ParentRoute path=path!(":module_name") view=module::Module>
                                 <ParentRoute path=path!("uniform_bindings") view=module::uniform_bindings::UniformBindings>
                                     <Route path=path!(":uniform_binding_id") view=module::uniform_bindings::Detail/>

@@ -44,11 +44,10 @@ pub fn RvsdgRegionViewer(
         gen_function_url: gen_function_url.clone(),
     });
 
-    let region_layout =
-        Memo::new(move |_| RegionLayout::generate(&Config::default(), &rvsdg.read_value(), region));
+    let region_layout = RegionLayout::generate(&Config::default(), &rvsdg.read_value(), region);
 
-    let width = move || region_layout.with(|r| r.rect().size[0] + 10.0);
-    let height = move || region_layout.with(|r| r.rect().size[1] + 30.0);
+    let width = region_layout.rect().size[0] + 10.0;
+    let height = region_layout.rect().size[1] + 30.0;
 
     view! {
         <svg xmlns="http://www.w3.org/2000/svg" width=width height=height>
@@ -158,7 +157,7 @@ pub fn RvsdgRegionViewer(
                 "#
             </style>
             <g transform="translate(5, 5)">
-                <Region region=region_layout.get() />
+                <Region region_layout />
             </g>
         </svg>
     }

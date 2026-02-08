@@ -109,14 +109,14 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                                 </g>
                             }.into_any()
                         }
-                        NodeContent::Loop(text, region) => {
+                        NodeContent::Loop(text, region_layout) => {
                             let [x, y] = text.translation();
-                            let region = region.clone();
+                            let region_layout = region_layout.clone();
 
                             view! {
                                 <text x=x y=y+TEXT_ADJUST>{text.text().to_owned()}</text>
 
-                                <Region region />
+                                <Region region_layout />
                             }.into_any()
                         }
                         NodeContent::Switch(text, regions) => {
@@ -127,8 +127,8 @@ pub fn Node(node: NodeLayout) -> impl IntoView {
                                 <text x=x y=y+TEXT_ADJUST>{text.text().to_owned()}</text>
 
                                 {move || {
-                                    regions.clone().into_iter().map(|region| {
-                                        view! { <Region region /> }
+                                    regions.clone().into_iter().map(|region_layout| {
+                                        view! { <Region region_layout /> }
                                     }).collect_view()
                                 }}
                             }.into_any()
