@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 arrayvec = { workspace = true }
+bincode = { workspace = true }
 delegate = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 index_vec = { workspace = true, features = ["serde"] }
@@ -16,7 +17,6 @@ ordered-float = { workspace = true, features = ["serde"] }
 risl-smi = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 slotmap = { workspace = true, features = ["serde"] }
 smallvec = { workspace = true, features = ["serde"] }
 thin-vec = { workspace = true, features = ["serde"] }

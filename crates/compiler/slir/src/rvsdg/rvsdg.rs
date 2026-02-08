@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::ops::Index;
 use std::slice;
 
@@ -1558,12 +1559,12 @@ impl Rvsdg {
         }
     }
 
-    /// Serializes the RVSDG to a JSON format and writes it to the given writer.
+    /// Serializes the RVSDG to a bincode format and writes it to the given writer.
     ///
-    /// This is useful for debugging purposes, as the resulting JSON file can be loaded and
+    /// This is useful for debugging purposes, as the resulting bincode file can be loaded and
     /// visualized by the `slir-explorer` to view a rendered SVG version of the RVSDG graph.
-    pub fn dump(&self, writer: impl std::io::Write) -> std::io::Result<()> {
-        serde_json::to_writer(writer, self)
+    pub fn dump<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        bincode::serde::encode_into_std_write(self, writer, bincode::config::standard())
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))?;
 
         Ok(())
