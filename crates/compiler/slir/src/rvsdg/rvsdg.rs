@@ -1,5 +1,7 @@
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Index;
+use std::path::Path;
 use std::slice;
 
 use indexmap::IndexSet;
@@ -1568,6 +1570,14 @@ impl Rvsdg {
                 std::io::Error::new(std::io::ErrorKind::Other, err.to_string())
             },
         )?;
+
+        Ok(())
+    }
+
+    pub fn dump_to_file<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+
+        self.dump(&mut file)?;
 
         Ok(())
     }
