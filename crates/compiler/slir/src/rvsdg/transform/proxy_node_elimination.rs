@@ -27,15 +27,11 @@ fn process_loop_node(rvsdg: &mut Rvsdg, loop_node: Node) {
 }
 
 fn eliminate_proxy_node(rvsdg: &mut Rvsdg, node: Node) {
-    rvsdg.dump_to_file("rvsdg.dump").unwrap();
-
     let node_data = &rvsdg[node];
     let region = node_data.region();
     let node_data = node_data.expect_value_proxy();
     let origin = node_data.input().origin;
     let user_count = node_data.output().users.len();
-
-    println!("{:?}", origin);
 
     for i in (0..user_count).rev() {
         let user = rvsdg[node].expect_value_proxy().output().users[i];
