@@ -1,8 +1,7 @@
 use std::ops::Deref;
 
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, ProxyKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin,
-    ValueUser,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
 use crate::ty::{TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{Function, Module};
@@ -374,7 +373,6 @@ impl<'a> EnumAllocaReplacer<'a> {
                 consumer: owner,
                 input: input_index,
             },
-            ProxyKind::Generic,
         );
         let proxy_input = ValueInput {
             ty: value_input.ty,

@@ -429,11 +429,9 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
 
     fn replicate_value_proxy_node(&mut self, node: Node) -> Node {
         let data = self.rvsdg[node].expect_value_proxy();
-        let proxy_kind = data.proxy_kind();
         let input = self.mapped_value_input(data.input());
 
-        self.rvsdg
-            .add_value_proxy(self.dst_region, input, proxy_kind)
+        self.rvsdg.add_value_proxy(self.dst_region, input)
     }
 
     fn replicate_reaggregation_node(&mut self, node: Node) -> Node {

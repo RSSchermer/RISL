@@ -421,14 +421,6 @@ impl NodeData {
         Reaggregation is_reaggregation expect_reaggregation "a reaggregation node",
     }
 
-    pub fn is_switch_output_replacement_marker(&self) -> bool {
-        if let NodeKind::Simple(SimpleNode::ValueProxy(proxy)) = &self.kind {
-            proxy.proxy_kind().is_switch_output_replacement_marker()
-        } else {
-            false
-        }
-    }
-
     fn expect_op_case_to_branch_selector_mut(&mut self) -> &mut OpCaseToBranchSelector {
         if let NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(op)) = &mut self.kind {
             op
@@ -1273,31 +1265,13 @@ impl Connectivity for ConstFallback {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Debug)]
-pub enum ProxyKind {
-    #[default]
-    Generic,
-    SwitchOutputReplacementMarker,
-}
-
-impl ProxyKind {
-    pub fn is_switch_output_replacement_marker(&self) -> bool {
-        *self == ProxyKind::SwitchOutputReplacementMarker
-    }
-}
-
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ValueProxy {
-    proxy_kind: ProxyKind,
     input: ValueInput,
     output: ValueOutput,
 }
 
 impl ValueProxy {
-    pub fn proxy_kind(&self) -> ProxyKind {
-        self.proxy_kind
-    }
-
     pub fn input(&self) -> &ValueInput {
         &self.input
     }
@@ -1336,14 +1310,19 @@ impl Connectivity for ValueProxy {
 /// Re-aggregates a set of pointers or values to the individual parts of an aggregate into a single
 /// pointer or value.
 ///
-/// This is a temporary node that acts as a pause/continue point for aggregate-replacement; it
-/// allows us to run e.g. a memory-promotion-and-legalization pass midway through the replacement
-/// pass. We also use this when an aggregate pointer is the result of a [Switch] node to pause at
-/// the end of each branch, until all other branches have also split the corresponding result.
+/// This is a temporary helper node used by the scalar-replacement pass. The first input represents
+/// the original (pointer to an) aggregate value. The remaining inputs represent the part values
+/// the original value is being split into.
+///
+/// This node acts like a "save-state" for the scalar-replacement pass. If we can't currently split
+/// a particular value-flow path, then a reaggregation node allows us to pause, split other alloca
+/// nodes or perform different transforms, then continue from the aggregation node later. Currently,
+/// this is used for switch node output splitting when the switch node output is a slice type and
+/// we won't know how many parts to split into until all branches have been processed.
 ///
 /// This "operation" is not implementable on any back-end; it is only to be used as a temporary node
 /// during RVSDG transformation, and no nodes of this kind should be left in the graph when
-/// transformation is complete.
+/// scalar-replacement is complete.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Reaggregation {
     inputs: Vec<ValueInput>,
@@ -2558,18 +2537,12 @@ impl Rvsdg {
         node
     }
 
-    pub fn add_value_proxy(
-        &mut self,
-        region: Region,
-        input: ValueInput,
-        proxy_kind: ProxyKind,
-    ) -> Node {
+    pub fn add_value_proxy(&mut self, region: Region, input: ValueInput) -> Node {
         self.validate_node_value_input(region, &input);
 
         let node = self.nodes.insert(NodeData {
             kind: NodeKind::Simple(
                 ValueProxy {
-                    proxy_kind,
                     input,
                     output: ValueOutput::new(input.ty),
                 }
@@ -2807,12 +2780,10 @@ impl Rvsdg {
         ty: Type,
         origin: ValueOrigin,
         user: ValueUser,
-        proxy_kind: ProxyKind,
     ) -> Node {
         let proxy = self.nodes.insert(NodeData {
             kind: NodeKind::Simple(
                 ValueProxy {
-                    proxy_kind,
                     input: ValueInput { ty, origin },
                     output: ValueOutput {
                         ty,
@@ -2883,13 +2854,21 @@ impl Rvsdg {
         proxy
     }
 
-    pub fn proxy_origin_users(
-        &mut self,
-        region: Region,
-        ty: Type,
-        origin: ValueOrigin,
-        proxy_kind: ProxyKind,
-    ) -> Node {
+    pub fn proxy_origin_users(&mut self, region: Region, ty: Type, origin: ValueOrigin) -> Node {
+        let proxy = self.nodes.insert(NodeData {
+            kind: NodeKind::Simple(
+                ValueProxy {
+                    input: ValueInput { ty, origin },
+                    output: ValueOutput {
+                        ty,
+                        users: thin_set![],
+                    },
+                }
+                .into(),
+            ),
+            region: Some(region),
+        });
+
         let output = match origin {
             ValueOrigin::Argument(arg) => &mut self.regions[region].value_arguments[arg as usize],
             ValueOrigin::Output { producer, output } => {
@@ -2907,20 +2886,10 @@ impl Rvsdg {
 
         let users = output.users.clone();
 
-        let proxy = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                ValueProxy {
-                    proxy_kind,
-                    input: ValueInput { ty, origin },
-                    output: ValueOutput {
-                        ty,
-                        users: thin_set![],
-                    },
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
+        output.users = thin_set![ValueUser::Input {
+            consumer: proxy,
+            input: 0
+        }];
 
         for user in users.iter().copied() {
             let input = match user {
@@ -2965,6 +2934,24 @@ impl Rvsdg {
         }
 
         self.remove_node(proxy_node);
+    }
+
+    pub fn dissolve_reaggregation(&mut self, reaggregation_node: Node) {
+        let region = self.nodes[reaggregation_node].region();
+        let data = self.nodes[reaggregation_node].expect_reaggregation();
+        let original_origin = data.original().origin;
+        let user_count = data.output().users.len();
+
+        for i in (0..user_count).rev() {
+            let user = self.nodes[reaggregation_node]
+                .expect_reaggregation()
+                .output()
+                .users[i];
+
+            self.reconnect_value_user(region, user, original_origin);
+        }
+
+        self.remove_node(reaggregation_node);
     }
 
     /// Adds a dependency on the given `dependency` node to the `function_node`.

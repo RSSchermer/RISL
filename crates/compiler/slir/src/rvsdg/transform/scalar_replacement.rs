@@ -184,15 +184,15 @@ use crate::rvsdg::analyse::element_index::ElementIndex;
 use crate::rvsdg::transform::enum_replacement::replace_enum_alloca;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, OpAlloca, OpLoad, ProxyKind, Region, Rvsdg, SimpleNode,
-    StateOrigin, ValueInput, ValueOrigin, ValueOutput, ValueUser, visit,
+    Connectivity, Node, NodeKind, OpAlloca, OpLoad, Region, Rvsdg, SimpleNode, StateOrigin,
+    ValueInput, ValueOrigin, ValueOutput, ValueUser, visit,
 };
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{Function, Module};
 
-enum Job {
-    Alloca(Node),
-    SwitchOutput(Node),
+enum SwitchOutputSplitKind {
+    Struct,
+    Array,
 }
 
 /// Collects all [OpAlloca] nodes of aggregate types in a region and all sub-regions (e.g. a switch
@@ -202,7 +202,7 @@ enum Job {
 /// replacement transform on a given [OpAlloca] node, this requires further analysis.
 struct CandidateAllocaCollector<'a, 'b> {
     rvsdg: &'a Rvsdg,
-    candidates: &'b mut VecDeque<Job>,
+    candidates: &'b mut VecDeque<Node>,
 }
 
 impl CandidateAllocaCollector<'_, '_> {
@@ -216,7 +216,7 @@ impl CandidateAllocaCollector<'_, '_> {
         match self.rvsdg[node].kind() {
             NodeKind::Simple(SimpleNode::OpAlloca(op)) => {
                 if self.rvsdg.ty().kind(op.ty()).is_aggregate() {
-                    self.candidates.push_back(Job::Alloca(node));
+                    self.candidates.push_back(node);
                 }
             }
             NodeKind::Switch(n) => {
@@ -230,7 +230,7 @@ impl CandidateAllocaCollector<'_, '_> {
     }
 }
 
-fn collect_candidate_allocas(rvsdg: &Rvsdg, candidates: &mut VecDeque<Job>, region: Region) {
+fn collect_candidate_allocas(rvsdg: &Rvsdg, candidates: &mut VecDeque<Node>, region: Region) {
     CandidateAllocaCollector { rvsdg, candidates }.visit_region(region);
 }
 
@@ -238,7 +238,6 @@ fn collect_candidate_allocas(rvsdg: &Rvsdg, candidates: &mut VecDeque<Job>, regi
 pub enum AnalysisResult {
     Replace,
     NeedsPromotionPass,
-    NeedsSwitchOutputReplacement,
     Ignore,
 }
 
@@ -272,7 +271,6 @@ struct AggregateAllocaAnalyzer {
     was_loaded: bool,
     has_nonlocal_use: bool,
     is_stored_value: bool,
-    needs_switch_output_replacement: bool,
 }
 
 impl AggregateAllocaAnalyzer {
@@ -282,7 +280,6 @@ impl AggregateAllocaAnalyzer {
             was_loaded: false,
             has_nonlocal_use: false,
             is_stored_value: false,
-            needs_switch_output_replacement: false,
         }
     }
 
@@ -292,7 +289,6 @@ impl AggregateAllocaAnalyzer {
         self.has_nonlocal_use = false;
         self.is_stored_value = false;
         self.was_loaded = false;
-        self.needs_switch_output_replacement = false;
 
         // Perform the analysis
         self.visit_value_output(rvsdg, alloca_node, 0);
@@ -302,8 +298,6 @@ impl AggregateAllocaAnalyzer {
             AnalysisResult::Ignore
         } else if self.is_stored_value {
             AnalysisResult::NeedsPromotionPass
-        } else if self.needs_switch_output_replacement {
-            AnalysisResult::NeedsSwitchOutputReplacement
         } else {
             AnalysisResult::Replace
         }
@@ -363,9 +357,6 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
                 // These operations take a pointer to an aggregate as input, but splitting does not
                 // propagate past these node kinds, so we end the search
             }
-            Simple(Reaggregation(_)) => {
-                self.needs_switch_output_replacement = true;
-            }
             Switch(_) | Loop(_) | Simple(OpOffsetSlice(_)) => {
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
@@ -376,26 +367,13 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
     }
 }
 
-struct SplitBranchState {
-    branch_count: u32,
-    split_branch_count: u32,
-}
-
-struct Replacer<'a, 'b, 'c> {
+struct Replacer<'a, 'b> {
     rvsdg: &'a mut Rvsdg,
-    candidate_queue: &'b mut VecDeque<Job>,
-    switch_output_state: &'c mut FxHashMap<Node, SplitBranchState>,
+    candidate_queue: &'b mut VecDeque<Node>,
     ty: TypeRegistry,
 }
 
-impl Replacer<'_, '_, '_> {
-    fn perform_job(&mut self, job: Job) {
-        match job {
-            Job::Alloca(node) => self.replace_alloca(node),
-            Job::SwitchOutput(node) => self.replace_switch_output(node),
-        }
-    }
-
+impl Replacer<'_, '_> {
     fn replace_alloca(&mut self, node: Node) {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
@@ -409,7 +387,7 @@ impl Replacer<'_, '_, '_> {
                 // Enum replacement is handled separately
                 return replace_enum_alloca(&mut self.rvsdg, node, |node, ty| {
                     if self.ty.kind(ty).is_aggregate() {
-                        self.candidate_queue.push_back(Job::Alloca(node));
+                        self.candidate_queue.push_back(node);
                     }
                 });
             }
@@ -433,7 +411,7 @@ impl Replacer<'_, '_, '_> {
                     });
 
                     if element_is_aggregate {
-                        self.candidate_queue.push_back(Job::Alloca(element_node));
+                        self.candidate_queue.push_back(element_node);
                     }
                 }
             }
@@ -441,18 +419,18 @@ impl Replacer<'_, '_, '_> {
                 for field in &struct_data.fields {
                     let field_ty = field.ty;
                     let field_ptr_ty = self.ty.register(TypeKind::Ptr(field_ty));
-                    let element_node = self.rvsdg.add_op_alloca(region, field_ty);
+                    let field_node = self.rvsdg.add_op_alloca(region, field_ty);
 
                     replacements.push(ValueInput {
                         ty: field_ptr_ty,
                         origin: ValueOrigin::Output {
-                            producer: element_node,
+                            producer: field_node,
                             output: 0,
                         },
                     });
 
                     if self.ty.kind(field_ty).is_aggregate() {
-                        self.candidate_queue.push_back(Job::Alloca(element_node));
+                        self.candidate_queue.push_back(field_node);
                     }
                 }
             }
@@ -462,115 +440,6 @@ impl Replacer<'_, '_, '_> {
         self.visit_users(node, 0, &replacements);
 
         let _ = self.rvsdg.try_remove_node(node);
-    }
-
-    fn replace_switch_output(&mut self, proxy_node: Node) {
-        let ValueOrigin::Output {
-            producer: switch_node,
-            output,
-        } = self.rvsdg[proxy_node].expect_value_proxy().input().origin
-        else {
-            panic!("the value-proxy marker node should connect to a switch output")
-        };
-
-        let data = self.rvsdg[switch_node].expect_switch();
-        let prior_result_count = data.value_outputs().len();
-        let branch_count = data.branches().len();
-
-        assert!(branch_count > 0);
-
-        let first_branch = data.branches()[0];
-
-        let mut max_part_count = 0;
-
-        for branch in data.branches() {
-            let ValueOrigin::Output {
-                producer: reaggregation_node,
-                output: 0,
-            } = self.rvsdg[*branch].value_results()[output as usize].origin
-            else {
-                panic!("all branches should have been processed into a reaggregation node earlier")
-            };
-            let part_count = self.rvsdg[reaggregation_node]
-                .expect_reaggregation()
-                .parts()
-                .len();
-
-            max_part_count = usize::max(max_part_count, part_count);
-        }
-
-        let mut split_output = Vec::with_capacity(max_part_count);
-
-        // Add the new outputs for the replacement values and record them in `split_output`. We'll
-        // derive the output value types from the outputs of the reaggregation node in the first
-        // branch.
-        for i in 0..max_part_count {
-            let ValueOrigin::Output {
-                producer: reaggregation_node,
-                output: 0,
-            } = self.rvsdg[first_branch].value_results()[output as usize].origin
-            else {
-                panic!("all branches should have been processed into a reaggregation node earlier")
-            };
-            let inputs = self.rvsdg[reaggregation_node]
-                .expect_reaggregation()
-                .parts();
-            let input_count = inputs.len();
-            // If the part count for the first branch is not equal to the `max_part_count`, then
-            // we may assume we're dealing with a slice. We'll simply repeat the final input to
-            // derive the extra outputs, as every part of a slice will have the same type.
-            let input_index = usize::max(i, input_count - 1);
-            let input = inputs[input_index];
-
-            split_output.push(ValueInput {
-                ty: input.ty,
-                origin: ValueOrigin::Output {
-                    producer: switch_node,
-                    output: i as u32,
-                },
-            });
-        }
-
-        // Now that we've created the new outputs/results, connect them to the inputs of the
-        // reaggregation nodes in each branch.
-        for b in 0..branch_count {
-            let branch = self.rvsdg[switch_node].expect_switch().branches()[b];
-            let ValueOrigin::Output {
-                producer: reaggregation_node,
-                output: 0,
-            } = self.rvsdg[branch].value_results()[output as usize].origin
-            else {
-                panic!("all branches should have been processed into a reaggregation node earlier")
-            };
-
-            for i in 0..max_part_count {
-                let inputs = self.rvsdg[reaggregation_node]
-                    .expect_reaggregation()
-                    .parts();
-                let input_count = inputs.len();
-                // If the part count for the branch is not equal to the `max_part_count`, then
-                // we may assume we're dealing with a slice. Since accessing those values would be
-                // UB (and should never happen), we're allowed to connect any correctly typed value
-                // to produce a valid RVSDG. We'll opt to simply repeat the final value.
-                let input_index = usize::max(i, input_count - 1);
-                let input = inputs[input_index];
-                let result_index = prior_result_count + i;
-
-                self.rvsdg
-                    .reconnect_region_result(branch, result_index as u32, input.origin);
-            }
-            let original_origin = self.rvsdg[reaggregation_node]
-                .expect_reaggregation()
-                .original()
-                .origin;
-
-            self.rvsdg
-                .reconnect_region_result(branch, output, original_origin);
-            self.rvsdg.remove_node(reaggregation_node);
-        }
-
-        self.rvsdg.dissolve_value_proxy(proxy_node);
-        self.visit_users(switch_node, output, &split_output);
     }
 
     fn visit_users(&mut self, node: Node, output: u32, split_inputs: &[ValueInput]) {
@@ -898,7 +767,6 @@ impl Replacer<'_, '_, '_> {
                     consumer: node,
                     input: 1,
                 },
-                ProxyKind::Generic,
             );
 
             value_input.origin = ValueOrigin::Output {
@@ -917,7 +785,6 @@ impl Replacer<'_, '_, '_> {
                     consumer: node,
                     input: 0,
                 },
-                ProxyKind::Generic,
             );
 
             ptr_input.origin = ValueOrigin::Output {
@@ -1084,52 +951,229 @@ impl Replacer<'_, '_, '_> {
 
     fn split_switch_result(&mut self, branch: Region, result: u32, split_input: &[ValueInput]) {
         let node = self.rvsdg[branch].owner();
-        let outer_region = self.rvsdg[node].region();
         let node_data = self.rvsdg[node].expect_switch();
-        let branch_count = node_data.branches().len() as u32;
-        let original = self.rvsdg[branch].value_results()[result as usize];
+        let output_ty = node_data.value_outputs()[result as usize].ty;
 
-        self.rvsdg
-            .add_reaggregation(branch, original, split_input.iter().copied());
-
-        let output_users = &self.rvsdg[node].value_outputs()[result as usize].users;
-
-        // We proxy the switch output that is to be split with a proxy node, then use that proxy
-        // node to keep track of the output that is to be split later. Doing it this way, rather
-        // than storing the output index, allows us to remove switch outputs in between now and
-        // when the actual output splitting happens; if we tried to keep track of the output by its
-        // index, then the removal of other switch outputs might make our tracking data invalid.
-        let output_proxy = if output_users.len() == 1
-            && let ValueUser::Input { consumer, input: 0 } = output_users[0]
-            && self.rvsdg[consumer].is_switch_output_replacement_marker()
-        {
-            // We already seem to have added the proxy when we visited a previous branch: use that
-            // proxy node.
-            consumer
-        } else {
-            self.rvsdg.proxy_origin_users(
-                outer_region,
-                original.ty,
-                ValueOrigin::Output {
-                    producer: node,
-                    output: result,
-                },
-                ProxyKind::SwitchOutputReplacementMarker,
-            )
+        let split_kind = match self.rvsdg.ty().kind(output_ty).deref() {
+            TypeKind::Ptr(ty) => match self.rvsdg.ty().kind(*ty).deref() {
+                TypeKind::Struct(_) => Ok(SwitchOutputSplitKind::Struct),
+                TypeKind::Array { .. } | TypeKind::Slice { .. } => Ok(SwitchOutputSplitKind::Array),
+                _ => Err(()),
+            },
+            TypeKind::Struct(_) => Ok(SwitchOutputSplitKind::Struct),
+            TypeKind::Array { .. } | TypeKind::Slice { .. } => Ok(SwitchOutputSplitKind::Array),
+            _ => Err(()),
         };
 
-        if let Some(state) = self.switch_output_state.get_mut(&output_proxy) {
-            state.split_branch_count += 1;
-        } else {
-            self.switch_output_state.insert(
-                output_proxy,
-                SplitBranchState {
-                    branch_count,
-                    split_branch_count: 1,
-                },
+        let Ok(split_kind) = split_kind else {
+            panic!(
+                "expected a (pointer to a) struct or array type, got `{}`",
+                output_ty.to_string(self.rvsdg.ty())
             );
-            self.candidate_queue
-                .push_back(Job::SwitchOutput(output_proxy))
+        };
+
+        match split_kind {
+            SwitchOutputSplitKind::Struct => {
+                self.split_switch_struct_output(node, result, branch, split_input)
+            }
+            SwitchOutputSplitKind::Array => self.try_split_switch_array_output(node, result),
+        }
+    }
+
+    fn split_switch_struct_output(
+        &mut self,
+        node: Node,
+        output: u32,
+        provoking_branch: Region,
+        split_input: &[ValueInput],
+    ) {
+        let node_data = self.rvsdg[node].expect_switch();
+        let branch_count = node_data.branches().len();
+        let output_ty = node_data.value_outputs()[output as usize].ty;
+        let is_ptr = self.rvsdg.ty().kind(output_ty).is_ptr();
+
+        let part_result_start = node_data.value_outputs().len();
+        let part_result_end = part_result_start + split_input.len();
+
+        let split_output = split_input
+            .iter()
+            .map(|input| {
+                let output = self.rvsdg.add_switch_output(node, input.ty);
+
+                ValueInput {
+                    ty: input.ty,
+                    origin: ValueOrigin::Output {
+                        producer: node,
+                        output,
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for branch in 0..branch_count {
+            let branch = self.rvsdg[node].expect_switch().branches()[branch];
+
+            if branch == provoking_branch {
+                // If the current branch is the provoking branch, then we already have part values
+                // available in our `split_input`, so directly connect
+
+                for (part, part_result) in
+                    (part_result_start..part_result_end).into_iter().enumerate()
+                {
+                    self.rvsdg.reconnect_region_result(
+                        branch,
+                        part_result as u32,
+                        split_input[part].origin,
+                    );
+                }
+            } else {
+                // If the current branch is not the provoking branch, then use part-selector nodes
+                // (OpFieldPtr and OpExtractField) to split the original results input value and
+                // provide inputs for the new result-parts. If scalar-replacement ends up visiting
+                // this branch for another value-flow path later. Then these parts selectors will
+                // "dissolve" and act as terminators for the value-flow splitting. If we never visit
+                // this branch in another value-flow path (because the value for this path
+                // originates from a global binding), then these part-selectors are the correct
+                // final transform for this value-flow path and no further adjustments are needed.
+
+                for (field, part_result) in
+                    (part_result_start..part_result_end).into_iter().enumerate()
+                {
+                    let input = self.rvsdg[branch].value_results()[output as usize];
+
+                    // To ensure we're not interfering with any active traversal over the original
+                    // origin's users, insert a ValueProxy node.
+                    let proxy = self.rvsdg.proxy_origin_user(
+                        branch,
+                        input.ty,
+                        input.origin,
+                        ValueUser::Result(output),
+                    );
+                    let input = ValueInput::output(input.ty, proxy, 0);
+
+                    let part_node = if is_ptr {
+                        self.rvsdg.add_op_field_ptr(branch, input, field as u32)
+                    } else {
+                        self.rvsdg.add_op_extract_field(branch, input, field as u32)
+                    };
+
+                    self.rvsdg.reconnect_region_result(
+                        branch,
+                        part_result as u32,
+                        ValueOrigin::Output {
+                            producer: part_node,
+                            output: 0,
+                        },
+                    );
+                }
+            }
+        }
+
+        self.visit_users(node, output, &split_output);
+    }
+
+    fn try_split_switch_array_output(&mut self, node: Node, output: u32) {
+        use NodeKind::*;
+        use SimpleNode::*;
+
+        let node_data = self.rvsdg[node].expect_switch();
+
+        // We'll only split the output if all branches are ready, that is, all corresponding results
+        // receive their input from a Reaggregation node. We'll combine that with resolving the part
+        // count (the maximum number of parts across all Reaggregation nodes), which saves us
+        // having to iterate over the branches again later. The `part_count` below being `Some`
+        // afterward indicates that we're ready to proceed with the split.
+        let mut part_count = Some(0);
+        for branch in node_data.branches() {
+            let result_origin = self.rvsdg[*branch].value_results()[output as usize].origin;
+
+            if let ValueOrigin::Output {
+                producer,
+                output: 0,
+            } = result_origin
+                && let Simple(Reaggregation(n)) = self.rvsdg[producer].kind()
+            {
+                part_count = Some(usize::max(part_count.unwrap_or(0), n.parts().len()));
+            } else {
+                part_count = None;
+
+                break;
+            }
+        }
+
+        if let Some(part_count) = part_count {
+            let branch_count = node_data.branches().len();
+            let aggregate_ty = node_data.value_outputs()[output as usize].ty;
+
+            let part_ty = match *self.rvsdg.ty().kind(aggregate_ty) {
+                TypeKind::Ptr(ty) => match *self.rvsdg.ty().kind(ty) {
+                    TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => {
+                        self.rvsdg.ty().register(TypeKind::Ptr(element_ty))
+                    }
+                    _ => unreachable!("expected an array or slice type"),
+                },
+                TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => {
+                    element_ty
+                }
+                _ => unreachable!("expected an array or slice type"),
+            };
+
+            let part_result_start = node_data.value_outputs().len();
+            let part_result_end = part_result_start + part_count;
+
+            let split_output = (0..part_count)
+                .into_iter()
+                .map(|_| {
+                    let output = self.rvsdg.add_switch_output(node, part_ty);
+
+                    ValueInput {
+                        ty: part_ty,
+                        origin: ValueOrigin::Output {
+                            producer: node,
+                            output,
+                        },
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            for branch in 0..branch_count {
+                let branch = self.rvsdg[node].expect_switch().branches()[branch];
+                let result_origin = self.rvsdg[branch].value_results()[output as usize].origin;
+                let ValueOrigin::Output {
+                    producer: reaggregation_node,
+                    output: 0,
+                } = result_origin
+                else {
+                    panic!("expected the result to be connected to a reaggregation node");
+                };
+                let reaggregation_count = self.rvsdg[reaggregation_node]
+                    .expect_reaggregation()
+                    .parts()
+                    .len();
+
+                for (part, part_result) in
+                    (part_result_start..part_result_end).into_iter().enumerate()
+                {
+                    // In case this branch has fewer reaggregated parts than new result-parts, clamp
+                    // the part index to the number of parts, so that we repeat the last array
+                    // element for the excess result-parts (see also the module level
+                    // documentation).
+                    let part = usize::min(part, reaggregation_count);
+                    let origin = self.rvsdg[reaggregation_node]
+                        .expect_reaggregation()
+                        .parts()[part]
+                        .origin;
+
+                    self.rvsdg
+                        .reconnect_region_result(branch, part_result as u32, origin);
+                }
+
+                // Now that all parts have been connected, dissolve the reaggregation node and
+                // reconnect the original aggregate value back to the original result.
+                self.rvsdg.dissolve_reaggregation(reaggregation_node);
+            }
+
+            self.visit_users(node, output, &split_output);
         }
     }
 
@@ -1205,7 +1249,6 @@ impl Replacer<'_, '_, '_> {
                 consumer: owner,
                 input: input_index,
             },
-            ProxyKind::Generic,
         );
         let proxy_input = ValueInput {
             ty: value_input.ty,
@@ -1220,9 +1263,9 @@ impl Replacer<'_, '_, '_> {
 
         let ty_reg = self.rvsdg.ty().clone();
 
-        // Add inputs for each element of the aggregate, and connect them to the proxy via either
+        // Add inputs for each element of the aggregate and connect them to the proxy via either
         // an OpPtrElementPtr node if the input is of a pointer type, or via an OpExtractElement
-        // node otherwise. Also record an argument mapping in `split_args` and an output mapping in
+        // node otherwise. Also, record an argument mapping in `split_args` and an output mapping in
         // `split_outputs`.
         match ty_reg.kind(value_input.ty).deref() {
             TypeKind::Ptr(pointee_ty) => match ty_reg.kind(*pointee_ty).deref() {
@@ -1473,24 +1516,8 @@ impl Replacer<'_, '_, '_> {
 
 pub struct AggregateReplacementContext {
     analyzer: AggregateAllocaAnalyzer,
-    queue: VecDeque<Job>,
-    candidates: VecDeque<Job>,
-
-    /// Tracks for a switch node result/output pair how many branches have been processed into a
-    /// [Reaggregation] node.
-    ///
-    /// The [SplitBranchState] value also stores the total number of branches for the switch node,
-    /// so that we can cheaply check if all branches have been processed without having to look up
-    /// the actual switch node in the RVSDG.
-    ///
-    /// The [Node] we use as a key is not the [Switch] node itself. It is instead a [ValueProxy]
-    /// node that has been attached to the switch output that we intend to split. The [ValueOrigin]
-    /// of that [ValueProxy] node's input identifies the actual [Switch] node and the output of
-    /// interest. We do this so that way may remove switch outputs without invalidating this
-    /// tracking information; if we instead tracked the output as e.g. a
-    /// `(switch_node, output_index)` pair, then removing any of the switch node's outputs might
-    /// invalidate our mapping.
-    switch_output_state: FxHashMap<Node, SplitBranchState>,
+    queue: VecDeque<Node>,
+    candidates: VecDeque<Node>,
 }
 
 impl AggregateReplacementContext {
@@ -1499,14 +1526,12 @@ impl AggregateReplacementContext {
             analyzer: AggregateAllocaAnalyzer::new(),
             queue: VecDeque::new(),
             candidates: VecDeque::new(),
-            switch_output_state: Default::default(),
         }
     }
 
     pub fn for_region(&mut self, rvsdg: &Rvsdg, region: Region) -> RegionReplacementContext {
         self.queue.clear();
         self.candidates.clear();
-        self.switch_output_state.clear();
 
         collect_candidate_allocas(rvsdg, &mut self.candidates, region);
 
@@ -1517,30 +1542,24 @@ impl AggregateReplacementContext {
         let mut i = start;
 
         while i < self.candidates.len() {
-            match self.candidates[i] {
-                Job::Alloca(node) => match self.analyzer.analyze_alloca_node(rvsdg, node) {
-                    AnalysisResult::Replace => {
-                        self.queue.push_back(Job::Alloca(node));
-                        self.candidates.swap_remove_back(i);
-                    }
-                    AnalysisResult::NeedsPromotionPass => i += 1,
-                    AnalysisResult::NeedsSwitchOutputReplacement => i += 1,
-                    AnalysisResult::Ignore => {
-                        self.candidates.swap_remove_back(i);
-                    }
-                },
-                Job::SwitchOutput(marker) => {
-                    let state = self.switch_output_state.get(&marker).expect(
-                        "job should not have been in candidate queue without a \
-                        corresponding state entry",
-                    );
+            let node = self.candidates[i];
 
-                    if state.split_branch_count == state.branch_count {
-                        self.queue.push_back(Job::SwitchOutput(marker));
-                        self.candidates.swap_remove_back(i);
-                    } else {
-                        i += 1;
-                    }
+            match self.analyzer.analyze_alloca_node(rvsdg, node) {
+                AnalysisResult::Replace => {
+                    self.queue.push_back(node);
+                    self.candidates.swap_remove_back(i);
+
+                    // Note that we don't increment `i` here, because we just moved another yet
+                    // unprocessed candidate into the `i`th position, which we want to process on
+                    // the next iteration.
+                }
+                AnalysisResult::NeedsPromotionPass => i += 1,
+                AnalysisResult::Ignore => {
+                    self.candidates.swap_remove_back(i);
+
+                    // Note that we don't increment `i` here, because we just moved another yet
+                    // unprocessed candidate into the `i`th position, which we want to process on
+                    // the next iteration.
                 }
             }
         }
@@ -1560,17 +1579,16 @@ impl RegionReplacementContext<'_> {
         } else {
             let ty_registry = rvsdg.ty().clone();
 
-            while let Some(job) = self.cx.queue.pop_front() {
+            while let Some(node) = self.cx.queue.pop_front() {
                 let prior_candidate_count = self.cx.candidates.len();
 
                 let mut replacer = Replacer {
                     rvsdg,
                     candidate_queue: &mut self.cx.candidates,
-                    switch_output_state: &mut self.cx.switch_output_state,
                     ty: ty_registry.clone(),
                 };
 
-                replacer.perform_job(job);
+                replacer.replace_alloca(node);
 
                 // Attempt to add any newly added candidates to the end of the queue *during* this
                 // current replacement iteration. This helps minimize the number of
