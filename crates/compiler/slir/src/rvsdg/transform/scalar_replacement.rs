@@ -1638,8 +1638,101 @@ mod tests {
     use std::iter;
 
     use super::*;
-    use crate::ty::{TY_DUMMY, TY_PREDICATE};
+    use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_PTR_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Symbol, thin_set};
+
+    #[test]
+    fn test_scalar_replace_op_field_ptr() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![
+                crate::ty::StructField {
+                    offset: 0,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+                crate::ty::StructField {
+                    offset: 4,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+            ],
+        }));
+        let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
+        let field_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+
+        let op_alloca = rvsdg.add_op_alloca(region, ty);
+        let op_field_ptr =
+            rvsdg.add_op_field_ptr(region, ValueInput::output(ptr_ty, op_alloca, 0), 1);
+        let load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(field_ptr_ty, op_field_ptr, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load,
+                output: 0,
+            },
+        );
+
+        let mut cx = AggregateReplacementContext::new();
+        let mut rcx = cx.for_region(&rvsdg, region);
+
+        rcx.replace(&mut rvsdg);
+
+        assert_eq!(
+            rvsdg[region].value_results()[0].origin,
+            ValueOrigin::Output {
+                producer: load,
+                output: 0
+            }
+        );
+
+        let load_origin = rvsdg[load].expect_op_load().ptr_input().origin;
+        let ValueOrigin::Output {
+            producer: load_origin_node,
+            output: 0,
+        } = load_origin
+        else {
+            panic!("load origin should be the first output of a node")
+        };
+        let field_alloca = rvsdg[load_origin_node].expect_op_alloca();
+
+        assert_eq!(field_alloca.ty(), TY_U32);
+        assert_eq!(
+            &field_alloca.value_output().users,
+            &thin_set![ValueUser::Input {
+                consumer: load,
+                input: 0
+            }]
+        );
+
+        assert!(!rvsdg.is_live_node(op_field_ptr));
+        assert!(!rvsdg.is_live_node(op_alloca));
+    }
 
     #[test]
     fn test_scalar_replace_op_ptr_element_ptr() {
@@ -1664,12 +1757,12 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Array {
-            element_ty: TY_U32,
+            element_ty: TY_PTR_U32,
             count: 2,
             stride: 4,
         });
         let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
-        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_PTR_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let element_index = rvsdg.add_const_u32(region, 1);
@@ -1716,7 +1809,7 @@ mod tests {
         };
         let element_alloca = rvsdg[load_origin_node].expect_op_alloca();
 
-        assert_eq!(element_alloca.ty(), TY_U32);
+        assert_eq!(element_alloca.ty(), TY_PTR_U32);
         assert_eq!(
             &element_alloca.value_output().users,
             &thin_set![ValueUser::Input {
@@ -1755,12 +1848,12 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Array {
-            element_ty: TY_U32,
+            element_ty: TY_PTR_U32,
             count: 2,
             stride: 4,
         });
         let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
-        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_PTR_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let op_ptr_element_ptr = rvsdg.add_op_element_ptr(
@@ -1871,7 +1964,7 @@ mod tests {
 
         let element_0_alloca = rvsdg[element_0_alloca].expect_op_alloca();
 
-        assert_eq!(element_0_alloca.ty(), TY_U32);
+        assert_eq!(element_0_alloca.ty(), TY_PTR_U32);
         assert_eq!(
             &element_0_alloca.value_output().users,
             &thin_set![ValueUser::Input {
@@ -1892,7 +1985,7 @@ mod tests {
 
         let element_1_alloca = rvsdg[element_1_alloca].expect_op_alloca();
 
-        assert_eq!(element_1_alloca.ty(), TY_U32);
+        assert_eq!(element_1_alloca.ty(), TY_PTR_U32);
         assert_eq!(
             &element_1_alloca.value_output().users,
             &thin_set![ValueUser::Input {
@@ -1906,7 +1999,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_replace_op_extract_element() {
+    fn test_scalar_replace_op_extract_field() {
         let mut module = Module::new(Symbol::from_ref(""));
         let function = Function {
             name: Symbol::from_ref(""),
@@ -1927,13 +2020,22 @@ mod tests {
 
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
-        let ty = module.ty.register(TypeKind::Array {
-            element_ty: TY_U32,
-            count: 2,
-            stride: 4,
-        });
+        let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![
+                crate::ty::StructField {
+                    offset: 0,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+                crate::ty::StructField {
+                    offset: 4,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+            ],
+        }));
         let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
-        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+        let field_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let op_load = rvsdg.add_op_load(
@@ -1941,18 +2043,14 @@ mod tests {
             ValueInput::output(ptr_ty, op_alloca, 0),
             StateOrigin::Argument,
         );
-        let element_index = rvsdg.add_const_u32(region, 1);
-        let op_extract_element = rvsdg.add_op_extract_element(
-            region,
-            ValueInput::output(ty, op_load, 0),
-            ValueInput::output(TY_U32, element_index, 0),
-        );
+        let op_extract_field =
+            rvsdg.add_op_extract_field(region, ValueInput::output(ty, op_load, 0), 1);
 
         rvsdg.reconnect_region_result(
             region,
             0,
             ValueOrigin::Output {
-                producer: op_extract_element,
+                producer: op_extract_field,
                 output: 0,
             },
         );
@@ -1974,33 +2072,33 @@ mod tests {
             panic!("result origin should be the first output of a node")
         };
 
-        let element_load = rvsdg[element_load_node].expect_op_load();
+        let field_load = rvsdg[element_load_node].expect_op_load();
 
-        assert_eq!(element_load.ptr_input().ty, element_ptr_ty);
-        assert_eq!(element_load.value_output().ty, TY_U32);
+        assert_eq!(field_load.ptr_input().ty, field_ptr_ty);
+        assert_eq!(field_load.value_output().ty, TY_U32);
         assert_eq!(
-            &element_load.value_output().users,
+            &field_load.value_output().users,
             &thin_set![ValueUser::Result(0)]
         );
 
-        let element_load_input = element_load.ptr_input();
+        let field_load_input = field_load.ptr_input();
 
         let ValueOrigin::Output {
-            producer: element_alloca_node,
-            output: element_alloca_output,
-        } = element_load_input.origin
+            producer: field_alloca_node,
+            output: field_alloca_output,
+        } = field_load_input.origin
         else {
-            panic!("element load op origin should be the first output of a node")
+            panic!("field load op origin should be the first output of a node")
         };
 
-        assert_eq!(element_alloca_output, 0);
+        assert_eq!(field_alloca_output, 0);
 
-        let element_alloca = rvsdg[element_alloca_node].expect_op_alloca();
+        let field_alloca = rvsdg[field_alloca_node].expect_op_alloca();
 
-        assert_eq!(element_alloca.ty(), TY_U32);
-        assert_eq!(element_alloca.value_output().ty, element_ptr_ty);
+        assert_eq!(field_alloca.ty(), TY_U32);
+        assert_eq!(field_alloca.value_output().ty, field_ptr_ty);
         assert_eq!(
-            &element_alloca.value_output().users,
+            &field_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: element_load_node,
                 input: 0
@@ -2009,7 +2107,7 @@ mod tests {
 
         assert!(!rvsdg.is_live_node(op_alloca));
         assert!(!rvsdg.is_live_node(op_load));
-        assert!(!rvsdg.is_live_node(op_extract_element));
+        assert!(!rvsdg.is_live_node(op_extract_field));
     }
 
     #[test]
@@ -2034,13 +2132,22 @@ mod tests {
 
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
-        let ty = module.ty.register(TypeKind::Array {
-            element_ty: TY_U32,
-            count: 2,
-            stride: 4,
-        });
+        let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![
+                crate::ty::StructField {
+                    offset: 0,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+                crate::ty::StructField {
+                    offset: 4,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+            ],
+        }));
         let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
-        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+        let field_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let op_load = rvsdg.add_op_load(
@@ -2060,154 +2167,153 @@ mod tests {
 
         rcx.replace(&mut rvsdg);
 
-        let StateOrigin::Node(store_element_1_node) = *rvsdg[region].state_result() else {
+        let StateOrigin::Node(store_field_1_node) = *rvsdg[region].state_result() else {
             panic!("the state origin should be a node output")
         };
 
-        let store_element_1 = rvsdg[store_element_1_node].expect_op_store();
+        let store_field_1 = rvsdg[store_field_1_node].expect_op_store();
 
-        let StateOrigin::Node(store_element_0_node) = store_element_1.state().unwrap().origin
-        else {
+        let StateOrigin::Node(store_field_0_node) = store_field_1.state().unwrap().origin else {
             panic!("the state origin should be a node output")
         };
 
-        let store_element_0 = rvsdg[store_element_0_node].expect_op_store();
+        let store_field_0 = rvsdg[store_field_0_node].expect_op_store();
 
-        let StateOrigin::Node(load_element_1_node) = store_element_0.state().unwrap().origin else {
+        let StateOrigin::Node(load_field_1_node) = store_field_0.state().unwrap().origin else {
             panic!("the state origin should be a node output")
         };
 
-        let load_element_1 = rvsdg[load_element_1_node].expect_op_load();
+        let load_field_1 = rvsdg[load_field_1_node].expect_op_load();
 
-        let StateOrigin::Node(load_element_0_node) = load_element_1.state().unwrap().origin else {
+        let StateOrigin::Node(load_field_0_node) = load_field_1.state().unwrap().origin else {
             panic!("the state origin should be a node output")
         };
 
-        let load_element_0 = rvsdg[load_element_0_node].expect_op_load();
+        let load_field_0 = rvsdg[load_field_0_node].expect_op_load();
 
         let ValueOrigin::Output {
-            producer: alloca_element_0_node,
+            producer: field_0_alloca_node,
             output: 0,
-        } = store_element_0.ptr_input().origin
+        } = store_field_0.ptr_input().origin
         else {
-            panic!("the pointer input to store_element_0 node should be the first output of a node")
+            panic!("the pointer input to store_field_0 node should be the first output of a node")
         };
 
-        let alloca_element_0 = rvsdg[alloca_element_0_node].expect_op_alloca();
+        let field_0_alloca = rvsdg[field_0_alloca_node].expect_op_alloca();
 
         let ValueOrigin::Output {
-            producer: alloca_element_1_node,
+            producer: field_1_alloca_node,
             output: 0,
-        } = store_element_1.ptr_input().origin
+        } = store_field_1.ptr_input().origin
         else {
-            panic!("the pointer input to store_element_1 node should be the first output of a node")
+            panic!("the pointer input to store_field_1 node should be the first output of a node")
         };
 
-        let alloca_element_1 = rvsdg[alloca_element_1_node].expect_op_alloca();
+        let field_1_alloca = rvsdg[field_1_alloca_node].expect_op_alloca();
 
-        assert_eq!(alloca_element_0.ty(), TY_U32);
+        assert_eq!(field_0_alloca.ty(), TY_U32);
         assert_eq!(
-            &alloca_element_0.value_output().users,
+            &field_0_alloca.value_output().users,
             &thin_set![
                 ValueUser::Input {
-                    consumer: store_element_0_node,
+                    consumer: store_field_0_node,
                     input: 0
                 },
                 ValueUser::Input {
-                    consumer: load_element_0_node,
+                    consumer: load_field_0_node,
                     input: 0
                 }
             ]
         );
 
-        assert_eq!(alloca_element_1.ty(), TY_U32);
+        assert_eq!(field_1_alloca.ty(), TY_U32);
         assert_eq!(
-            &alloca_element_1.value_output().users,
+            &field_1_alloca.value_output().users,
             &thin_set![
                 ValueUser::Input {
-                    consumer: store_element_1_node,
+                    consumer: store_field_1_node,
                     input: 0
                 },
                 ValueUser::Input {
-                    consumer: load_element_1_node,
+                    consumer: load_field_1_node,
                     input: 0
                 }
             ]
         );
 
         assert_eq!(
-            load_element_0.ptr_input(),
+            load_field_0.ptr_input(),
             &ValueInput {
-                ty: element_ptr_ty,
+                ty: field_ptr_ty,
                 origin: ValueOrigin::Output {
-                    producer: alloca_element_0_node,
+                    producer: field_0_alloca_node,
                     output: 0,
                 },
             }
         );
         assert_eq!(
-            &load_element_0.value_output().users,
+            &load_field_0.value_output().users,
             &thin_set![ValueUser::Input {
-                consumer: store_element_0_node,
+                consumer: store_field_0_node,
                 input: 1
             }]
         );
 
         assert_eq!(
-            load_element_1.ptr_input(),
+            load_field_1.ptr_input(),
             &ValueInput {
-                ty: element_ptr_ty,
+                ty: field_ptr_ty,
                 origin: ValueOrigin::Output {
-                    producer: alloca_element_1_node,
+                    producer: field_1_alloca_node,
                     output: 0,
                 },
             }
         );
         assert_eq!(
-            &load_element_1.value_output().users,
+            &load_field_1.value_output().users,
             &thin_set![ValueUser::Input {
-                consumer: store_element_1_node,
+                consumer: store_field_1_node,
                 input: 1
             }]
         );
 
         assert_eq!(
-            store_element_0.ptr_input(),
+            store_field_0.ptr_input(),
             &ValueInput {
-                ty: element_ptr_ty,
+                ty: field_ptr_ty,
                 origin: ValueOrigin::Output {
-                    producer: alloca_element_0_node,
+                    producer: field_0_alloca_node,
                     output: 0,
                 },
             }
         );
         assert_eq!(
-            store_element_0.value_input(),
+            store_field_0.value_input(),
             &ValueInput {
                 ty: TY_U32,
                 origin: ValueOrigin::Output {
-                    producer: load_element_0_node,
+                    producer: load_field_0_node,
                     output: 0,
                 },
             }
         );
 
         assert_eq!(
-            store_element_1.ptr_input(),
+            store_field_1.ptr_input(),
             &ValueInput {
-                ty: element_ptr_ty,
+                ty: field_ptr_ty,
                 origin: ValueOrigin::Output {
-                    producer: alloca_element_1_node,
+                    producer: field_1_alloca_node,
                     output: 0,
                 },
             }
         );
         assert_eq!(
-            store_element_1.value_input(),
+            store_field_1.value_input(),
             &ValueInput {
                 ty: TY_U32,
                 origin: ValueOrigin::Output {
-                    producer: load_element_1_node,
+                    producer: load_field_1_node,
                     output: 0,
                 },
             }
@@ -2243,13 +2349,22 @@ mod tests {
 
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
-        let ty = module.ty.register(TypeKind::Array {
-            element_ty: TY_U32,
-            count: 2,
-            stride: 4,
-        });
+        let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![
+                crate::ty::StructField {
+                    offset: 0,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+                crate::ty::StructField {
+                    offset: 4,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+            ],
+        }));
         let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
-        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+        let field_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let switch_node = rvsdg.add_switch(
@@ -2263,15 +2378,11 @@ mod tests {
         );
 
         let branch_0 = rvsdg.add_switch_branch(switch_node);
-        let branch_0_index = rvsdg.add_const_u32(branch_0, 0);
-        let branch_0_op_ptr_element_ptr = rvsdg.add_op_element_ptr(
-            branch_0,
-            ValueInput::argument(ptr_ty, 0),
-            ValueInput::output(TY_U32, branch_0_index, 0),
-        );
+        let branch_0_op_ptr_field_ptr =
+            rvsdg.add_op_field_ptr(branch_0, ValueInput::argument(ptr_ty, 0), 0);
         let branch_0_load = rvsdg.add_op_load(
             branch_0,
-            ValueInput::output(element_ptr_ty, branch_0_op_ptr_element_ptr, 0),
+            ValueInput::output(field_ptr_ty, branch_0_op_ptr_field_ptr, 0),
             StateOrigin::Argument,
         );
 
@@ -2285,15 +2396,11 @@ mod tests {
         );
 
         let branch_1 = rvsdg.add_switch_branch(switch_node);
-        let branch_1_index = rvsdg.add_const_u32(branch_1, 1);
-        let branch_1_op_ptr_element_ptr = rvsdg.add_op_element_ptr(
-            branch_1,
-            ValueInput::argument(ptr_ty, 0),
-            ValueInput::output(TY_U32, branch_1_index, 0),
-        );
+        let branch_1_op_ptr_field_ptr =
+            rvsdg.add_op_field_ptr(branch_1, ValueInput::argument(ptr_ty, 0), 1);
         let branch_1_load = rvsdg.add_op_load(
             branch_1,
-            ValueInput::output(element_ptr_ty, branch_1_op_ptr_element_ptr, 0),
+            ValueInput::output(field_ptr_ty, branch_1_op_ptr_field_ptr, 0),
             StateOrigin::Argument,
         );
 
@@ -2351,8 +2458,8 @@ mod tests {
         );
 
         assert_eq!(branch_0.value_arguments().len(), 3);
-        assert_eq!(branch_0.value_arguments()[1].ty, element_ptr_ty);
-        assert_eq!(branch_0.value_arguments()[2].ty, element_ptr_ty);
+        assert_eq!(branch_0.value_arguments()[1].ty, field_ptr_ty);
+        assert_eq!(branch_0.value_arguments()[2].ty, field_ptr_ty);
         assert_eq!(
             &branch_0.value_arguments()[1].users,
             &thin_set![ValueUser::Input {
@@ -2378,8 +2485,8 @@ mod tests {
         );
 
         assert_eq!(branch_1.value_arguments().len(), 3);
-        assert_eq!(branch_1.value_arguments()[1].ty, element_ptr_ty);
-        assert_eq!(branch_1.value_arguments()[2].ty, element_ptr_ty);
+        assert_eq!(branch_1.value_arguments()[1].ty, field_ptr_ty);
+        assert_eq!(branch_1.value_arguments()[2].ty, field_ptr_ty);
         assert_eq!(&branch_1.value_arguments()[1].users, &thin_set![]);
         assert_eq!(
             &branch_1.value_arguments()[2].users,
@@ -2392,18 +2499,18 @@ mod tests {
         assert_eq!(switch.value_inputs()[0].origin, ValueOrigin::Argument(0));
 
         let ValueOrigin::Output {
-            producer: element_0_alloca_node,
+            producer: field_0_alloca_node,
             output: 0,
         } = switch.value_inputs()[2].origin
         else {
             panic!("the second input to the switch node should be the first output of a node")
         };
 
-        let element_0_alloca = rvsdg[element_0_alloca_node].expect_op_alloca();
+        let field_0_alloca = rvsdg[field_0_alloca_node].expect_op_alloca();
 
-        assert_eq!(element_0_alloca.ty(), TY_U32);
+        assert_eq!(field_0_alloca.ty(), TY_U32);
         assert_eq!(
-            &element_0_alloca.value_output().users,
+            &field_0_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: switch_node,
                 input: 2,
@@ -2411,26 +2518,26 @@ mod tests {
         );
 
         let ValueOrigin::Output {
-            producer: element_1_alloca_node,
+            producer: field_1_alloca_node,
             output: 0,
         } = switch.value_inputs()[3].origin
         else {
             panic!("the third input to the switch node should be the first output of a node")
         };
 
-        let element_1_alloca = rvsdg[element_1_alloca_node].expect_op_alloca();
+        let field_1_alloca = rvsdg[field_1_alloca_node].expect_op_alloca();
 
-        assert_eq!(element_1_alloca.ty(), TY_U32);
+        assert_eq!(field_1_alloca.ty(), TY_U32);
         assert_eq!(
-            &element_1_alloca.value_output().users,
+            &field_1_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: switch_node,
                 input: 3,
             }]
         );
 
-        assert!(!rvsdg.is_live_node(branch_0_op_ptr_element_ptr));
-        assert!(!rvsdg.is_live_node(branch_1_op_ptr_element_ptr));
+        assert!(!rvsdg.is_live_node(branch_0_op_ptr_field_ptr));
+        assert!(!rvsdg.is_live_node(branch_1_op_ptr_field_ptr));
     }
 
     #[test]
@@ -2458,13 +2565,22 @@ mod tests {
 
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
-        let ty = module.ty.register(TypeKind::Array {
-            element_ty: TY_U32,
-            count: 2,
-            stride: 4,
-        });
+        let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![
+                crate::ty::StructField {
+                    offset: 0,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+                crate::ty::StructField {
+                    offset: 4,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+            ],
+        }));
         let ptr_ty = module.ty.register(TypeKind::Ptr(ty));
-        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+        let field_ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
 
         let counter = rvsdg.add_const_u32(region, 0);
         let op_alloca = rvsdg.add_op_alloca(region, ty);
@@ -2479,15 +2595,11 @@ mod tests {
             None,
         );
 
-        let element_index = rvsdg.add_const_u32(loop_region, 0);
-        let op_ptr_element_ptr_node = rvsdg.add_op_element_ptr(
-            loop_region,
-            ValueInput::argument(ptr_ty, 2),
-            ValueInput::output(TY_U32, element_index, 0),
-        );
+        let op_ptr_field_ptr_node =
+            rvsdg.add_op_field_ptr(loop_region, ValueInput::argument(ptr_ty, 2), 0);
         let load_node = rvsdg.add_op_load(
             loop_region,
-            ValueInput::output(element_ptr_ty, op_ptr_element_ptr_node, 0),
+            ValueInput::output(field_ptr_ty, op_ptr_field_ptr_node, 0),
             StateOrigin::Argument,
         );
 
@@ -2500,7 +2612,7 @@ mod tests {
         );
         let store_node = rvsdg.add_op_store(
             loop_region,
-            ValueInput::output(element_ptr_ty, op_ptr_element_ptr_node, 0),
+            ValueInput::output(field_ptr_ty, op_ptr_field_ptr_node, 0),
             ValueInput::output(TY_U32, add_one_node, 0),
             StateOrigin::Node(load_node),
         );
@@ -2548,22 +2660,22 @@ mod tests {
         assert_eq!(loop_data.value_inputs().len(), 5);
         assert_eq!(loop_data.value_inputs()[0].ty, TY_U32);
         assert_eq!(loop_data.value_inputs()[1].ty, TY_U32);
-        assert_eq!(loop_data.value_inputs()[3].ty, element_ptr_ty);
-        assert_eq!(loop_data.value_inputs()[4].ty, element_ptr_ty);
+        assert_eq!(loop_data.value_inputs()[3].ty, field_ptr_ty);
+        assert_eq!(loop_data.value_inputs()[4].ty, field_ptr_ty);
 
         let ValueOrigin::Output {
-            producer: element_0_alloca_node,
+            producer: field_0_alloca_node,
             output: 0,
         } = loop_data.value_inputs()[3].origin
         else {
             panic!("the third input to the switch node should be the first output of a node")
         };
 
-        let element_0_alloca = rvsdg[element_0_alloca_node].expect_op_alloca();
+        let field_0_alloca = rvsdg[field_0_alloca_node].expect_op_alloca();
 
-        assert_eq!(element_0_alloca.ty(), TY_U32);
+        assert_eq!(field_0_alloca.ty(), TY_U32);
         assert_eq!(
-            &element_0_alloca.value_output().users,
+            &field_0_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: loop_node,
                 input: 3,
@@ -2571,18 +2683,18 @@ mod tests {
         );
 
         let ValueOrigin::Output {
-            producer: element_1_alloca_node,
+            producer: field_1_alloca_node,
             output: 0,
         } = loop_data.value_inputs()[4].origin
         else {
             panic!("the third input to the switch node should be the first output of a node")
         };
 
-        let element_1_alloca = rvsdg[element_1_alloca_node].expect_op_alloca();
+        let field_1_alloca = rvsdg[field_1_alloca_node].expect_op_alloca();
 
-        assert_eq!(element_1_alloca.ty(), TY_U32);
+        assert_eq!(field_1_alloca.ty(), TY_U32);
         assert_eq!(
-            &element_1_alloca.value_output().users,
+            &field_1_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: loop_node,
                 input: 4,
@@ -2604,7 +2716,7 @@ mod tests {
 
         assert_eq!(arguments.len(), 5);
 
-        assert_eq!(arguments[3].ty, element_ptr_ty);
+        assert_eq!(arguments[3].ty, field_ptr_ty);
         assert_eq!(
             &arguments[3].users,
             &thin_set![
@@ -2620,19 +2732,19 @@ mod tests {
             ]
         );
 
-        assert_eq!(arguments[4].ty, element_ptr_ty);
+        assert_eq!(arguments[4].ty, field_ptr_ty);
         assert_eq!(arguments[4].users, thin_set![ValueUser::Result(5)]);
 
         let results = rvsdg[loop_region].value_results();
 
         assert_eq!(results.len(), 6);
 
-        assert_eq!(results[4].ty, element_ptr_ty);
+        assert_eq!(results[4].ty, field_ptr_ty);
         assert_eq!(results[4].origin, ValueOrigin::Argument(3));
 
-        assert_eq!(results[5].ty, element_ptr_ty);
+        assert_eq!(results[5].ty, field_ptr_ty);
         assert_eq!(results[5].origin, ValueOrigin::Argument(4));
 
-        assert!(!rvsdg.is_live_node(op_ptr_element_ptr_node));
+        assert!(!rvsdg.is_live_node(op_ptr_field_ptr_node));
     }
 }
