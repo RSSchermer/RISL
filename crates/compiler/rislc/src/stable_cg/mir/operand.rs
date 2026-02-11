@@ -282,11 +282,11 @@ impl<'a, V: CodegenObject> OperandRef<V> {
             // Reconstruct the immediate aggregate.
             let mut alloca = bx.alloca(&self.layout);
 
-            let a_ptr = bx.ptr_element_ptr(a_llty, alloca, &[bx.const_usize(0)]);
+            let a_ptr = bx.element_ptr(a_llty, alloca, &[bx.const_usize(0)]);
 
             bx.store(a, a_ptr, a_layout.layout.abi_align);
 
-            let b_ptr = bx.ptr_element_ptr(b_llty, alloca, &[bx.const_usize(1)]);
+            let b_ptr = bx.element_ptr(b_llty, alloca, &[bx.const_usize(1)]);
 
             bx.store(b, b_ptr, b_layout.layout.abi_align);
 

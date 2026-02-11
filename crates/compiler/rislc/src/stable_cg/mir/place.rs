@@ -146,7 +146,7 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
     /// Access a field, at a point when the value's case is known.
     pub fn project_field<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx, ix: usize) -> Self {
         let field = self.layout.field(ix);
-        let ptr = bx.ptr_element_ptr(
+        let ptr = bx.element_ptr(
             bx.backend_type(&field),
             self.val.llval,
             &[bx.const_u32(ix as u32)],
@@ -166,7 +166,7 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
         llindex: V,
     ) -> Self {
         let layout = self.layout.field(0);
-        let llval = bx.ptr_element_ptr(bx.backend_type(&layout), self.val.llval, &[llindex]);
+        let llval = bx.element_ptr(bx.backend_type(&layout), self.val.llval, &[llindex]);
 
         PlaceValue::new_sized(llval, layout.layout.abi_align).with_type(layout)
     }

@@ -622,7 +622,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     // TODO: replace with separate `field_ptr` and `element_ptr` methods that only take a single
     // index. From current inspection of how codegen actually calls these methods, it seems that
     // this can be done without much issue.
-    fn ptr_element_ptr(
+    fn element_ptr(
         &mut self,
         _ty: Self::Type,
         ptr: Self::Value,
@@ -856,8 +856,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
             slir::ty::TypeKind::Ptr(pointee_ty) => {
                 mem::drop(cfg);
 
-                let val_ptr =
-                    self.ptr_element_ptr(pointee_ty.into(), agg_val.into(), &[index.into()]);
+                let val_ptr = self.element_ptr(pointee_ty.into(), agg_val.into(), &[index.into()]);
 
                 self.load(slir::ty::TY_DUMMY.into(), val_ptr, 0)
             }

@@ -433,14 +433,14 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
+        let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, add_offset_node, 0),
             ValueInput::output(TY_U32, add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
-            ValueInput::output(TY_PTR_U32, ptr_element_ptr_node, 0),
+            ValueInput::output(TY_PTR_U32, element_ptr_node, 0),
             StateOrigin::Argument,
         );
 
@@ -465,7 +465,7 @@ mod tests {
             }
         );
         assert_eq!(
-            rvsdg[ptr_element_ptr_node]
+            rvsdg[element_ptr_node]
                 .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
@@ -531,14 +531,14 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
+        let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, add_offset_1_node, 0),
             ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
-            ValueInput::output(TY_PTR_U32, ptr_element_ptr_node, 0),
+            ValueInput::output(TY_PTR_U32, element_ptr_node, 0),
             StateOrigin::Argument,
         );
 
@@ -583,7 +583,7 @@ mod tests {
         );
 
         assert_eq!(
-            rvsdg[ptr_element_ptr_node]
+            rvsdg[element_ptr_node]
                 .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
@@ -678,14 +678,14 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
+        let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, switch_node, 0),
             ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
-            ValueInput::output(TY_PTR_U32, ptr_element_ptr_node, 0),
+            ValueInput::output(TY_PTR_U32, element_ptr_node, 0),
             StateOrigin::Argument,
         );
 
@@ -774,7 +774,7 @@ mod tests {
             "the index-add-node's LHS should be connected to the offset output of the switch node"
         );
         assert_eq!(
-            rvsdg[ptr_element_ptr_node]
+            rvsdg[element_ptr_node]
                 .expect_op_element_ptr()
                 .ptr_input()
                 .origin,
@@ -870,14 +870,14 @@ mod tests {
             ValueInput::output(TY_U32, get_offset_node, 0),
             ValueInput::output(TY_U32, index_node, 0),
         );
-        let ptr_element_ptr_node = rvsdg.add_op_element_ptr(
+        let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(array_ptr_ty, loop_node, 0),
             ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
             region,
-            ValueInput::output(TY_PTR_U32, ptr_element_ptr_node, 0),
+            ValueInput::output(TY_PTR_U32, element_ptr_node, 0),
             StateOrigin::Argument,
         );
 
@@ -953,7 +953,7 @@ mod tests {
             "the index-add-node's LHS should be connected to the offset output of the loop node"
         );
         assert_eq!(
-            rvsdg[ptr_element_ptr_node]
+            rvsdg[element_ptr_node]
                 .expect_op_element_ptr()
                 .ptr_input()
                 .origin,

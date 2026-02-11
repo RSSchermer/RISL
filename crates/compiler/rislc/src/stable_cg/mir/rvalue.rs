@@ -907,7 +907,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 } else {
                     let llty = bx.cx().backend_type(&pointee_layout);
 
-                    bx.ptr_element_ptr(llty, lhs, &[rhs])
+                    bx.element_ptr(llty, lhs, &[rhs])
                 }
             }
             mir::BinOp::Shl | mir::BinOp::ShlUnchecked => {

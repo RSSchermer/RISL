@@ -287,9 +287,9 @@ pub enum AnalysisResult {
 ///
 /// For the [OpAlloca] to be found to escape, it must be the whole pointer to the full aggregate, or
 /// the whole unsplit loaded value, that is passed to an [OpCall] node or returned as a result.
-/// Passing or returning sub-elements of the aggregate, obtained via e.g. an [OpPtrElementPtr], does
+/// Passing or returning sub-elements of the aggregate, obtained via e.g. an [OpElementPtr], does
 /// not constitute an escape, as in these cases scalar replacement will only require local
-/// modifications (the [OpPtrElementPtr] can be adjusted such that any [OpCall] user or result user
+/// modifications (the [OpElementPtr] can be adjusted such that any [OpCall] user or result user
 /// can remain unchanged).
 ///
 /// # Stored-value analysis
@@ -1237,7 +1237,7 @@ impl Replacer<'_, '_> {
         }
 
         // First connect all region results that we've created to the unsplit input that the
-        // original result connects to, via [OpPtrElementPtr] nodes or [OpExtractElement] nodes,
+        // original result connects to, via [OpElementPtr] nodes or [OpExtractElement] nodes,
         // depending on whether the result type is a pointer or an immediate value. This also
         // disconnects the original result.
         self.redirect_region_result(loop_region, input as usize + 1, prior_result_count);
@@ -1245,7 +1245,7 @@ impl Replacer<'_, '_> {
         // Now redirect the argument using the argument mapping. We do this after redirecting the
         // results, because otherwise this might try to split the original result again; by doing
         // this after result redirection, all the argument's user tree should terminate at the
-        // [OpPtrElementPtr]/[OpExtractElement] nodes that were inserted, since nothing should
+        // [OpElementPtr]/[OpExtractElement] nodes that were inserted, since nothing should
         // be connected to the original result anymore.
         self.redirect_region_argument(loop_region, input, &split_args);
 
@@ -1296,7 +1296,7 @@ impl Replacer<'_, '_> {
         let ty_reg = self.rvsdg.ty().clone();
 
         // Add inputs for each element of the aggregate and connect them to the proxy via either
-        // an OpPtrElementPtr node if the input is of a pointer type, or via an OpExtractElement
+        // an OpElementPtr node if the input is of a pointer type, or via an OpExtractElement
         // node otherwise. Also, record an argument mapping in `split_args` and an output mapping in
         // `split_outputs`.
         match ty_reg.kind(value_input.ty).deref() {
@@ -1448,7 +1448,7 @@ impl Replacer<'_, '_> {
     }
 
     /// Redirects the origin for the `region`'s given `result` to a set of "split" results that
-    /// start at `split_results_start`, via either [OpPtrElementPtr] or [OpExtractElement] nodes
+    /// start at `split_results_start`, via either [OpElementPtr] or [OpExtractElement] nodes
     /// depending on whether to original input type is a pointer or immediate value.
     ///
     /// Leaves the original result connected to the "placeholder" origin.
@@ -1735,7 +1735,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_replace_op_ptr_element_ptr() {
+    fn test_scalar_replace_op_element_ptr() {
         let mut module = Module::new(Symbol::from_ref(""));
         let function = Function {
             name: Symbol::from_ref(""),
@@ -1766,14 +1766,14 @@ mod tests {
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
         let element_index = rvsdg.add_const_u32(region, 1);
-        let op_ptr_element_ptr = rvsdg.add_op_element_ptr(
+        let op_element_ptr = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, op_alloca, 0),
             ValueInput::output(TY_U32, element_index, 0),
         );
         let load = rvsdg.add_op_load(
             region,
-            ValueInput::output(element_ptr_ty, op_ptr_element_ptr, 0),
+            ValueInput::output(element_ptr_ty, op_element_ptr, 0),
             StateOrigin::Argument,
         );
 
@@ -1818,12 +1818,12 @@ mod tests {
             }]
         );
 
-        assert!(!rvsdg.is_live_node(op_ptr_element_ptr));
+        assert!(!rvsdg.is_live_node(op_element_ptr));
         assert!(!rvsdg.is_live_node(op_alloca));
     }
 
     #[test]
-    fn test_scalar_replace_op_ptr_element_ptr_dynamic_index() {
+    fn test_scalar_replace_op_element_ptr_dynamic_index() {
         let mut module = Module::new(Symbol::from_ref(""));
         let function = Function {
             name: Symbol::from_ref(""),
@@ -1856,14 +1856,14 @@ mod tests {
         let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_PTR_U32));
 
         let op_alloca = rvsdg.add_op_alloca(region, ty);
-        let op_ptr_element_ptr = rvsdg.add_op_element_ptr(
+        let op_element_ptr = rvsdg.add_op_element_ptr(
             region,
             ValueInput::output(ptr_ty, op_alloca, 0),
             ValueInput::argument(TY_U32, 0),
         );
         let load = rvsdg.add_op_load(
             region,
-            ValueInput::output(element_ptr_ty, op_ptr_element_ptr, 0),
+            ValueInput::output(element_ptr_ty, op_element_ptr, 0),
             StateOrigin::Argument,
         );
 
@@ -1994,7 +1994,7 @@ mod tests {
             }]
         );
 
-        assert!(!rvsdg.is_live_node(op_ptr_element_ptr));
+        assert!(!rvsdg.is_live_node(op_element_ptr));
         assert!(!rvsdg.is_live_node(op_alloca));
     }
 

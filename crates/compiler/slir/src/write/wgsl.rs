@@ -108,7 +108,8 @@ enum InlineContext {
         needs_parens: bool,
     },
 
-    /// We're inlining an expression as the base value of an [OpPtrElementPtr] expression.
+    /// We're inlining an expression as the base value of an [OpFieldPtr] or an [OpElementPtr]
+    /// expression.
     Reref,
 
     /// We're inlining an expression as the base value of an [OpExtractElement] expression.
@@ -846,12 +847,12 @@ impl WgslModuleWriter {
 
     fn write_stmt_alloca(&mut self, cx: Context, stmt: &Alloca) {
         // In the SCF, an alloca statement is represented by a local-binding of a pointer type,
-        // which may be passed around, rereferenced (with an OpPtrElementPtr expression), or
-        // dereferenced by a load or store operation. In WGSL we use an uninitialized `var` to
-        // represent an alloca statement, which does not produce a binding of a pointer type. An
-        // alloca statement is not inlinable into an expression, it may only be interacted with via
-        // its binding ID. We can therefore compensate for this discrepancy when we write the
-        // binding ID, see `write_local_value`.
+        // which may be passed around, rereferenced (with an `OpFieldPtr` or `OpElementPtr`
+        // expression), or dereferenced by a load or store operation. In WGSL we use an
+        // uninitialized `var` to represent an alloca statement, which does not produce a binding of
+        // a pointer type. An alloca statement is not inlinable into an expression, it may only be
+        // interacted with via its binding ID. We can therefore compensate for this discrepancy when
+        // we write the binding ID, see `write_local_value`.
 
         self.w.push_str("var ");
         self.write_local_binding_id(stmt.binding());
@@ -1155,9 +1156,9 @@ impl WgslModuleWriter {
         // ```
         //
         // The OpLoad's operand may be an expression that is to be inlined. If such an expression is
-        // a "referencing" expression (`GlobalPtr` or `OpPtrElementPtr`), the referencing operator
-        // `&` and the dereferencing operator `*` cancel out, and we write no operator at all. In
-        // this case parentheses are never needed.
+        // a "referencing" expression (`GlobalPtr`, `OpFieldPtr`, or `OpElementPtr`), the
+        // referencing operator  `&` and the dereferencing operator `*` cancel out, and we write no
+        // operator at all. In this case parentheses are never needed.
         //
         // The OpLoad's operand may also be a local binding for an alloca statement. Due to the
         // "alloca discrepancy" (see `write_stmt_alloca`) we also never write a dereferencing

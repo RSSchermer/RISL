@@ -185,7 +185,7 @@ pub trait BuilderMethods<'a>:
         size: MachineSize,
     );
 
-    fn ptr_element_ptr(
+    fn element_ptr(
         &mut self,
         ty: Self::Type,
         ptr: Self::Value,

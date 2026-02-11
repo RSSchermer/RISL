@@ -290,12 +290,13 @@ impl TouchedOuterAllocaStack {
 /// abstraction is not really explicitly concerned with the concept of registers, so here we'll
 /// refer to this slightly more abstractly as a "memory to value-flow" transform. We only promote
 /// a memory operation if its pointer resolves to a complete alloca, we don't promote operations on
-/// element pointers (as produced by an [OpPtrElementPtr] node); such operations must first be split
-/// by a scalar-replacement pass. We also do not promote memory operations on "variable pointers".
+/// part pointers (as produced by [OpFieldPtr] or an [OpElementPtr] node); such operations must
+/// first be split by a scalar-replacement pass. We also do not promote memory operations on
+/// "variable pointers".
 ///
 /// For our purposes, variable pointers are defined as pointers that result from the output of
 /// switch or loop nodes, or further refinements of such pointers (e.g. a pointer resulting from an
-/// [OpPtrElementPtr] for which the input pointer was a variable pointer). Not only will variable
+/// [OpElementPtr] for which the input pointer was a variable pointer). Not only will variable
 /// pointers prevent memory promotion, our primary compilation target WGSL does not support variable
 /// pointers at all. Therefore, we must be able to emulate *all* variable pointers if we are to
 /// compile a legal program.
