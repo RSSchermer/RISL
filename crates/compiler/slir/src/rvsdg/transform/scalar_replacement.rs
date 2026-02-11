@@ -195,6 +195,38 @@ enum SwitchOutputSplitKind {
     Array,
 }
 
+/// Whether the given type must be split for reasons of legalization.
+///
+/// Currently, types that contain pointers must be split as our primary target (WGSL) does not
+/// support pointers in aggregate types. Types that contain enums must also be split, as enums are
+/// not supported at all in our targets, and splitting is the primary strategy to eliminate enums.
+fn ty_must_split(ty_registry: &TypeRegistry, ty: Type) -> bool {
+    match ty_registry.kind(ty).deref() {
+        TypeKind::Ptr(_) | TypeKind::Enum(_) => true,
+        TypeKind::Struct(data) => data
+            .fields
+            .iter()
+            .any(|field| ty_must_split(ty_registry, field.ty)),
+        TypeKind::Array { element_ty, .. } => ty_must_split(ty_registry, *element_ty),
+        TypeKind::Slice { element_ty, .. } => ty_must_split(ty_registry, *element_ty),
+        _ => false,
+    }
+}
+
+/// Whether an alloca for the given type would be a candidate for splitting.
+///
+/// Struct and enum types are always candidates for splitting. Array types are only candidates if
+/// they contain a type that must be split (see [ty_must_split]). See the "Splitting switch node
+/// results and output" section of the module-level documentation for details on why we're
+/// conservative when it comes to splitting arrays.
+fn alloca_ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
+    match ty_registry.kind(ty).deref() {
+        TypeKind::Struct(_) | TypeKind::Enum(_) => true,
+        TypeKind::Array { element_ty, .. } => ty_must_split(ty_registry, *element_ty),
+        _ => false,
+    }
+}
+
 /// Collects all [OpAlloca] nodes of aggregate types in a region and all sub-regions (e.g. a switch
 /// node branch region) into a queue of candidates for scalar replacement.
 ///
@@ -215,7 +247,7 @@ impl CandidateAllocaCollector<'_, '_> {
     fn visit_node(&mut self, node: Node) {
         match self.rvsdg[node].kind() {
             NodeKind::Simple(SimpleNode::OpAlloca(op)) => {
-                if self.rvsdg.ty().kind(op.ty()).is_aggregate() {
+                if alloca_ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
                     self.candidates.push_back(node);
                 }
             }
