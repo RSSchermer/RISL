@@ -45,7 +45,7 @@ cargo-util = "0.2"
 color-print = "0.3"
 delegate = "0.13"
 either = "1"
-empa = { path = "../glitz/crates/empa", version = "0.1.0" }
+empa = { path = "../empa/crates/empa", version = "0.1.0" }
 futures = "0.3"
 indexmap = "2"
 index_vec = "0.1"
