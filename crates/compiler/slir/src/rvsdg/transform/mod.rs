@@ -14,6 +14,7 @@ pub mod scalar_replacement;
 pub mod store_coalescing;
 pub mod switch_arg_reduction;
 pub mod switch_merging;
+pub mod switch_passthrough_elimination;
 pub mod variable_pointer_emulation;
 
 use crate::Module;
@@ -21,6 +22,7 @@ use crate::rvsdg::Rvsdg;
 
 pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
+    switch_passthrough_elimination::transform_entry_points(module, rvsdg);
     offset_slice_elaboration::transform_entry_points(module, rvsdg);
     memory_transform::transform_entry_points(module, rvsdg);
     offset_slice_replacement::transform_entry_points(module, rvsdg);
