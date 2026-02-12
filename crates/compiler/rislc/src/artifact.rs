@@ -122,8 +122,9 @@ impl SlirArtifactBuilder {
 
     pub fn maybe_add_rvsdg_initial(&mut self, rvsdg: &Rvsdg) {
         if let Some(identifier) = self.rvsdg_initial_identifier.clone() {
-            let encoding = bincode::serde::encode_to_vec(rvsdg.as_data(), bincode::config::standard())
-                .expect("failed to encode SLIR RVSDG-initial");
+            let encoding =
+                bincode::serde::encode_to_vec(rvsdg.as_data(), bincode::config::standard())
+                    .expect("failed to encode SLIR RVSDG-initial");
 
             self.inner
                 .append(
@@ -136,8 +137,9 @@ impl SlirArtifactBuilder {
 
     pub fn maybe_add_rvsdg_transformed(&mut self, rvsdg: &Rvsdg) {
         if let Some(identifier) = self.rvsdg_transformed_identifier.clone() {
-            let encoding = bincode::serde::encode_to_vec(rvsdg.as_data(), bincode::config::standard())
-                .expect("failed to encode SLIR RVSDG-transformed");
+            let encoding =
+                bincode::serde::encode_to_vec(rvsdg.as_data(), bincode::config::standard())
+                    .expect("failed to encode SLIR RVSDG-transformed");
 
             self.inner
                 .append(
