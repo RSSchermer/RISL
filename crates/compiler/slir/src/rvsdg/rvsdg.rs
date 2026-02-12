@@ -1,4 +1,4 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
 use std::ops::Index;
 use std::path::Path;
@@ -6,8 +6,7 @@ use std::slice;
 
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize, Serializer};
-use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
 use smallvec::SmallVec;
 use thiserror::Error;
