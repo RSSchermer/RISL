@@ -6,7 +6,8 @@ use std::slice;
 
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde::ser::SerializeStruct;
 use slotmap::SlotMap;
 use smallvec::SmallVec;
 use thiserror::Error;
@@ -1484,6 +1485,29 @@ macro_rules! add_const_methods {
     };
 }
 
+/// Type that helps facilitate serializing an [Rvsdg] instance without its [TypeRegistry].
+///
+/// An [Rvsdg] instance contains a shared reference to its [TypeRegistry]. However, when serializing
+/// the [Rvsdg] alongside its [Module] - which shares a reference to the same [TypeRegistry] - this
+/// would produce duplicate data in the serialization artifact and - after deserialization - would
+/// result in the [Rvsdg]'s [TypeRegistry] being decoupled from the [Module]'s [TypeRegistry], which
+/// is not desired.
+///
+/// Instead [Rvsdg::as_data] may be used to serialize the [Rvsdg] without its [TypeRegistry]. It may
+/// then be deserialized into an [RvsdgData] instance, which may in turn be used to reconstruct the
+/// [Rvsdg] instance via [Rvsdg::from_ty_and_data] where a shared reference to the [TypeRegistry] is
+/// obtained from the accompanying [Module] instance (e.g., by cloning [Module::ty]).
+#[derive(Clone, Serialize, Debug)]
+pub struct RvsdgAsData<'a> {
+    regions: &'a SlotMap<Region, RegionData>,
+    nodes: &'a SlotMap<Node, NodeData>,
+    global_region: &'a Region,
+    function_node: &'a FxHashMap<Function, Node>,
+}
+
+/// Type that helps facilitate deserializing an [Rvsdg] instance without its [TypeRegistry].
+///
+/// For details, see the documentation for [RvsdgAsData].
 #[derive(Clone, Deserialize, Debug)]
 pub struct RvsdgData {
     regions: SlotMap<Region, RegionData>,
@@ -1522,6 +1546,9 @@ impl Rvsdg {
         }
     }
 
+    /// Reconstructs an [Rvsdg] instance from its data and a shared [TypeRegistry].
+    ///
+    /// See the documentation for [RvsdgAsData] for details.
     pub fn from_ty_and_data(ty: TypeRegistry, data: RvsdgData) -> Self {
         let RvsdgData {
             regions,
@@ -1536,6 +1563,18 @@ impl Rvsdg {
             nodes,
             global_region,
             function_node,
+        }
+    }
+
+    /// Returns a representation of the [Rvsdg]'s data without its [TypeRegistry].
+    ///
+    /// See the documentation for [RvsdgAsData] for details.
+    pub fn as_data(&self) -> RvsdgAsData<'_> {
+        RvsdgAsData {
+            regions: &self.regions,
+            nodes: &self.nodes,
+            global_region: &self.global_region,
+            function_node: &self.function_node,
         }
     }
 
@@ -1922,7 +1961,10 @@ impl Rvsdg {
             let branch = self.nodes[switch_node].expect_switch().branches()[branch_index];
             let origin = self.regions[branch].value_results[index].origin;
 
-            self.remove_user(branch, origin, ValueUser::Result(index as u32));
+            if !origin.is_placeholder() {
+                self.remove_user(branch, origin, ValueUser::Result(index as u32));
+            }
+
             self.regions[branch].value_results.remove(index);
             self.correct_region_result_connections(branch, index, -1);
         }
