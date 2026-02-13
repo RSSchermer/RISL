@@ -15,6 +15,7 @@ pub mod store_coalescing;
 pub mod switch_arg_reduction;
 pub mod switch_merging;
 pub mod switch_passthrough_elimination;
+pub mod switchify_pred_to_case;
 pub mod variable_pointer_emulation;
 
 use crate::Module;
@@ -28,6 +29,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     offset_slice_replacement::transform_entry_points(module, rvsdg);
     pred_to_case_extraction::transform_entry_points(module, rvsdg);
     pred_to_case_to_pred_merging::transform_entry_points(module, rvsdg);
+    switchify_pred_to_case::transform_entry_points(module, rvsdg);
     switch_arg_reduction::transform_entry_points(module, rvsdg);
     const_switch_inlining::transform_entry_points(module, rvsdg);
     switch_merging::transform_entry_points(module, rvsdg);
