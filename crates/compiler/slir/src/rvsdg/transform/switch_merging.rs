@@ -181,7 +181,7 @@ impl RegionSwitchMerger {
         while let Some(candidate) = self.candidates.pop_front() {
             let max_stratum = candidate.stratum + 1;
 
-            for other in &self.candidates {
+            'inner: for other in &self.candidates {
                 // The candidate node list was collected in such a way that the candidates will be
                 // ordered by "stratum" (see analyze::region_stratification). We allow two switch
                 // nodes to merge if they are either in the same stratum or in consecutive strata:
@@ -192,7 +192,7 @@ impl RegionSwitchMerger {
                 if other.stratum > max_stratum {
                     // The stratum gap is too large and, because of the ordering, will only get
                     // larger for later candidates, so we can stop looking for candidates here.
-                    break;
+                    break 'inner;
                 }
 
                 if other.predicate_origin == candidate.predicate_origin {
@@ -203,6 +203,14 @@ impl RegionSwitchMerger {
                         candidate.switch_node,
                         other.switch_node,
                     );
+
+                    // We break here because the `candidate` switch node no longer exists:
+                    // `merge_switch_nodes` merges the first switch node argument into the second
+                    // switch node argument, then removes the first switch node from the RVSDG.
+                    // The second switch node `other` is still in the candidates list, so if there
+                    // are more nodes to merge into `other`, then we'll find them and merge in
+                    // further iterations of the outer loop.
+                    break 'inner;
                 }
             }
         }
