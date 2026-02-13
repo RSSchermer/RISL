@@ -1974,6 +1974,11 @@ impl Rvsdg {
             panic!("switch node is already linked into the state chain")
         }
 
+        self.nodes[switch_node].expect_switch_mut().state = Some(State {
+            origin: state_origin,
+            user: StateUser::Result,
+        });
+
         let region = self.nodes[switch_node].region();
 
         self.link_state(region, switch_node, state_origin);
