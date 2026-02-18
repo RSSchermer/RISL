@@ -1,0 +1,4 @@
+echo "Recompiling rislc to ensure it is up to date with the current source..."
+RUSTFLAGS=-Awarnings cargo build --bin=rislc
+echo "Running behavioral tests..."
+RUSTFLAGS=-Awarnings RUST_BACKTRACE=full RUSTC_WRAPPER=target/debug/rislc cargo test --package=behavioral-tests

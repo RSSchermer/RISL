@@ -21,3 +21,12 @@ pub(crate) struct EncounteredErrorWhileInstantiating {
     pub kind: &'static str,
     pub instance: String,
 }
+
+#[derive(Diagnostic)]
+#[diag(rislc_monomorphize_no_optimized_mir)]
+pub(crate) struct NoOptimizedMir {
+    #[note]
+    pub span: Span,
+    pub crate_name: Symbol,
+    pub instance: String,
+}

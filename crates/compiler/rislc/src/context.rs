@@ -57,7 +57,7 @@ impl<'tcx> RislContext<'tcx> {
 
     pub fn shim_def_lookup(&self) -> &ShimDefLookup {
         self.shim_def_lookup
-            .get_or_init(|| resolve_shim_def_lookup(self.tcx(), &self.hir_ext))
+            .get_or_init(|| resolve_shim_def_lookup(self))
     }
 
     /// Whether the current crate is the core-shim crate.
@@ -145,5 +145,43 @@ impl<'tcx> RislContext<'tcx> {
         }
 
         mapping
+    }
+
+    /// Resolves the rlib file path for a given `dependency` crate.
+    ///
+    /// If the `rlib` source is not directly available, this method attempts to derive the rlib
+    /// path from the `.rmeta` path.
+    ///
+    /// In vanilla Rust builds that don't involve a linking stage, a consuming crate may start
+    /// compilation with only a dependency's `.rmeta` available and the dependency's `.rlib` still
+    /// pending; this is referred to as "build pipelining". `rislc` differs here: during the RISL
+    /// phase we always create the `.rlib` for a crate alongside its `.rmeta`, regardless of
+    /// pipelining. Therefore, though rustc's default machinery will fail to resolve the `.rlib`, we
+    /// can reliably resolve it by constructing the `.rlib` path from the `.rmeta` path.
+    pub fn resolve_risl_rlib_path(&self, dependency: CrateNum) -> PathBuf {
+        let source = self.tcx.used_crate_source(dependency);
+
+        if let Some(rlib) = &source.rlib {
+            rlib.0.clone()
+        } else if let Some(rmeta) = &source.rmeta {
+            let rlib_path = rmeta.0.with_extension("rlib");
+
+            if rlib_path.exists() {
+                rlib_path
+            } else {
+                panic!(
+                    "failed to find rlib for crate `{}` (found rmeta at `{:?}` but no rlib at \
+                    `{:?}`)",
+                    self.tcx.crate_name(dependency),
+                    rmeta.0,
+                    rlib_path
+                );
+            }
+        } else {
+            panic!(
+                "failed to find source for crate `{}`",
+                self.tcx.crate_name(dependency)
+            );
+        }
     }
 }

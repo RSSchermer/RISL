@@ -13,6 +13,7 @@ use rustc_span::Symbol;
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::SHIM_LOOKUP_HEADER;
+use crate::context::RislContext;
 use crate::hir_ext::{FnExt, GpuFnExt, HirExt};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -105,18 +106,22 @@ pub fn is_core_shim_crate(tcx: TyCtxt) -> bool {
     })
 }
 
-pub fn resolve_shim_def_lookup(tcx: TyCtxt, hir_ext: &HirExt) -> ShimDefLookup {
-    if is_core_shim_crate(tcx) {
-        return build_shim_def_lookup(hir_ext);
+pub fn resolve_shim_def_lookup(rcx: &RislContext) -> ShimDefLookup {
+    if is_core_shim_crate(rcx.tcx()) {
+        return build_shim_def_lookup(rcx.hir_ext());
     }
 
-    for &crate_num in tcx.crates(()) {
-        let is_shim_crate = tcx.get_all_attrs(crate_num.as_def_id()).iter().any(|attr| {
-            attr.path_matches(&[Symbol::intern("rislc"), Symbol::intern("core_shim_crate")])
-        });
+    for &crate_num in rcx.tcx().crates(()) {
+        let is_shim_crate = rcx
+            .tcx()
+            .get_all_attrs(crate_num.as_def_id())
+            .iter()
+            .any(|attr| {
+                attr.path_matches(&[Symbol::intern("rislc"), Symbol::intern("core_shim_crate")])
+            });
 
         if is_shim_crate {
-            return load_shim_def_lookup(tcx, crate_num);
+            return load_shim_def_lookup(rcx, crate_num);
         }
     }
 
@@ -126,8 +131,8 @@ pub fn resolve_shim_def_lookup(tcx: TyCtxt, hir_ext: &HirExt) -> ShimDefLookup {
     }
 }
 
-fn load_shim_def_lookup(tcx: TyCtxt, dependency: CrateNum) -> ShimDefLookup {
-    let filename = &tcx.used_crate_source(dependency).rlib.as_ref().unwrap().0;
+fn load_shim_def_lookup(rcx: &RislContext, dependency: CrateNum) -> ShimDefLookup {
+    let filename = rcx.resolve_risl_rlib_path(dependency);
 
     let mut archive = Archive::new(File::open(filename).unwrap());
 
@@ -151,7 +156,7 @@ fn load_shim_def_lookup(tcx: TyCtxt, dependency: CrateNum) -> ShimDefLookup {
 
     panic!(
         "failed to load shim def lookup from crate `{}`",
-        tcx.crate_name(dependency)
+        rcx.tcx().crate_name(dependency)
     );
 }
 

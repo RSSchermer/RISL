@@ -10,4 +10,4 @@
 mod collect;
 mod errors;
 
-pub use collect::{ShaderModuleCodegenUnit, collect_shader_module_codegen_units};
+pub use collect::{ShaderModuleCodegenUnit, collect_shader_module_codegen_units, provide};

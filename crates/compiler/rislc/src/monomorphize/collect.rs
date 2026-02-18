@@ -4,6 +4,7 @@ use std::sync::RwLock;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_hir as hir;
+use rustc_hir::attrs::InlineAttr;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{LocalDefId, LocalModDefId};
 use rustc_hir::lang_items::LangItem;
@@ -14,6 +15,7 @@ use rustc_middle::mir::mono::{CollectionMode, MonoItem as InternalMonoItem};
 use rustc_middle::ty::{
     self, GenericArgs, GenericParamDefKind, Instance as InternalInstance, TyCtxt,
 };
+use rustc_middle::util::Providers;
 use rustc_middle::{bug, span_bug};
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::{Instance, InstanceKind, MonoItem};
@@ -25,7 +27,9 @@ use rustc_span::{DUMMY_SP, Span};
 use tracing::{debug, instrument, trace};
 
 use crate::context::RislContext as Cx;
-use crate::monomorphize::errors::{EncounteredErrorWhileInstantiating, RecursionLimit};
+use crate::monomorphize::errors::{
+    EncounteredErrorWhileInstantiating, NoOptimizedMir, RecursionLimit,
+};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MonoItemCollectionStrategy {
@@ -912,4 +916,78 @@ pub fn collect_shader_module_codegen_units(
     }
 
     (free_items, modules)
+}
+
+/// A replacement query provider for [TyCtxt::should_codegen_locally].
+///
+/// Modified version of `rustc_monomorphize::collector::should_codegen_locally`. Specifically, the
+/// default rustc query provider will return `false` if the mono-item has already been codegenned in
+/// an upstream crate; in this case rustc wants to link the upstream mono-item, rather than create a
+/// duplicate.
+///
+/// However, this will also resolve non-GPU upstream mono-items, in which case there is no actual
+/// SLIR-CFG representation available for the item. It would currently also not resolve to the
+/// correct SLIR module (it would resolve to the module associated with the crate that originally
+/// defines the item, not the module associated with the crate that provides the monomorphization).
+/// We therefore opt to always codegen generic items locally and accept potential duplicate IR
+/// items.
+///
+/// We may in the future want to implement our own version of upstream mono-item resolution to
+/// prevent duplications in the IR. However, since we currently exhaustively inline the SLIR, these
+/// duplicates do not affect the final output, and thus deduplication is not a high priority.
+fn should_codegen_locally<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    instance: rustc_middle::ty::Instance<'tcx>,
+) -> bool {
+    let Some(def_id) = instance.def.def_id_if_not_guaranteed_local_codegen() else {
+        return true;
+    };
+
+    if tcx.is_foreign_item(def_id) {
+        // Foreign items are always linked against, there's no way of instantiating them.
+        return false;
+    }
+
+    if tcx.def_kind(def_id).has_codegen_attrs()
+        && matches!(
+            tcx.codegen_fn_attrs(def_id).inline,
+            InlineAttr::Force { .. }
+        )
+    {
+        // `#[rustc_force_inline]` items should never be codegened. This should be caught by
+        // the MIR validator.
+        tcx.dcx()
+            .delayed_bug("attempt to codegen `#[rustc_force_inline]` item");
+    }
+
+    if def_id.is_local() {
+        // Local items cannot be referred to locally without monomorphizing them locally.
+        return true;
+    }
+
+    if tcx.is_reachable_non_generic(def_id) {
+        // We can link to the item in question, no instance needed in this crate.
+        return false;
+    }
+
+    if let DefKind::Static { .. } = tcx.def_kind(def_id) {
+        // We cannot monomorphize statics from upstream crates.
+        return false;
+    }
+
+    // See comment in should_encode_mir in rustc_metadata for why we don't report
+    // an error for constructors.
+    if !tcx.is_mir_available(def_id) && !matches!(tcx.def_kind(def_id), DefKind::Ctor(..)) {
+        tcx.dcx().emit_fatal(NoOptimizedMir {
+            span: tcx.def_span(def_id),
+            crate_name: tcx.crate_name(def_id.krate),
+            instance: instance.to_string(),
+        });
+    }
+
+    true
+}
+
+pub fn provide(providers: &mut Providers) {
+    providers.hooks.should_codegen_locally = should_codegen_locally;
 }

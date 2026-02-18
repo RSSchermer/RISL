@@ -31,14 +31,7 @@ impl slir::dependencies::DependencyLoader for RlibDependencyLoader<'_, '_> {
         let crate_num = self
             .rcx
             .crate_num_for_crate_slir_module_name(module.as_str());
-        let filename = &self
-            .rcx
-            .tcx()
-            .used_crate_source(crate_num)
-            .rlib
-            .as_ref()
-            .unwrap()
-            .0;
+        let filename = self.rcx.resolve_risl_rlib_path(crate_num);
 
         let mut archive = Archive::new(File::open(filename).unwrap());
 
@@ -101,15 +94,15 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
 
             artifact_builder.maybe_add_rvsdg_transformed(&rvsdg);
 
-            // let mut scf = slir::rvsdg_to_scf::rvsdg_entry_points_to_scf(&module, &rvsdg);
-            //
-            // scf::transform::transform(&mut module, &mut scf);
-            //
-            // artifact_builder.add_scf(&scf);
-            //
-            // let wgsl = slir::write::wgsl::write_wgsl(&module, &scf);
-            //
-            // artifact_builder.maybe_add_wgsl(&wgsl);
+            let mut scf = slir::rvsdg_to_scf::rvsdg_entry_points_to_scf(&module, &rvsdg);
+
+            scf::transform::transform(&mut module, &mut scf);
+
+            artifact_builder.add_scf(&scf);
+
+            let wgsl = slir::write::wgsl::write_wgsl(&module, &scf);
+
+            artifact_builder.maybe_add_wgsl(&wgsl);
 
             let smi = slir::smi::build_smi(&module, &cfg);
 

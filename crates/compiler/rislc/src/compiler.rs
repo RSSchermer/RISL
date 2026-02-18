@@ -20,10 +20,10 @@ use rustc_session::output::out_filename;
 use rustc_session::search_paths::{PathKind, SearchPath};
 use rustc_span::def_id::{CrateNum, LOCAL_CRATE};
 
-use crate::abi;
 use crate::codegen::codegen_shader_modules;
 use crate::context::RislContext;
 use crate::core_shim::ShimDefLookup;
+use crate::{abi, monomorphize};
 
 /// The header used in an `rlib` archive for the crate's "free items" SLIR-CFG module.
 ///
@@ -346,6 +346,7 @@ impl Callbacks for RislPassCallbacks {
 
         config.override_queries = Some(|_, providers| {
             abi::provide(providers);
+            monomorphize::provide(providers);
         });
     }
 
@@ -413,13 +414,7 @@ struct Smam {
 
 /// Loads the shader-module-artifact-mapping (SMAM) for the given `dependency`.
 fn load_smam(cx: &RislContext, dependency: CrateNum) -> Smam {
-    let filename = &cx
-        .tcx()
-        .used_crate_source(dependency)
-        .rlib
-        .as_ref()
-        .unwrap()
-        .0;
+    let filename = cx.resolve_risl_rlib_path(dependency);
 
     let mut archive = Archive::new(File::open(filename).unwrap());
 
