@@ -327,6 +327,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpConvertToI32(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpConvertToF32(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpConvertToBool(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpArrayLength(op) => self.prepare_bind_intrinsic(node, op).apply(self),
 
             // We don't express switch predicates in the SCF, instead we translate the switch nodes
             // either if statements or switch statements with the approprate cases. Therefore,
@@ -336,7 +337,11 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpBoolToBranchSelector(_) => self.visit_op_bool_to_branch_selector(node),
             OpU32ToBranchSelector(_) => self.visit_op_u32_to_branch_selector(node),
             _ => {
-                panic!("node kind not currently supported by SLIR's structured control-flow format")
+                panic!(
+                    "node kind `{:?}` not currently supported by SLIR's structured control-flow \
+                    format",
+                    data
+                )
             }
         }
     }
