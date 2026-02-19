@@ -1,10 +1,9 @@
 use std::error::Error;
 
+use behavioral_tests_macros::test_runner;
 use futures::FutureExt;
 
-use crate::gen_test_runner;
-
-gen_test_runner! {
+test_runner! {
     name: EnumRunner,
     inputs: {
         VALUE: u32 as StorageMut,

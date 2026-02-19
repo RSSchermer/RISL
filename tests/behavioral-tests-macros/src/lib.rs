@@ -125,9 +125,9 @@ impl Parse for MacroInput {
 /// # Example
 ///
 /// ```rust
-/// use behavioral_tests_macros::gen_test_runner;
+/// use behavioral_tests_macros::test_runner;
 ///
-/// gen_test_runner! {
+/// test_runner! {
 ///     name: SliceRunner,
 ///     inputs: {
 ///         INDEX: u32 as Uniform,
@@ -179,7 +179,7 @@ impl Parse for MacroInput {
 /// of the value of the `RESULT` binding after the pipeline has successfully finished executing, or
 /// an error if there was as problem executing the pipeline.
 #[proc_macro]
-pub fn gen_test_runner(input: TokenStream) -> TokenStream {
+pub fn test_runner(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as MacroInput);
     let name = &input.name;
     let result_ty = &input.result_ty;
@@ -264,8 +264,9 @@ pub fn gen_test_runner(input: TokenStream) -> TokenStream {
     // We explicitly set the span of the generated `shader_risl!` macro call to `Span::call_site()`.
     // This is done because `risl_request` currently relies on the span of the artifact-request
     // macro being globally unique in order to generate unique request IDs. If the `shader_risl!`
-    // macro was assigned a `def_site` span, then multiple invocations of the `gen_test_runner!`
-    // macro would produce the same request ID, leading to incorrect shader artifact resolution.
+    // macro was assigned a `def_site` span, then multiple invocations of the `test_runner!` macro
+    // would produce the same request ID, leading to incorrect shader-artifact resolution.
+    //
     // This constraint is the primary reason this macro is implemented as a proc-macro; otherwise
     // it could be implemented as a "macro-rules" declarative macro. If we ever come up with a
     // better way to make and satisfy shader-artifact requests, then we may want to look into a

@@ -5,8 +5,6 @@
     macro_metavar_expr
 )]
 
-use behavioral_tests_macros::gen_test_runner;
-
 mod enum_result;
 mod slice_get_index;
 mod variable_pointer_if_else;
