@@ -6,6 +6,10 @@ use crate::gen_test_runner;
 
 gen_test_runner! {
     name: EnumRunner,
+    inputs: {
+        VALUE: u32 as StorageMut,
+    },
+    result: u32,
     shader: {
         fn test(v: u32) -> Result<u32, u32> {
             if v > 10 { Ok(1) } else { Err(0) }
@@ -18,14 +22,10 @@ gen_test_runner! {
             };
         }
     },
-    result: RESULT: u32,
-    inputs: [
-        VALUE: u32 as StorageMut,
-    ],
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = EnumRunner::new().await?;
+    let runner = EnumRunner::init().await?;
 
     assert_eq!(runner.run(10u32).await?, 0u32);
     assert_eq!(runner.run(11u32).await?, 1u32);

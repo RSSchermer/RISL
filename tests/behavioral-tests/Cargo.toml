@@ -9,6 +9,7 @@ publish = false
 doctest = false
 
 [dependencies]
+behavioral-tests-macros = { path = "../behavioral-tests-macros" }
 empa = { workspace = true, features = ["risl", "dx12", "metal"] }
 futures = { workspace = true }
 pollster = { workspace = true }
