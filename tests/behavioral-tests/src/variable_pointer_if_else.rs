@@ -1,8 +1,7 @@
 use std::error::Error;
 
 use behavioral_tests_macros::test_runner;
-use empa::{abi, buffer};
-use futures::FutureExt;
+use empa::abi;
 use risl::gpu;
 
 #[derive(Clone, Copy, abi::Sized)]
