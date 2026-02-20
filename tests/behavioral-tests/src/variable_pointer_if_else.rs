@@ -2,6 +2,7 @@ use std::error::Error;
 
 use behavioral_tests_macros::test_runner;
 use empa::abi;
+use futures::FutureExt;
 use risl::gpu;
 
 #[derive(Clone, Copy, abi::Sized)]
@@ -14,8 +15,8 @@ struct Values {
 test_runner! {
     name: VarPtrIfElseRunner,
     inputs: {
-        CONDITION: u32 as Uniform,
-        VALUES: Values as Storage,
+        CONDITION: u32 as Uniform<u32>,
+        VALUES: Values as Storage<Values>,
     },
     result: u32,
     shader: {

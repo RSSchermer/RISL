@@ -5,27 +5,34 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Ident, Result, Token, Type, braced, parse_macro_input};
 
-struct InputField {
+struct Input {
     name: Ident,
     ty: Type,
-    kind: InputKind,
+    binding: Binding,
 }
 
-enum InputKind {
-    Uniform,
-    Storage,
-    StorageMut,
+enum Binding {
+    Uniform(Type),
+    Storage(Type),
+    StorageMut(Type),
 }
 
-impl Parse for InputKind {
+impl Parse for Binding {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
+
         if lookahead.peek(Ident) {
             let ident: Ident = input.parse()?;
-            match ident.to_string().as_str() {
-                "Uniform" => Ok(InputKind::Uniform),
-                "Storage" => Ok(InputKind::Storage),
-                "StorageMut" => Ok(InputKind::StorageMut),
+            let binding_kind = ident.to_string();
+
+            input.parse::<Token![<]>()?;
+            let gpu_ty: Type = input.parse()?;
+            input.parse::<Token![>]>()?;
+
+            match binding_kind.as_str() {
+                "Uniform" => Ok(Binding::Uniform(gpu_ty)),
+                "Storage" => Ok(Binding::Storage(gpu_ty)),
+                "StorageMut" => Ok(Binding::StorageMut(gpu_ty)),
                 _ => Err(Error::new(
                     ident.span(),
                     "expected Uniform, Storage, or StorageMut",
@@ -37,20 +44,21 @@ impl Parse for InputKind {
     }
 }
 
-impl Parse for InputField {
+impl Parse for Input {
     fn parse(input: ParseStream) -> Result<Self> {
         let name: Ident = input.parse()?;
         input.parse::<Token![:]>()?;
         let ty: Type = input.parse()?;
         let _: Token![as] = input.parse()?;
-        let kind: InputKind = input.parse()?;
-        Ok(InputField { name, ty, kind })
+        let binding: Binding = input.parse()?;
+
+        Ok(Input { name, ty, binding })
     }
 }
 
 struct MacroInput {
     name: Ident,
-    inputs: Punctuated<InputField, Token![,]>,
+    inputs: Punctuated<Input, Token![,]>,
     result_ty: Type,
     shader_body: syn::Block,
 }
@@ -80,7 +88,7 @@ impl Parse for MacroInput {
         input.parse::<Token![:]>()?;
         let content;
         braced!(content in input);
-        let inputs = content.parse_terminated(InputField::parse, Token![,])?;
+        let inputs = content.parse_terminated(Input::parse, Token![,])?;
         input.parse::<Token![,]>()?;
 
         // result: <ResultTy>
@@ -130,8 +138,8 @@ impl Parse for MacroInput {
 /// test_runner! {
 ///     name: SliceRunner,
 ///     inputs: {
-///         INDEX: u32 as Uniform,
-///         VALUES: [u32] as Storage,
+///         INDEX: u32 as Uniform<u32>,
+///         VALUES: [u32] as Storage<[u32]>,
 ///     },
 ///     result: u32,
 ///     shader: {
@@ -155,12 +163,13 @@ impl Parse for MacroInput {
 ///
 /// - `name`: name of the generated runner struct (e.g.: `SliceRunner`).
 /// - `inputs`: ordered set of test inputs. Each input must match one of:
-///   - `<IDENT>: <Ty> as Uniform`: creates the input as a uniform binding. The type must be
-///     uniform binding compatible.
-///   - `<IDENT>: <Ty> as Storage`: creates the input as a read-only storage binding. The type must
-///     be storage binding compatible.
-///   - `<IDENT>: <Ty> as StorageMut`creates the input as a read-write storage binding. The type
-///     must be storage binding compatible.
+///
+///   - `<IDENT>: <CpuTy> as Uniform<GpuTy>`: creates the input as a uniform binding.
+///   - `<IDENT>: <CpuTy> as Storage<GpuTy>`: creates the input as a read-only storage binding.
+///   - `<IDENT>: <CpuTy> as StorageMut<GpuTy>`: creates the input as a read-write storage binding.
+///
+///   For all binding types, the buffer is created from `CpuTy`, while the shader binding uses the
+///   binding type parameterized by `GpuTy`. The `CpuTy` and `GpuTy` must be "binding compatible".
 /// - `result`: the type of the test-result. Creates a read-write storage binding called `RESULT`
 ///   of the specified type. The type must implement [Clone] and must be storage binding compatible.
 /// - `shader`: the test code. May access any of the input bindings by their `<IDENT>` or the result
@@ -179,62 +188,72 @@ impl Parse for MacroInput {
 /// of the value of the `RESULT` binding after the pipeline has successfully finished executing, or
 /// an error if there was as problem executing the pipeline.
 #[proc_macro]
-pub fn test_runner(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as MacroInput);
-    let name = &input.name;
-    let result_ty = &input.result_ty;
-    let shader_body = &input.shader_body;
+pub fn test_runner(macro_input: TokenStream) -> TokenStream {
+    let macro_input = parse_macro_input!(macro_input as MacroInput);
+    let name = &macro_input.name;
+    let result_ty = &macro_input.result_ty;
+    let shader_body = &macro_input.shader_body;
 
     let mut shader_resources = quote! {};
     let mut input_resource_fields = quote! {};
     let mut input_resource_init = quote! {};
     let mut run_args = quote! {};
-    let mut buffer_creations = quote! {};
+    let mut input_buffer_creations = quote! {};
 
-    for (i, field) in input.inputs.iter().enumerate() {
-        let field_name = &field.name;
-        let field_ty = &field.ty;
+    for (i, input) in macro_input.inputs.iter().enumerate() {
+        let input_name = &input.name;
+        let input_ty = &input.ty;
         let binding = i as u32;
 
-        let res_ty = match field.kind {
-            InputKind::Uniform => quote! { Uniform<#field_ty> },
-            InputKind::Storage => quote! { Storage<#field_ty> },
-            InputKind::StorageMut => quote! { StorageMut<#field_ty> },
+        let binding_ty = match &input.binding {
+            Binding::Uniform(gpu_ty) => {
+                quote! { Uniform<#gpu_ty> }
+            }
+            Binding::Storage(gpu_ty) => {
+                quote! { Storage<#gpu_ty> }
+            }
+            Binding::StorageMut(gpu_ty) => {
+                quote! { StorageMut<#gpu_ty> }
+            }
         };
 
         shader_resources.extend(quote! {
             #[resource(group = 0, binding = #binding)]
-            static #field_name: #res_ty;
+            static #input_name: #binding_ty;
         });
 
-        let input_res_ty = match field.kind {
-            InputKind::Uniform => quote! { empa::buffer::Uniform<'a, #field_ty> },
-            InputKind::Storage => quote! { empa::buffer::Storage<'a, #field_ty> },
-            InputKind::StorageMut => {
+        let buffer_view_ty = match &input.binding {
+            Binding::Uniform(_) => {
+                quote! { empa::buffer::Uniform<'a, #input_ty> }
+            }
+            Binding::Storage(_) => {
+                quote! { empa::buffer::Storage<'a, #input_ty> }
+            }
+            Binding::StorageMut(_) => {
                 quote! {
-                    empa::buffer::Storage<'a, #field_ty, empa::access_mode::ReadWrite>
+                    empa::buffer::Storage<'a, #input_ty, empa::access_mode::ReadWrite>
                 }
             }
         };
 
         input_resource_fields.extend(quote! {
             #[resource(binding = #binding, visibility = "COMPUTE")]
-            #field_name: #input_res_ty,
+            #input_name: #buffer_view_ty,
         });
 
         let arg_name = Ident::new(&format!("input_{}", i), Span::call_site());
         run_args.extend(quote! {
-            #arg_name: impl empa::buffer::AsBuffer<#field_ty>,
+            #arg_name: impl empa::buffer::AsBuffer<#input_ty>,
         });
 
-        let usage = match field.kind {
-            InputKind::Uniform => {
+        let usage = match &input.binding {
+            Binding::Uniform(_) => {
                 quote! { empa::buffer::Usages::uniform_binding() }
             }
-            InputKind::Storage => {
+            Binding::Storage(_) => {
                 quote! { empa::buffer::Usages::storage_binding() }
             }
-            InputKind::StorageMut => {
+            Binding::StorageMut(_) => {
                 quote! {
                     empa::buffer::Usages::storage_binding().and_copy_dst()
                 }
@@ -242,22 +261,22 @@ pub fn test_runner(input: TokenStream) -> TokenStream {
         };
 
         let buffer_name = Ident::new(&format!("buffer_{}", i), Span::call_site());
-        buffer_creations.extend(quote! {
+        input_buffer_creations.extend(quote! {
             let #buffer_name = self.device.create_buffer(#arg_name, #usage);
         });
 
-        let res_view = match field.kind {
-            InputKind::Uniform => quote! { #buffer_name.uniform() },
-            InputKind::Storage => {
+        let buffer_view = match &input.binding {
+            Binding::Uniform(_) => quote! { #buffer_name.uniform() },
+            Binding::Storage(_) => {
                 quote! { #buffer_name.storage::<empa::access_mode::Read>() }
             }
-            InputKind::StorageMut => {
+            Binding::StorageMut(_) => {
                 quote! { #buffer_name.storage::<empa::access_mode::ReadWrite>() }
             }
         };
 
         input_resource_init.extend(quote! {
-            #field_name: #res_view,
+            #input_name: #buffer_view,
         });
     }
 
@@ -372,7 +391,7 @@ pub fn test_runner(input: TokenStream) -> TokenStream {
                 use empa::command::ResourceBindingCommandEncoder as _;
                 use empa::command::CommandEncoder as _;
 
-                #buffer_creations
+                #input_buffer_creations
 
                 let result_buffer = self.device.create_buffer(
                     <#result_ty>::default(),

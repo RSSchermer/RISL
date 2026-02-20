@@ -1,12 +1,13 @@
 use std::error::Error;
 
 use behavioral_tests_macros::test_runner;
+use futures::FutureExt;
 
 test_runner! {
     name: SliceRunner,
     inputs: {
-        INDEX: u32 as Uniform,
-        VALUES: [u32] as Storage,
+        INDEX: u32 as Uniform<u32>,
+        VALUES: [u32] as Storage<[u32]>,
     },
     result: u32,
     shader: {
