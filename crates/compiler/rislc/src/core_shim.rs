@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Read;
+use std::mem;
 use std::sync::RwLock;
 
 use ar::Archive;
@@ -60,8 +61,11 @@ impl ShimDefLookup {
             // characters. However, that should never produce a def_path that will incorrectly match
             // an entry in our mapping; it will always result in a `None` lookup result.
             let def_path = def_path.replace("std::", "core::");
+            let mapping_lock = self.mapping.read().unwrap();
 
-            if let Some(index) = self.mapping.read().unwrap().get(&def_path).copied() {
+            if let Some(index) = mapping_lock.get(&def_path).copied() {
+                mem::drop(mapping_lock);
+
                 self.mapping.write().unwrap().insert(def_path, index);
 
                 Some(index)
