@@ -20,6 +20,7 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::Sub => define_sub(instance, cx),
             RislIntrinsic::Mul => define_mul(instance, cx),
             RislIntrinsic::Div => define_div(instance, cx),
+            RislIntrinsic::SliceLen => define_slice_len(instance, cx),
             RislIntrinsic::SliceElementRef => define_slice_element_ref(instance, cx),
             RislIntrinsic::SliceRange => define_slice_range(instance, cx),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
@@ -37,6 +38,7 @@ pub enum RislIntrinsic {
     Sub,
     Mul,
     Div,
+    SliceLen,
     SliceElementRef,
     SliceRange,
     MemResourceAsRef,
@@ -58,6 +60,7 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(sub)]" => RislIntrinsic::Sub,
         "#[rislc::intrinsic(mul)]" => RislIntrinsic::Mul,
         "#[rislc::intrinsic(div)]" => RislIntrinsic::Div,
+        "#[rislc::intrinsic(slice_len)]" => RislIntrinsic::SliceLen,
         "#[rislc::intrinsic(slice_element_ref)]" => RislIntrinsic::SliceElementRef,
         "#[rislc::intrinsic(slice_range)]" => RislIntrinsic::SliceRange,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
@@ -127,6 +130,19 @@ fn define_mul(instance: Instance, cx: &CodegenContext) {
 
 fn define_div(instance: Instance, cx: &CodegenContext) {
     define_arith_op(instance, cx, BinaryOperator::Div);
+}
+
+fn define_slice_len(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let slice_len = body.argument_values()[1];
+    let bb = body.entry_block();
+
+    cfg.set_terminator(bb, Terminator::return_value(slice_len.into()));
 }
 
 fn define_slice_element_ref(instance: Instance, cx: &CodegenContext) {

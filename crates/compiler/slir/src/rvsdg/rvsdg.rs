@@ -3206,15 +3206,18 @@ impl Rvsdg {
                 let region = &self[region];
 
                 if let Some(a) = region.value_arguments().get(*i as usize) {
-                    if value_input.ty != a.ty {
+                    if !self.ty.is_compatible(value_input.ty, a.ty) {
                         panic!(
-                            "cannot connect a node input of type `{:?}` to a region argument of type `{:?}",
-                            value_input.ty, a.ty
+                            "cannot connect a node input of type `{}` to a region argument of type \
+                            `{}`",
+                            value_input.ty.to_string(self.ty()),
+                            a.ty.to_string(self.ty()),
                         );
                     }
                 } else {
                     panic!(
-                        "tried to connect to region argument `{}`, but region only has {} arguments",
+                        "tried to connect to region argument `{}`, but region only has {} \
+                        arguments",
                         i,
                         region.value_arguments().len()
                     );

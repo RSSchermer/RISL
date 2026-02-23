@@ -5,19 +5,15 @@ use risl_macros::gpu;
 use crate::intrinsic;
 
 #[gpu]
-pub trait SliceIndex<T>
-where
-    T: ?Sized,
-{
-    type Output: ?Sized;
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::len"))]
+pub fn slice_len<T>(slice: &[T]) -> usize {
+    unsafe { intrinsic::slice_len(slice) }
+}
 
-    fn get(self, slice: &T) -> Option<&Self::Output>;
-
-    fn get_mut(self, slice: &mut T) -> Option<&mut Self::Output>;
-
-    unsafe fn get_unchecked(self, slice: &T) -> &Self::Output;
-
-    unsafe fn get_unchecked_mut(self, slice: &mut T) -> &mut Self::Output;
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::is_empty"))]
+pub fn slice_is_empty<T>(slice: &[T]) -> bool {
+    slice_len(slice) == 0
 }
 
 #[gpu]
@@ -36,6 +32,43 @@ where
     I: SliceIndex<[T]>,
 {
     index.get(slice)
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::get_unchecked"))]
+pub unsafe fn slice_get_unchecked<T, I>(slice: &[T], index: I) -> &<I as SliceIndex<[T]>>::Output
+where
+    I: SliceIndex<[T]>,
+{
+    unsafe { index.get_unchecked(slice) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::get_unchecked_mut"))]
+pub unsafe fn slice_get_unchecked_mut<T, I>(
+    slice: &mut [T],
+    index: I,
+) -> &mut <I as SliceIndex<[T]>>::Output
+where
+    I: SliceIndex<[T]>,
+{
+    unsafe { index.get_unchecked_mut(slice) }
+}
+
+#[gpu]
+pub trait SliceIndex<T>
+where
+    T: ?Sized,
+{
+    type Output: ?Sized;
+
+    fn get(self, slice: &T) -> Option<&Self::Output>;
+
+    fn get_mut(self, slice: &mut T) -> Option<&mut Self::Output>;
+
+    unsafe fn get_unchecked(self, slice: &T) -> &Self::Output;
+
+    unsafe fn get_unchecked_mut(self, slice: &mut T) -> &mut Self::Output;
 }
 
 #[gpu]

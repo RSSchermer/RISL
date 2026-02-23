@@ -149,6 +149,8 @@ pub trait BuilderMethods<'a>:
 
     fn assign(&mut self, local: Self::Local, value: Self::Value);
 
+    fn pointercast(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value;
+
     fn load(&mut self, ty: Self::Type, ptr: Self::Value, align: Align) -> Self::Value;
     fn volatile_load(&mut self, ty: Self::Type, ptr: Self::Value) -> Self::Value;
     fn atomic_load(

@@ -1051,6 +1051,42 @@ impl Cfg {
         (stmt, local_binding)
     }
 
+    /// Adds a statement to a basic-block that binds the given `value` as a local value with the
+    /// given `dest_ty`.
+    ///
+    /// Very similar to [add_stmt_bind], but the local value may have a different type than the
+    /// value being bound. The `dest_ty` must be compatible with the `value`'s ty as per
+    /// [TyRegistry::is_compatible]. The statement that is added is a [Bind] statement.
+    pub fn add_stmt_cast(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+        dest_ty: Type,
+    ) -> (Statement, LocalBinding) {
+        let owner = self.basic_blocks[bb].owner;
+
+        self.validate_value(owner, &value, "value");
+
+        let ty = self.value_ty(&value);
+
+        assert!(self.ty().is_compatible(ty, dest_ty));
+
+        let local_binding = self.add_local_binding(owner, dest_ty);
+
+        let stmt = self.statements.insert(
+            Bind {
+                local_binding,
+                value,
+            }
+            .into(),
+        );
+
+        self.basic_blocks[bb].add_statement(position, stmt);
+
+        (stmt, local_binding)
+    }
+
     pub fn add_stmt_uninitialized(
         &mut self,
         bb: BasicBlock,

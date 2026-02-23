@@ -268,7 +268,13 @@ fn unsize_ptr<'a, Bx: BuilderMethods<'a>>(
         (Ref(_, a, _), Ref(_, b, _) | RawPtr(b, _)) | (RawPtr(a, _), RawPtr(b, _)) => {
             assert_eq!(a.layout().unwrap().shape().is_sized(), old_info.is_none());
 
-            (src, unsized_info(bx, a, b, old_info))
+            // An unsize cast implies a fat pointer, so we can select the first field of the
+            // `dst_ty` to resolve the type of the unsized thin pointer.
+            let cast_val_ty = bx.backend_type(&TyAndLayout::expect_from_ty(dst_ty).field(0));
+
+            let cast_val = bx.pointercast(src, cast_val_ty);
+
+            (cast_val, unsized_info(bx, a, b, old_info))
         }
         (Adt(def_a, _), Adt(def_b, _)) => {
             assert_eq!(def_a, def_b); // implies same number of fields
@@ -1007,7 +1013,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             | Rvalue::AddressOf(..)
             | Rvalue::ShallowInitBox(..)
             | Rvalue::ThreadLocalRef(_) => {
-                bug!("not supported by risl")
+                bug!("R-value not supported by risl ({:?})", rvalue);
             }
             Rvalue::Ref(..)
             | Rvalue::CopyForDeref(..)

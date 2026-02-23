@@ -1,4 +1,4 @@
-#![feature(core_intrinsics, custom_inner_attributes)]
+#![feature(core_intrinsics, custom_inner_attributes, ptr_metadata)]
 #![cfg_attr(rislc, rislc::core_shim_crate)]
 
 pub mod mem;

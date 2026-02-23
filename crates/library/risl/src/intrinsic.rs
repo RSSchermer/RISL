@@ -23,6 +23,7 @@ gen_intrinsic!(mem_resource_as_ref: fn storage_mut_as_ref<T>(storage: &StorageMu
 gen_intrinsic!(mem_resource_as_ref: fn storage_mut_as_mut<T>(storage: &StorageMut<T>) -> &mut T where T: ?Sized);
 gen_intrinsic!(mem_resource_as_ref: fn workgroup_as_ref<T>(workgroup: &Workgroup<T>) -> &T);
 gen_intrinsic!(mem_resource_as_ref: fn workgroup_as_mut<T>(workgroup: &Workgroup<T>) -> &mut T);
+gen_intrinsic!(slice_len: fn slice_len<T>(slice: &[T]) -> usize);
 gen_intrinsic!(slice_element_ref: fn slice_element_ref<T>(slice: &[T], index: usize) -> &T);
 gen_intrinsic!(slice_element_ref: fn slice_element_mut<T>(slice: &mut [T], index: usize) -> &mut T);
 gen_intrinsic!(slice_range: fn slice_range<T>(slice: &[T], start: usize, end: usize) -> &[T]);

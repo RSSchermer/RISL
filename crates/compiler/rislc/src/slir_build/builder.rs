@@ -508,6 +508,17 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         );
     }
 
+    fn pointercast(&mut self, value: Self::Value, dest_ty: Self::Type) -> Self::Value {
+        let (_, local) = self.cfg.borrow_mut().add_stmt_cast(
+            self.basic_block,
+            BlockPosition::Append,
+            value.expect_value(),
+            dest_ty.expect_slir_type(),
+        );
+
+        local.into()
+    }
+
     fn load(&mut self, _ty: Self::Type, ptr: Self::Value, _align: Align) -> Self::Value {
         let (_, result) = self.cfg.borrow_mut().add_stmt_op_load(
             self.basic_block,
