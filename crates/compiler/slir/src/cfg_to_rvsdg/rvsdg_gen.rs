@@ -19,7 +19,7 @@ use crate::cfg_to_rvsdg::control_tree::{
 };
 use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind};
+use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type};
 use crate::{Function, Module, rvsdg};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -466,7 +466,7 @@ impl<'a> RegionBuilder<'a> {
         &mut self,
         region: Region,
         input_state_tracker: InputStateTracker,
-    ) -> RegionBuilder {
+    ) -> RegionBuilder<'_> {
         RegionBuilder {
             region,
             module: self.module,
@@ -600,7 +600,7 @@ mod tests {
 
     use super::*;
     use crate::cfg::BlockPosition;
-    use crate::ty::{TY_DUMMY, TY_PREDICATE};
+    use crate::ty::{TypeKind, TY_DUMMY, TY_PREDICATE};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Symbol};
 
     #[test]

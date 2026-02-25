@@ -1,4 +1,4 @@
-use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueOrigin, ValueUser};
+use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueOrigin};
 
 pub trait ReverseValueFlowVisitor: Sized {
     /// Returns a boolean that indicates whether to visit the given `user`.

@@ -1,4 +1,3 @@
-use std::fmt::Formatter;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -7,7 +6,7 @@ use std::{fmt, mem};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 
-use crate::{BinaryOperator, Function, ShaderIOBinding};
+use crate::{Function, ShaderIOBinding};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct Type(TypeInner);
@@ -756,7 +755,7 @@ impl TypeRegistry {
         Type(TypeInner::Registered(index))
     }
 
-    pub fn kind(&self, ty: Type) -> KindRef {
+    pub fn kind(&self, ty: Type) -> KindRef<'_> {
         match ty.0 {
             TypeInner::U32 => KindRef::from_static(&TY_KIND_U32),
             TypeInner::I32 => KindRef::from_static(&TY_KIND_I32),
@@ -835,24 +834,24 @@ impl TypeRegistry {
         }
 
         return true;
-
-        use ScalarKind::*;
-        use TypeKind::*;
-
-        let k0 = self.kind(t0);
-        let k1 = self.kind(t1);
-
-        match (&*k0, &*k1) {
-            // TODO: the predicate compatibilities are a bit of a stop-gap. I think the predicate
-            // type itself needs to be rethought.
-            (Predicate, Scalar(U32))
-            | (Scalar(U32), Predicate)
-            | (Predicate, Scalar(Bool))
-            | (Scalar(Bool), Predicate) => return true,
-            _ => {}
-        }
-
-        false
+        //
+        // use ScalarKind::*;
+        // use TypeKind::*;
+        //
+        // let k0 = self.kind(t0);
+        // let k1 = self.kind(t1);
+        //
+        // match (&*k0, &*k1) {
+        //     // TODO: the predicate compatibilities are a bit of a stop-gap. I think the predicate
+        //     // type itself needs to be rethought.
+        //     (Predicate, Scalar(U32))
+        //     | (Scalar(U32), Predicate)
+        //     | (Predicate, Scalar(Bool))
+        //     | (Scalar(Bool), Predicate) => return true,
+        //     _ => {}
+        // }
+        //
+        // false
     }
 }
 
@@ -903,55 +902,5 @@ impl Deref for KindRef<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.as_ref()
-    }
-}
-
-fn check_arith_ty(lhs: Type, rhs: Type) -> Result<Type, ()> {
-    match (lhs, rhs) {
-        (TY_U32, TY_U32) => Ok(TY_U32),
-        (TY_I32, TY_I32) => Ok(TY_I32),
-        (TY_F32, TY_F32) => Ok(TY_F32),
-        (TY_VEC2_U32, TY_VEC2_U32) => Ok(TY_VEC2_U32),
-        (TY_VEC2_U32, TY_U32) => Ok(TY_VEC2_U32),
-        (TY_U32, TY_VEC2_U32) => Ok(TY_VEC2_U32),
-        (TY_VEC2_I32, TY_VEC2_I32) => Ok(TY_VEC2_I32),
-        (TY_VEC2_I32, TY_I32) => Ok(TY_VEC2_I32),
-        (TY_I32, TY_VEC2_I32) => Ok(TY_VEC2_I32),
-        (TY_VEC2_F32, TY_VEC2_F32) => Ok(TY_VEC2_F32),
-        (TY_VEC2_F32, TY_F32) => Ok(TY_VEC2_F32),
-        (TY_F32, TY_VEC2_F32) => Ok(TY_VEC2_F32),
-        (TY_VEC3_U32, TY_VEC3_U32) => Ok(TY_VEC3_U32),
-        (TY_VEC3_U32, TY_U32) => Ok(TY_VEC3_U32),
-        (TY_U32, TY_VEC3_U32) => Ok(TY_VEC3_U32),
-        (TY_VEC3_I32, TY_VEC3_I32) => Ok(TY_VEC3_I32),
-        (TY_VEC3_I32, TY_I32) => Ok(TY_VEC3_I32),
-        (TY_I32, TY_VEC3_I32) => Ok(TY_VEC3_I32),
-        (TY_VEC3_F32, TY_VEC3_F32) => Ok(TY_VEC3_F32),
-        (TY_VEC3_F32, TY_F32) => Ok(TY_VEC3_F32),
-        (TY_F32, TY_VEC3_F32) => Ok(TY_VEC3_F32),
-        (TY_VEC4_U32, TY_VEC4_U32) => Ok(TY_VEC4_U32),
-        (TY_VEC4_U32, TY_U32) => Ok(TY_VEC4_U32),
-        (TY_U32, TY_VEC4_U32) => Ok(TY_VEC4_U32),
-        (TY_VEC4_I32, TY_VEC4_I32) => Ok(TY_VEC4_I32),
-        (TY_VEC4_I32, TY_I32) => Ok(TY_VEC4_I32),
-        (TY_I32, TY_VEC4_I32) => Ok(TY_VEC4_I32),
-        (TY_VEC4_F32, TY_VEC4_F32) => Ok(TY_VEC4_F32),
-        (TY_VEC4_F32, TY_F32) => Ok(TY_VEC4_F32),
-        (TY_F32, TY_VEC4_F32) => Ok(TY_VEC4_F32),
-        _ => Err(()),
-    }
-}
-
-fn check_shift_ty(lhs: Type, rhs: Type) -> Result<Type, ()> {
-    match (lhs, rhs) {
-        (TY_U32, TY_U32) => Ok(TY_U32),
-        (TY_I32, TY_U32) => Ok(TY_I32),
-        (TY_VEC2_U32, TY_VEC2_U32) => Ok(TY_VEC2_U32),
-        (TY_VEC2_I32, TY_VEC2_U32) => Ok(TY_VEC2_I32),
-        (TY_VEC3_U32, TY_VEC3_U32) => Ok(TY_VEC3_U32),
-        (TY_VEC3_I32, TY_VEC3_U32) => Ok(TY_VEC3_I32),
-        (TY_VEC4_U32, TY_VEC4_U32) => Ok(TY_VEC4_U32),
-        (TY_VEC4_I32, TY_VEC4_U32) => Ok(TY_VEC4_I32),
-        _ => Err(()),
     }
 }

@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 
 use rustc_hash::FxHashSet;
 
-use crate::scf::analyze::global_use::{GlobalUse, collect_used_global_bindings};
+use crate::scf::analyze::global_use::GlobalUse;
 use crate::scf::visit::TopDownVisitor;
 use crate::scf::{Scf, Statement, StatementKind, visit};
 use crate::ty::Type;

@@ -3,7 +3,6 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::ops::Index;
 
-use indexmap::set::MutableValues;
 use internment::Intern;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};

@@ -6,7 +6,7 @@ use crate::Module;
 use crate::rvsdg::transform::region_replication::replicate_region;
 use crate::rvsdg::visit::bottom_up::{BottomUpVisitor, visit_node_bottom_up};
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueUser,
+    Connectivity, Node, NodeKind, Region, Rvsdg, ValueInput, ValueOrigin,
 };
 
 /// Adds missing dependencies to the function we're inlining into.
@@ -108,7 +108,7 @@ impl<'a> DependencyResolver<'a> {
 }
 
 fn resolve_dependencies(rvsdg: &mut Rvsdg, function_node: Node, region: Region) -> Vec<ValueInput> {
-    let mut resolver = DependencyResolver::new(rvsdg, function_node);
+    let resolver = DependencyResolver::new(rvsdg, function_node);
 
     resolver.route(region)
 }
@@ -254,7 +254,7 @@ mod tests {
     use std::iter;
 
     use super::*;
-    use crate::rvsdg::StateUser;
+    use crate::rvsdg::{StateOrigin, StateUser, ValueUser};
     use crate::ty::{TY_DUMMY, TY_U32, TypeKind};
     use crate::{BinaryOperator, EntryPoint, EntryPointKind, FnArg, FnSig, Function, Symbol};
 

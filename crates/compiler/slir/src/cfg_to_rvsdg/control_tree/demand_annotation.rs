@@ -2,7 +2,7 @@ use std::mem;
 
 use indexmap::IndexSet;
 
-use crate::cfg::{BasicBlock, LocalBinding, Terminator, Value};
+use crate::cfg::{BasicBlock, LocalBinding};
 use crate::cfg_to_rvsdg::control_tree::control_tree::{
     BranchingNode, ControlTree, ControlTreeNode, ControlTreeNodeKind, LinearNode, LoopNode,
 };

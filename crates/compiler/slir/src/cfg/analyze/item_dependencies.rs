@@ -8,12 +8,6 @@ use crate::cfg::{
 use crate::ty::Type;
 use crate::{Constant, Function, Module, StorageBinding, UniformBinding, WorkgroupBinding};
 
-pub struct Node(usize);
-
-pub struct NodeData {
-    children: IndexSet<Node>,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Item {
     Function(Function),
@@ -75,7 +69,7 @@ impl WithItemDependencies for Bind {
 }
 
 impl WithItemDependencies for Uninitialized {
-    fn with_item_dependencies<F>(&self, mut f: F)
+    fn with_item_dependencies<F>(&self, _f: F)
     where
         F: FnMut(Item),
     {

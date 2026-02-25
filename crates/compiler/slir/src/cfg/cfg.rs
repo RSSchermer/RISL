@@ -655,14 +655,6 @@ impl Terminator {
         }
     }
 
-    fn expect_return_mut(&mut self) -> &mut Option<Value> {
-        if let Terminator::Return(v) = self {
-            v
-        } else {
-            panic!("expected terminator to return")
-        }
-    }
-
     pub fn is_branch(&self) -> bool {
         matches!(self, Terminator::Branch(_))
     }
@@ -756,10 +748,6 @@ impl BasicBlockData {
         // Note that `IndexSet::insert_before` accepts indices in the `0..=set.len()` range, so
         // this works even if the `after` statement is the last statement in the block.
         self.statements.insert_before(index + 1, statement);
-    }
-
-    fn remove_statement(&mut self, statement: Statement) -> bool {
-        self.statements.shift_remove(&statement)
     }
 }
 
@@ -1598,33 +1586,6 @@ impl Cfg {
         self.function_body_map
             .get_mut(&function)
             .expect("function not registered")
-    }
-
-    fn project_ty(&self, (i, value): (usize, &Value), base_ty: Type) -> Type {
-        let ty = self.value_ty(value);
-
-        assert_eq!(ty, TY_U32, "index `{}` must be a `u32`", i);
-
-        match &*self.ty.kind(base_ty) {
-            TypeKind::Struct(s) => {
-                let Value::InlineConst(InlineConst::U32(index)) = *value else {
-                    panic!(
-                        "index `{}` tried to index into a struct type with a non-constant index",
-                        i
-                    );
-                };
-
-                s.fields[index as usize].ty
-            }
-            TypeKind::Vector(v) => v.scalar.ty(),
-            TypeKind::Matrix(m) => m.column_ty(),
-            TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => *element_ty,
-            _ => panic!(
-                "index `{}` tried to index a non-aggregate type (`{}`)",
-                i,
-                base_ty.to_string(self.ty())
-            ),
-        }
     }
 }
 

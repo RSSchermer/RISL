@@ -5,38 +5,23 @@ use slotmap::{SecondaryMap, SlotMap};
 use crate::scf::visit::TopDownVisitor;
 use crate::scf::{
     Block, ExprBinding, ExpressionKind, If, IntrinsicOp, LocalBinding, LocalBindingData,
-    LocalBindingKind, Loop, LoopControl, OpStore, Return, Scf, Statement, StatementKind, Switch,
+    Loop, LoopControl, Return, Scf, Statement, StatementKind, Switch,
     visit,
 };
 
-pub struct Config {
-    pub count_const_index_use: bool,
-}
-
-fn is_const_u32(scf: &Scf, local_binding: LocalBinding) -> bool {
-    if let LocalBindingKind::ExprBinding(stmt) = scf[local_binding].kind()
-        && let StatementKind::ExprBinding(stmt) = scf[*stmt].kind()
-    {
-        stmt.expression().kind().is_const_u32()
-    } else {
-        false
-    }
-}
-
 struct UseCounter {
     count: SecondaryMap<LocalBinding, u32>,
-    config: Config,
 }
 
 impl UseCounter {
-    fn new(local_bindings: &SlotMap<LocalBinding, LocalBindingData>, config: Config) -> Self {
+    fn new(local_bindings: &SlotMap<LocalBinding, LocalBindingData>) -> Self {
         let mut count = SecondaryMap::with_capacity(local_bindings.capacity());
 
         for local_binding in local_bindings.keys() {
             count.insert(local_binding, 0);
         }
 
-        UseCounter { count, config }
+        UseCounter { count }
     }
 
     fn increment(&mut self, local_binding: LocalBinding) {
@@ -71,7 +56,7 @@ impl UseCounter {
         }
     }
 
-    fn count_expr_binding(&mut self, scf: &Scf, stmt: &ExprBinding) {
+    fn count_expr_binding(&mut self, _scf: &Scf, stmt: &ExprBinding) {
         match stmt.expression().kind() {
             ExpressionKind::FallbackValue
             | ExpressionKind::ConstU32(_)
@@ -133,8 +118,8 @@ impl TopDownVisitor for Visitor {
     }
 }
 
-pub fn count_local_binding_use(scf: &Scf, config: Config) -> SecondaryMap<LocalBinding, u32> {
-    let counter = UseCounter::new(scf.local_bindings(), config);
+pub fn count_local_binding_use(scf: &Scf) -> SecondaryMap<LocalBinding, u32> {
+    let counter = UseCounter::new(scf.local_bindings());
     let mut visitor = Visitor { counter };
 
     for function in scf.registered_functions() {

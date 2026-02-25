@@ -2,7 +2,6 @@ use crate::rvsdg::Rvsdg;
 use crate::rvsdg::transform::memory_promotion_and_legalization::MemoryPromoterLegalizer;
 use crate::rvsdg::transform::proxy_node_elimination::region_eliminate_proxy_nodes;
 use crate::rvsdg::transform::scalar_replacement::AggregateReplacementContext;
-use crate::rvsdg::transform::store_coalescing;
 use crate::rvsdg::transform::store_coalescing::region_coalesce_store_ops;
 use crate::{Function, Module};
 

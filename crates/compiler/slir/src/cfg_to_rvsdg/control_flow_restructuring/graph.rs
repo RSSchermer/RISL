@@ -2,12 +2,11 @@ use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexSet;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
-use slotmap::SlotMap;
 
 use crate::Function;
 use crate::cfg::{
-    BasicBlock, BasicBlockData, BlockPosition, Cfg, FunctionBody, LocalBinding, LocalBindingData,
-    Statement, StatementData, Terminator,
+    BasicBlock, BlockPosition, Cfg, LocalBinding,
+    Statement, Terminator,
 };
 use crate::cfg_to_rvsdg::control_flow_restructuring::exit_restructuring::restructure_exit;
 use crate::ty::Type;
@@ -123,7 +122,7 @@ impl<'a> Graph<'a> {
         let Edge { source, dest } = edge;
 
         // First point the out-edge from the source to the new destination
-        let mut src_out_found = self.cfg.replace_branch_target(source, dest, new_dest);
+        let src_out_found = self.cfg.replace_branch_target(source, dest, new_dest);
         assert!(src_out_found, "edge source does not connect to edge dest");
 
         // Then disconnect the in-edge from the old destination
@@ -148,7 +147,7 @@ impl<'a> Graph<'a> {
 
         // First point the out-edge from the source to the "via" node
 
-        let mut src_out_found = self.cfg.replace_branch_target(source, dest, via);
+        let src_out_found = self.cfg.replace_branch_target(source, dest, via);
 
         assert!(src_out_found, "edge source does not connect to edge dest");
 

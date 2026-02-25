@@ -41,7 +41,7 @@ impl CasesMatcher {
         }
     }
 
-    fn match_cases(&mut self, cases_0: &[u32], cases_1: &[u32]) -> CasesMatch {
+    fn match_cases(&mut self, cases_0: &[u32], cases_1: &[u32]) -> CasesMatch<'_> {
         // Note: this assumes that the cases in `cases_0` are all unique (no duplicates).
 
         if cases_0.len() != cases_1.len() {

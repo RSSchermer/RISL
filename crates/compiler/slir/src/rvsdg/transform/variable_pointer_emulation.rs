@@ -6,7 +6,7 @@ use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
     ValueOutput,
 };
-use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind};
+use crate::ty::{TY_PREDICATE, TY_U32, Type};
 
 /// A variable pointer emulation program description.
 #[derive(Clone, Debug)]
@@ -179,8 +179,9 @@ impl EmulationTreeNode {
 ///
 /// See [SwitchEmulationRegistry] for details.
 struct SwitchEmulationValues {
-    start: u32,
+    /// The current `end` of the emulation output values for the node as a whole.
     end: u32,
+    /// The per branch `end` of the emulation results that have been used so far by the branch.
     branches_end: Vec<u32>,
 }
 
@@ -189,7 +190,7 @@ struct SwitchEmulationValues {
 ///
 /// Not every branch of a switch node will want to make the same values available. However, we want
 /// to maximally reuse output values because every extra output value will likely end up costing a
-/// registry. So we track the start and end of output values that have been added so far for the
+/// register. So we track the start and end of output values that have been added so far for the
 /// node as a whole, and we'll also track for each branch which results/outputs are actually being
 /// used to pass out values. Note that this reuse of outputs works because all extra emulation
 /// outputs will all be of type `u32`.
@@ -215,12 +216,10 @@ impl SwitchEmulationRegistry {
             .entry(switch_node)
             .or_insert_with(|| {
                 let branch_count = rvsdg[switch_node].expect_switch().branches().len();
-                let start = rvsdg[switch_node].value_outputs().len() as u32;
-                let end = start;
-                let branches_end = vec![start; branch_count];
+                let end = rvsdg[switch_node].value_outputs().len() as u32;
+                let branches_end = vec![end; branch_count];
 
                 SwitchEmulationValues {
-                    start,
                     end,
                     branches_end,
                 }
@@ -1175,7 +1174,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::TY_DUMMY;
+    use crate::ty::{TypeKind, TY_DUMMY};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]

@@ -8,7 +8,7 @@
 
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueOutput,
+    Connectivity, Node, NodeKind, Rvsdg, SimpleNode, ValueOrigin, ValueOutput,
     visit,
 };
 use crate::ty::TY_U32;

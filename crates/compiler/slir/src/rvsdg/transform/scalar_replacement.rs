@@ -178,17 +178,16 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use crate::rvsdg::analyse::element_index::ElementIndex;
 use crate::rvsdg::transform::enum_replacement::replace_enum_alloca;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, OpAlloca, OpLoad, Region, Rvsdg, SimpleNode, StateOrigin,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin,
     ValueInput, ValueOrigin, ValueOutput, ValueUser, visit,
 };
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
-use crate::{Function, Module};
 
 enum SwitchOutputSplitKind {
     Struct,
@@ -680,7 +679,7 @@ impl Replacer<'_, '_> {
                     None,
                 );
 
-                for (i, input) in split_input.iter().enumerate() {
+                for (i, _input) in split_input.iter().enumerate() {
                     let branch = self.rvsdg.add_switch_branch(switch);
                     let origin = ValueOrigin::Argument(i as u32);
 
@@ -1561,7 +1560,7 @@ impl AggregateReplacementContext {
         }
     }
 
-    pub fn for_region(&mut self, rvsdg: &Rvsdg, region: Region) -> RegionReplacementContext {
+    pub fn for_region(&mut self, rvsdg: &Rvsdg, region: Region) -> RegionReplacementContext<'_> {
         self.queue.clear();
         self.candidates.clear();
 
@@ -1639,7 +1638,7 @@ mod tests {
 
     use super::*;
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_PTR_U32};
-    use crate::{BinaryOperator, FnArg, FnSig, Symbol, thin_set};
+    use crate::{BinaryOperator, FnArg, FnSig, Symbol, thin_set, Module, Function};
 
     #[test]
     fn test_scalar_replace_op_field_ptr() {

@@ -3,8 +3,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::KeyData;
 
 use crate::Module;
-use crate::cfg::OpAlloca;
-use crate::rvsdg::NodeKind::{Loop, Switch};
 use crate::rvsdg::transform::variable_pointer_emulation::EmulationContext;
 use crate::rvsdg::visit::reverse_value_flow::ReverseValueFlowVisitor;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
@@ -12,7 +10,7 @@ use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, StateUser, ValueInput,
     ValueOrigin, ValueUser, visit,
 };
-use crate::ty::{TypeKind, TypeRegistry};
+use crate::ty::TypeKind;
 
 #[derive(Debug)]
 struct AggregateAnalyzer {
@@ -232,12 +230,6 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
             _ => unreachable!("node kind cannot output a pointer"),
         }
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum PointerValue {
-    Stored(ValueOrigin),
-    Fallback,
 }
 
 struct TouchedOuterAllocaStack {

@@ -34,7 +34,7 @@ impl WithReadValues for Bind {
 }
 
 impl WithReadValues for Uninitialized {
-    fn with_read_values<F>(&self, mut f: F)
+    fn with_read_values<F>(&self, _f: F)
     where
         F: FnMut(&Value),
     {
@@ -145,7 +145,7 @@ impl<T> WithWrittenValues for IntrinsicOp<T> {
 }
 
 impl WithWrittenValues for OpCall {
-    fn with_written_values<F>(&self, mut f: F)
+    fn with_written_values<F>(&self, f: F)
     where
         F: FnMut(&LocalBinding),
     {

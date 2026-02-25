@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::intrinsic::Intrinsic;
 use crate::ty::{
-    TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry,
+    TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry,
 };
 use crate::util::thin_set::ThinSet;
 use crate::{
@@ -1984,12 +1984,12 @@ impl Rvsdg {
         self.link_state(region, switch_node, state_origin);
     }
 
-    pub fn unlink_switch_state(&mut self, switch_node: Node, state_origin: StateOrigin) {
+    pub fn unlink_switch_state(&mut self, switch_node: Node, _state_origin: StateOrigin) {
         if self.nodes[switch_node].state().is_none() {
             panic!("switch node is not linked into the state chain")
         }
 
-        let region = self.nodes[switch_node].region();
+        let _region = self.nodes[switch_node].region();
 
         self.unlink_state(switch_node);
     }
@@ -2548,8 +2548,8 @@ impl Rvsdg {
             arg_count
         );
         for i in 0..arg_count {
-            let sig_arg_ty = sig.args[i].ty;
-            let value_input_ty = value_inputs[i + 1].ty;
+            let _sig_arg_ty = sig.args[i].ty;
+            let _value_input_ty = value_inputs[i + 1].ty;
             //TODO
             // assert_eq!(
             //     sig_arg_ty,
@@ -3532,34 +3532,6 @@ impl Rvsdg {
                 .remove(&user),
         }
     }
-
-    fn project_index(&self, (i, input): (usize, &ValueInput), base_ty: Type) -> Type {
-        match &*self.ty.kind(base_ty) {
-            TypeKind::Struct(s) => {
-                if let ValueOrigin::Output {
-                    producer,
-                    output: 0,
-                } = input.origin
-                    && let NodeKind::Simple(SimpleNode::ConstU32(n)) = self[producer].kind()
-                {
-                    let index = n.value as usize;
-
-                    s.fields[index].ty
-                } else {
-                    panic!(
-                        "index `{}` tried to project into a struct field with a non-constant index",
-                        i
-                    );
-                }
-            }
-            TypeKind::Vector(v) => v.scalar.ty(),
-            TypeKind::Matrix(m) => m.column_ty(),
-            TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => *element_ty,
-            _ => {
-                panic!("index `{}` tried to index into a non-aggregate type", i);
-            }
-        }
-    }
 }
 
 impl Index<Region> for Rvsdg {
@@ -3619,7 +3591,7 @@ mod tests {
     use std::iter;
 
     use super::*;
-    use crate::ty::TY_DUMMY;
+    use crate::ty::{TY_DUMMY, TY_PTR_U32};
     use crate::{FnArg, FnSig, Symbol, thin_set};
 
     #[test]

@@ -168,6 +168,7 @@ pub struct SccStructure {
     pub exit_edges: Vec<Edge>,
     /// Nodes outside the strongly connected component that are the destination for one or more
     /// [exit_edges].
+    #[allow(unused)]
     pub exit_nodes: IndexSet<BasicBlock>,
     /// Edges from source nodes inside the strongly connected component, for which the destination
     /// is one of the [entry_nodes].

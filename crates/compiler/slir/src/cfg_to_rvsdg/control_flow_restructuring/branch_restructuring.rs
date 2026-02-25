@@ -1,7 +1,7 @@
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::cfg::{Assign, BasicBlock, BlockPosition};
+use crate::cfg::{BasicBlock, BlockPosition};
 use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
 use crate::ty::TY_PREDICATE;
 

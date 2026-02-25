@@ -2,7 +2,7 @@ mod strongly_connected_components;
 
 mod branch_restructuring;
 mod exit_restructuring;
-mod graph;
+pub mod graph;
 mod loop_restructuring;
 
 pub use self::branch_restructuring::restructure_branches;

@@ -1,4 +1,4 @@
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash};
 use std::ops::Index;
 
 use delegate::delegate;
@@ -6,9 +6,8 @@ use indexmap::{IndexMap, IndexSet};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use slotmap::{Key, SlotMap};
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 
-use crate::builtin_function::BuiltinFunction;
 use crate::intrinsic::Intrinsic;
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{
@@ -1636,7 +1635,7 @@ impl Scf {
                 .kind
                 .expect_switch()
                 .out_vars[i];
-            let ty = self.local_bindings[binding].ty();
+            let _ty = self.local_bindings[binding].ty();
 
             self.blocks[case_block].add_control_flow_var(binding, LocalBinding::null());
         }

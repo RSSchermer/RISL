@@ -6,7 +6,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::SecondaryMap;
 
 use crate::scf::analyze::global_use::collect_used_global_bindings;
-use crate::scf::analyze::local_binding_use;
 use crate::scf::analyze::local_binding_use::count_local_binding_use;
 use crate::scf::analyze::struct_use::collect_used_structs;
 use crate::scf::{
@@ -48,8 +47,8 @@ where
 
     fn write<W: Write>(&mut self, w: &mut W, key: K) {
         if let Some(id) = self.mapping.get(&key) {
-            w.write_str(self.prefix);
-            write!(w, "{}", id);
+            w.write_str(self.prefix).unwrap();
+            write!(w, "{}", id).unwrap();
         } else {
             self.update_buffer();
 
@@ -89,7 +88,7 @@ enum InlineContext {
     None,
 
     /// We're inlining an expression as the operand of an [OpUnary] expression.
-    UnOp(UnaryOperator),
+    UnOp,
 
     /// We're inlining an expression as either the left-hand-side or the right-hand-side of an
     /// [OpBinary] expression.
@@ -332,7 +331,7 @@ impl WgslModuleWriter {
                 blend_src,
                 interpolation,
             } => {
-                write!(&mut self.w, "@location{location}");
+                write!(&mut self.w, "@location{location}").unwrap();
 
                 if let Some(blend_src) = blend_src {
                     self.write_optional_space();
@@ -960,7 +959,7 @@ impl WgslModuleWriter {
         match inline_cx {
             InlineContext::None => self.w.push_str("&"),
             InlineContext::Deref { .. } | InlineContext::Reref => (),
-            InlineContext::UnOp(_) | InlineContext::BinOp(_, _) | InlineContext::Extract => {
+            InlineContext::UnOp | InlineContext::BinOp(_, _) | InlineContext::Extract => {
                 panic!("cannot not be used without dereferencing")
             }
         }
@@ -982,7 +981,7 @@ impl WgslModuleWriter {
             UnaryOperator::Neg => self.w.push_str("-"),
         };
 
-        self.write_local_value(cx, op.operand(), InlineContext::None);
+        self.write_local_value(cx, op.operand(), InlineContext::UnOp);
     }
 
     fn write_expr_op_binary(&mut self, cx: Context, op: &OpBinary, inline_cx: InlineContext) {
@@ -1118,7 +1117,7 @@ impl WgslModuleWriter {
         match inline_cx {
             InlineContext::None => self.w.push_str("&"),
             InlineContext::Deref { .. } | InlineContext::Reref => (),
-            InlineContext::UnOp(_) | InlineContext::BinOp(_, _) | InlineContext::Extract => {
+            InlineContext::UnOp | InlineContext::BinOp(_, _) | InlineContext::Extract => {
                 panic!("cannot not be used without dereferencing")
             }
         }
@@ -1453,6 +1452,14 @@ fn op_binary_needs_parens(operator: BinaryOperator, inline_cx: InlineContext) ->
         // need parentheses.
         (BinOp(_, Or | And), Eq | NotEq | Lt | LtEq | Gt | GtEq) => false,
 
+        // In all other cases we conservatively add parentheses. Adding parentheses never results in
+        // incorrect output, it can only every produce output that is needlessly verbose. If we
+        // identify cases where parentheses are needlessly added, then we can add more exceptions
+        // above.
+        //
+        // Note that this case also covers the InlineContext::UnOp case. All unary operators take
+        // precedence over all binary operators, so if we're inlining a binary expression as the
+        // operand of a unary expression, then we always need parentheses.
         _ => true,
     }
 }
@@ -1462,10 +1469,7 @@ pub fn write_wgsl(module: &Module, scf: &Scf) -> String {
     let used_structs = collect_used_structs(module, scf, &used_globals);
 
     let local_binding_use_counts = count_local_binding_use(
-        scf,
-        local_binding_use::Config {
-            count_const_index_use: false,
-        },
+        scf
     );
 
     let cx = Context {

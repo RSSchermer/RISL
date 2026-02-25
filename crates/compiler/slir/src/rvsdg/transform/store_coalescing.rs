@@ -65,18 +65,17 @@
 //! pass can also be thought of as a "scalarization" pass for vector and matrix values.
 
 use arrayvec::ArrayVec;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::rvsdg::NodeKind::Simple;
 use crate::rvsdg::SimpleNode::OpElementPtr;
-use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::visit::reverse_value_flow::ReverseValueFlowVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateUser, ValueInput, ValueOrigin,
     visit,
 };
 use crate::ty::TypeKind;
-use crate::{Function, Module, StorageBinding, WorkgroupBinding, ty};
+use crate::{StorageBinding, WorkgroupBinding, ty};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -193,7 +192,7 @@ impl ReverseValueFlowVisitor for PointerAnalyzer {
         }
     }
 
-    fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, output: u32) {
+    fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, _output: u32) {
         use NodeKind::*;
         use SimpleNode::*;
 
@@ -578,7 +577,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::StateOrigin;
     use crate::ty::{TY_BOOL, TY_DUMMY, TY_F32, TY_PREDICATE, TY_U32, TY_VEC2_F32, TY_VEC3_F32};
-    use crate::{FnArg, FnSig, Symbol};
+    use crate::{FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
     fn test_valid_sequence() {

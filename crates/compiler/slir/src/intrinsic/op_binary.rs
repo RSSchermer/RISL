@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::BinaryOperator;
-use crate::BinaryOperator::{
-    Add, And, BitAnd, BitOr, BitXor, Div, Eq, Gt, GtEq, Lt, LtEq, Mod, Mul, NotEq, Or, Shl, Shr,
-    Sub,
-};
 use crate::intrinsic::Intrinsic;
 use crate::ty::{Matrix, ScalarKind, TY_BOOL, TY_U32, Type, TypeKind, TypeRegistry, Vector};
 
