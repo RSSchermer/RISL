@@ -4,27 +4,27 @@ use std::sync::RwLock;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 use rustc_hir as hir;
-use rustc_hir::attrs::InlineAttr;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{LocalDefId, LocalModDefId};
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::limit::Limit;
 use rustc_middle::mir::ConstValue;
-use rustc_middle::mir::interpret::Scalar;
-use rustc_middle::mir::mono::{CollectionMode, MonoItem as InternalMonoItem};
+use rustc_middle::mir::interpret::{ErrorHandled, Scalar};
+use rustc_middle::mir::mono::MonoItem as InternalMonoItem;
 use rustc_middle::ty::{
     self, GenericArgs, GenericParamDefKind, Instance as InternalInstance, TyCtxt,
 };
-use rustc_middle::util::Providers;
 use rustc_middle::{bug, span_bug};
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::{Instance, InstanceKind, MonoItem};
+use rustc_public::mir::visit::Location;
+use rustc_public::mir::{MirVisitor, PointerCoercion};
 use rustc_public::rustc_internal::{internal, stable};
-use rustc_public::ty::Ty;
-use rustc_public::{CrateDef, DefId};
+use rustc_public::ty::{ClosureKind, RigidTy, Ty, TyKind};
+use rustc_public::{CrateDef, DefId, mir};
 use rustc_span::source_map::{Spanned, dummy_spanned, respan};
 use rustc_span::{DUMMY_SP, Span};
-use tracing::{debug, instrument, trace};
+use tracing::{debug, trace};
 
 use crate::context::RislContext as Cx;
 use crate::monomorphize::errors::{
@@ -41,9 +41,6 @@ pub(crate) enum MonoItemCollectionStrategy {
 struct SharedState {
     /// Items that have been or are currently being recursively collected.
     visited: RwLock<FxHashSet<MonoItem>>,
-    /// Items that have been or are currently being recursively treated as "mentioned", i.e., their
-    /// consts are evaluated but nothing is added to the collection.
-    mentioned: RwLock<FxHashSet<MonoItem>>,
     /// Which items are being used where, for better errors.
     usage_map: RwLock<UsageMap>,
 }
@@ -154,19 +151,7 @@ fn collect_items_root(
         state,
         &mut recursion_depths,
         recursion_limit,
-        CollectionMode::UsedItems,
     );
-}
-
-fn maybe_shimmed(cx: &Cx, item: MonoItem) -> MonoItem {
-    if let MonoItem::Fn(instance) = item {
-        MonoItem::Fn(cx.shim_def_lookup().maybe_shimmed(cx.tcx(), instance))
-    } else {
-        // We only do shims for functions, so for other mono-item kinds we always return the
-        // original item.
-
-        item
-    }
 }
 
 /// Collect all monomorphized items reachable from `starting_point`, and emit a note diagnostic if a
@@ -180,10 +165,8 @@ fn collect_items_rec(
     state: &SharedState,
     recursion_depths: &mut FxHashMap<DefId, usize>,
     recursion_limit: Limit,
-    mode: CollectionMode,
 ) {
     let mut used_items = MonoItems::new();
-    let mut mentioned_items = MonoItems::new();
     let recursion_depth_reset;
 
     // Post-monomorphization errors MVP
@@ -237,33 +220,7 @@ fn collect_items_rec(
             ));
 
             rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                let instance = internal(cx.tcx(), instance);
-
-                let Ok((used, mentioned)) = cx.tcx().items_of_instance((instance, mode)) else {
-                    // Normalization errors here are usually due to trait solving overflow.
-                    // FIXME: I assume that there are few type errors at post-analysis stage, but not
-                    // entirely sure.
-                    // We have to emit the error outside of `items_of_instance` to access the
-                    // span of the `starting_item`.
-                    let def_id = instance.def_id();
-                    let def_span = cx.tcx().def_span(def_id);
-                    let def_path_str = cx.tcx().def_path_str(def_id);
-                    cx.tcx().dcx().emit_fatal(RecursionLimit {
-                        span: starting_item.span,
-                        instance: instance.to_string(),
-                        def_span,
-                        def_path_str,
-                    });
-                };
-
-                used_items.extend(used.iter().map(|spanned| Spanned {
-                    span: spanned.span,
-                    node: maybe_shimmed(cx, stable(&spanned.node)),
-                }));
-                mentioned_items.extend(mentioned.iter().map(|spanned| Spanned {
-                    span: spanned.span,
-                    node: stable(&spanned.node),
-                }));
+                used_items.extend(collect_items_of_instance(cx, instance));
             });
         }
         MonoItem::GlobalAsm(_) => {
@@ -306,68 +263,26 @@ fn collect_items_rec(
             }
         }
     }
-    // Only updating `usage_map` for used items as otherwise we may be inserting the same item
-    // multiple times (if it is first 'mentioned' and then later actually used), and the usage map
-    // logic does not like that.
-    // This is part of the output of collection and hence only relevant for "used" items.
-    // ("Mentioned" items are only considered internally during collection.)
-    if mode == CollectionMode::UsedItems {
-        state
-            .usage_map
-            .write()
-            .unwrap()
-            .record_used(starting_item.node, &used_items);
-    }
+
+    state
+        .usage_map
+        .write()
+        .unwrap()
+        .record_used(starting_item.node, &used_items);
 
     {
+        // This setup avoids taking a write lock if the used_items set is empty.
         let mut visited = OnceCell::default();
-        if mode == CollectionMode::UsedItems {
-            used_items.items.retain(|k, _| {
-                visited
-                    .get_mut_or_init(|| state.visited.write().unwrap())
-                    .insert(k.clone())
-            });
-        }
 
-        let mut mentioned = OnceCell::default();
-        mentioned_items.items.retain(|k, _| {
-            !visited
-                .get_or_init(|| state.visited.write().unwrap())
-                .contains(k)
-                && mentioned
-                    .get_mut_or_init(|| state.mentioned.write().unwrap())
-                    .insert(k.clone())
+        used_items.items.retain(|k, _| {
+            visited
+                .get_mut_or_init(|| state.visited.write().unwrap())
+                .insert(k.clone())
         });
     }
-    if mode == CollectionMode::MentionedItems {
-        assert!(
-            used_items.is_empty(),
-            "'mentioned' collection should never encounter used items"
-        );
-    } else {
-        for used_item in used_items {
-            collect_items_rec(
-                cx,
-                used_item,
-                state,
-                recursion_depths,
-                recursion_limit,
-                CollectionMode::UsedItems,
-            );
-        }
-    }
 
-    // Walk over mentioned items *after* used items, so that if an item is both mentioned and used then
-    // the loop above has fully collected it, so this loop will skip it.
-    for mentioned_item in mentioned_items {
-        collect_items_rec(
-            cx,
-            mentioned_item,
-            state,
-            recursion_depths,
-            recursion_limit,
-            CollectionMode::MentionedItems,
-        );
+    for used_item in used_items {
+        collect_items_rec(cx, used_item, state, recursion_depths, recursion_limit);
     }
 
     if let Some((def_id, depth)) = recursion_depth_reset {
@@ -416,14 +331,182 @@ fn check_recursion_limit(
     (def_id, recursion_depth)
 }
 
-fn visit_drop_use(tcx: TyCtxt, ty: Ty, is_direct_call: bool, source: Span, output: &mut MonoItems) {
+struct MirUsedCollector<'a, 'tcx> {
+    cx: &'a Cx<'tcx>,
+    body: &'a mir::Body,
+    used_items: &'a mut MonoItems,
+}
+
+impl<'a, 'tcx> MirUsedCollector<'a, 'tcx> {
+    fn eval_constant(&mut self, constant: &mir::ConstOperand) -> Option<ConstValue> {
+        let span = internal(self.cx.tcx(), constant.span);
+        let constant = internal(self.cx.tcx(), &constant.const_);
+
+        // Evaluate the constant. This makes const eval failure a collection-time error (rather than
+        // a codegen-time error). rustc stops after collection if there was an error, so this
+        // ensures codegen never has to worry about failing consts.
+        // (codegen relies on this and ICEs will happen if this is violated.)
+        match constant.eval(self.cx.tcx(), ty::TypingEnv::fully_monomorphized(), span) {
+            Ok(v) => Some(v),
+            Err(ErrorHandled::TooGeneric(..)) => span_bug!(
+                span,
+                "collection encountered polymorphic constant: {:?}",
+                constant
+            ),
+            Err(err @ ErrorHandled::Reported(..)) => {
+                err.emit_note(self.cx.tcx());
+
+                None
+            }
+        }
+    }
+}
+
+impl<'a, 'tcx> MirVisitor for MirUsedCollector<'a, 'tcx> {
+    fn visit_rvalue(&mut self, rvalue: &mir::Rvalue, location: Location) {
+        debug!("visiting rvalue {:?}", *rvalue);
+
+        let span = internal(self.cx.tcx(), self.body.span);
+
+        match *rvalue {
+            // // When doing an cast from a regular pointer to a wide pointer, we
+            // // have to instantiate all methods of the trait being cast to, so we
+            // // can build the appropriate vtable.
+            // mir::Rvalue::Cast(
+            //     mir::CastKind::PointerCoercion(PointerCoercion::Unsize),
+            //     ref operand,
+            //     target_ty,
+            // ) => {
+            //     let source_ty = operand.ty(self.body.locals()).unwrap();
+            //
+            //     // *Before* monomorphizing, record that we already handled this mention.
+            //     self.used_mentioned_items
+            //         .insert(MentionedItem::UnsizeCast { source_ty, target_ty });
+            //
+            //     let (source_ty, target_ty) =
+            //         find_tails_for_unsizing(self.tcx.at(span), source_ty, target_ty);
+            //                     // This could also be a different Unsize instruction, like
+            //     // from a fixed sized array to a slice. But we are only
+            //     // interested in things that produce a vtable.
+            //     if target_ty.is_trait() && !source_ty.is_trait() {
+            //         create_mono_items_for_vtable_methods(
+            //             self.tcx,
+            //             target_ty,
+            //             source_ty,
+            //             span,
+            //             self.used_items,
+            //         );
+            //     }
+            // }
+            mir::Rvalue::Cast(
+                mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_)),
+                ref operand,
+                _,
+            ) => {
+                let fn_ty = operand.ty(self.body.locals()).unwrap();
+
+                visit_fn_use(self.cx, fn_ty, false, span, self.used_items);
+            }
+            mir::Rvalue::Cast(
+                mir::CastKind::PointerCoercion(PointerCoercion::ClosureFnPointer(_)),
+                ref operand,
+                _,
+            ) => {
+                let source_ty = operand.ty(self.body.locals()).unwrap();
+
+                if let TyKind::RigidTy(RigidTy::Closure(def_id, args)) = source_ty.kind() {
+                    let instance =
+                        Instance::resolve_closure(def_id, &args, ClosureKind::FnOnce).unwrap();
+
+                    if should_codegen_locally(self.cx.tcx(), instance) {
+                        self.used_items.push(create_fn_mono_item(instance, span));
+                    }
+                } else {
+                    bug!()
+                }
+            }
+            mir::Rvalue::ThreadLocalRef(def_id) => {
+                bug!("not supported by RISL")
+            }
+            _ => { /* not interesting */ }
+        }
+
+        self.super_rvalue(rvalue, location);
+    }
+
+    /// This does not walk the MIR of the constant as that is not needed for codegen, all we need is
+    /// to ensure that the constant evaluates successfully and walk the result.
+    fn visit_const_operand(&mut self, constant: &mir::ConstOperand, _location: Location) {
+        // No `super_constant` as we don't care about `visit_ty`/`visit_ty_const`.
+        let Some(val) = self.eval_constant(constant) else {
+            return;
+        };
+
+        collect_const_value(self.cx.tcx(), val, self.used_items);
+    }
+
+    fn visit_terminator(&mut self, terminator: &mir::Terminator, location: Location) {
+        debug!("visiting terminator {:?} @ {:?}", terminator, location);
+
+        let source = internal(self.cx.tcx(), self.body.span);
+
+        match &terminator.kind {
+            mir::TerminatorKind::Call { func, .. } => {
+                let callee_ty = func.ty(self.body.locals()).unwrap();
+
+                visit_fn_use(
+                    self.cx,
+                    callee_ty,
+                    /* is_direct_call */ true,
+                    source,
+                    &mut self.used_items,
+                )
+            }
+            mir::TerminatorKind::Drop { place, .. } => {
+                let ty = place.ty(self.body.locals()).unwrap();
+
+                visit_drop_use(self.cx, ty, true, source, self.used_items);
+            }
+
+            mir::TerminatorKind::InlineAsm { .. }
+            | mir::TerminatorKind::Abort
+            | mir::TerminatorKind::Assert { .. } => {
+                bug!("terminator not supported by RISL: {:?}", &terminator.kind);
+            }
+
+            mir::TerminatorKind::Goto { .. }
+            | mir::TerminatorKind::SwitchInt { .. }
+            | mir::TerminatorKind::Resume
+            | mir::TerminatorKind::Unreachable
+            | mir::TerminatorKind::Return => {}
+        }
+
+        self.super_terminator(terminator, location);
+    }
+}
+
+fn visit_fn_use(cx: &Cx, ty: Ty, is_direct_call: bool, source: Span, output: &mut MonoItems) {
+    if let TyKind::RigidTy(RigidTy::FnDef(def, args)) = ty.kind() {
+        let instance = if is_direct_call {
+            Instance::resolve(def, &args).unwrap()
+        } else if let Ok(instance) = Instance::resolve_for_fn_ptr(def, &args) {
+            instance
+        } else {
+            bug!("failed to resolve instance for {ty}")
+        };
+
+        visit_instance_use(cx, instance, is_direct_call, source, output);
+    }
+}
+
+fn visit_drop_use(cx: &Cx, ty: Ty, is_direct_call: bool, source: Span, output: &mut MonoItems) {
     let instance = Instance::resolve_drop_in_place(ty);
 
-    visit_instance_use(tcx, instance, is_direct_call, source, output);
+    visit_instance_use(cx, instance, is_direct_call, source, output);
 }
 
 fn visit_instance_use(
-    tcx: TyCtxt,
+    cx: &Cx,
     instance: Instance,
     is_direct_call: bool,
     source: Span,
@@ -434,7 +517,17 @@ fn visit_instance_use(
         instance, is_direct_call
     );
 
-    if !tcx.should_codegen_locally(internal(tcx, instance)) {
+    // RISL supports a sub-set of the `core` library, but the implementations provided in `core` may
+    // not be compatible with RISL's code generation. For example, RISL does not support raw
+    // pointers, but various operations associated with slices use raw pointer and raw pointer
+    // operations. We provide alternative "shim" implementations for such methods that do not use
+    // types and instructions that our codegen can't support.
+    //
+    // This attempts to look up such a shim. If a shim is found, then the instance is replaced with
+    // the shim instance, otherwise the instance is returned unmodified.
+    let instance = cx.shim_def_lookup().maybe_shimmed(cx.tcx(), instance);
+
+    if !should_codegen_locally(cx.tcx(), instance) {
         return;
     }
 
@@ -450,17 +543,17 @@ fn visit_instance_use(
         // distinction. Is this a problem, or does this only add some noise? Do we need to drop
         // to the `internal` representation here?
         | InstanceKind::Shim => {
-            output.push(create_fn_mono_item(tcx, instance, source));
+            output.push(create_fn_mono_item(instance, source));
         }
     }
 }
 
-fn create_fn_mono_item(tcx: TyCtxt, instance: Instance, source: Span) -> Spanned<MonoItem> {
+fn create_fn_mono_item(instance: Instance, source: Span) -> Spanned<MonoItem> {
     respan(source, MonoItem::Fn(instance))
 }
 
 /// Scans the CTFE alloc in order to find function pointers and statics that must be monomorphized.
-fn collect_alloc<'tcx>(tcx: TyCtxt<'tcx>, alloc_id: AllocId, output: &mut MonoItems) {
+fn collect_alloc(tcx: TyCtxt, alloc_id: AllocId, output: &mut MonoItems) {
     match GlobalAlloc::from(alloc_id) {
         GlobalAlloc::Static(def) => {
             output.push(dummy_spanned(MonoItem::Static(def)));
@@ -479,9 +572,9 @@ fn collect_alloc<'tcx>(tcx: TyCtxt<'tcx>, alloc_id: AllocId, output: &mut MonoIt
             }
         }
         GlobalAlloc::Function(instance) => {
-            if tcx.should_codegen_locally(internal(tcx, instance)) {
+            if should_codegen_locally(tcx, instance) {
                 trace!("collecting {:?} with {:#?}", alloc_id, instance);
-                output.push(create_fn_mono_item(tcx, instance, DUMMY_SP));
+                output.push(create_fn_mono_item(instance, DUMMY_SP));
             }
         }
         GlobalAlloc::VTable(ty, dyn_ty) => {
@@ -491,7 +584,40 @@ fn collect_alloc<'tcx>(tcx: TyCtxt<'tcx>, alloc_id: AllocId, output: &mut MonoIt
     }
 }
 
-#[instrument(skip(tcx, output), level = "debug")]
+/// Scans the MIR in order to find function calls, closures, and drop-glue.
+fn collect_items_of_instance(cx: &Cx, instance: Instance) -> MonoItems {
+    let mut used_items = MonoItems::new();
+
+    // TODO: this is probably not very performant. Maybe use the HirExt, or cache
+    let is_risl_intrinsic = !instance
+        .def
+        .tool_attrs(&["rislc".into(), "intrinsic".into()])
+        .is_empty();
+
+    if is_risl_intrinsic {
+        // If the instance is an RISL intrinsic, then in the phase one of rislc (the "RISL phase")
+        // we don't have to collect any used items from the body; though items marked as RISL
+        // intrinsics may have function bodies that are used in phase two (the "regular Rust
+        // phase"), in phase one the function body is wholly replaced with an intrinsic
+        // implementation during codegen.
+        return used_items;
+    }
+
+    let body = instance.body().unwrap();
+
+    let mut collector = MirUsedCollector {
+        cx,
+        body: &body,
+        used_items: &mut used_items,
+    };
+
+    for bb in &body.blocks {
+        collector.visit_basic_block(bb);
+    }
+
+    used_items
+}
+
 fn collect_const_value(tcx: TyCtxt, value: ConstValue, output: &mut MonoItems) {
     match value {
         ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => {
@@ -637,7 +763,7 @@ impl<'v> RootCollector<'_, 'v> {
                         .type_of(id.owner_id.to_def_id())
                         .no_bound_vars()
                         .unwrap();
-                    visit_drop_use(self.cx.tcx(), stable(ty), true, DUMMY_SP, self.output);
+                    visit_drop_use(self.cx, stable(ty), true, DUMMY_SP, self.output);
                 }
             }
             DefKind::Static { .. } => {
@@ -710,11 +836,9 @@ impl<'v> RootCollector<'_, 'v> {
 
             let instance = InternalInstance::mono(self.cx.tcx(), def_id.to_def_id());
 
-            let mono = self.output.push(create_fn_mono_item(
-                self.cx.tcx(),
-                stable(instance),
-                DUMMY_SP,
-            ));
+            let mono = self
+                .output
+                .push(create_fn_mono_item(stable(instance), DUMMY_SP));
         }
     }
 }
@@ -787,7 +911,7 @@ fn create_mono_items_for_default_impls(tcx: TyCtxt, item: hir::ItemId, output: &
         let instance = ty::Instance::expect_resolve(tcx, typing_env, method.def_id, args, DUMMY_SP);
         let mono_item = InternalMonoItem::Fn(instance);
 
-        if mono_item.is_instantiable(tcx) && tcx.should_codegen_locally(instance) {
+        if mono_item.is_instantiable(tcx) && should_codegen_locally(tcx, stable(instance)) {
             output.push(dummy_spanned(stable(mono_item)));
         }
     }
@@ -846,7 +970,6 @@ fn collect_mono_items(
 
     let state = SharedState {
         visited: RwLock::new(FxHashSet::default()),
-        mentioned: RwLock::new(FxHashSet::default()),
         usage_map: RwLock::new(UsageMap::new()),
     };
     let recursion_limit = tcx.recursion_limit();
@@ -918,7 +1041,7 @@ pub fn collect_shader_module_codegen_units(
     (free_items, modules)
 }
 
-/// A replacement query provider for [TyCtxt::should_codegen_locally].
+/// Whether or not the given `instance` should be codegenned locally.
 ///
 /// Modified version of `rustc_monomorphize::collector::should_codegen_locally`. Specifically, the
 /// default rustc query provider will return `false` if the mono-item has already been codegenned in
@@ -935,10 +1058,9 @@ pub fn collect_shader_module_codegen_units(
 /// We may in the future want to implement our own version of upstream mono-item resolution to
 /// prevent duplications in the IR. However, since we currently exhaustively inline the SLIR, these
 /// duplicates do not affect the final output, and thus deduplication is not a high priority.
-fn should_codegen_locally<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    instance: rustc_middle::ty::Instance<'tcx>,
-) -> bool {
+fn should_codegen_locally(tcx: TyCtxt, instance: Instance) -> bool {
+    let instance = internal(tcx, instance);
+
     let Some(def_id) = instance.def.def_id_if_not_guaranteed_local_codegen() else {
         return true;
     };
@@ -946,18 +1068,6 @@ fn should_codegen_locally<'tcx>(
     if tcx.is_foreign_item(def_id) {
         // Foreign items are always linked against, there's no way of instantiating them.
         return false;
-    }
-
-    if tcx.def_kind(def_id).has_codegen_attrs()
-        && matches!(
-            tcx.codegen_fn_attrs(def_id).inline,
-            InlineAttr::Force { .. }
-        )
-    {
-        // `#[rustc_force_inline]` items should never be codegened. This should be caught by
-        // the MIR validator.
-        tcx.dcx()
-            .delayed_bug("attempt to codegen `#[rustc_force_inline]` item");
     }
 
     if def_id.is_local() {
@@ -986,8 +1096,4 @@ fn should_codegen_locally<'tcx>(
     }
 
     true
-}
-
-pub fn provide(providers: &mut Providers) {
-    providers.hooks.should_codegen_locally = should_codegen_locally;
 }

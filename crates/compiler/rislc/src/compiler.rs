@@ -331,6 +331,7 @@ impl Callbacks for RislPassCallbacks {
         // We never want to generate overflow panics code for the GPU, not even in debug mode, so
         // when compiling RISL we always disable these checks.
         config.opts.cg.overflow_checks = Some(false);
+        config.opts.cg.debug_assertions = Some(false);
 
         // Disable certain MIR transformations
         config.opts.unstable_opts.inline_mir = Some(false);
@@ -346,7 +347,6 @@ impl Callbacks for RislPassCallbacks {
 
         config.override_queries = Some(|_, providers| {
             abi::provide(providers);
-            monomorphize::provide(providers);
         });
     }
 

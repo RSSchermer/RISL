@@ -1,5 +1,4 @@
-use rustc_macros::{Diagnostic, LintDiagnostic};
-use rustc_public::mir::mono::Instance;
+use rustc_macros::Diagnostic;
 use rustc_span::{Span, Symbol};
 
 #[derive(Diagnostic)]
