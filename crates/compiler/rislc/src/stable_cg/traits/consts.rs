@@ -1,5 +1,3 @@
-use rustc_public::abi;
-use rustc_public::target::MachineSize;
 use rustc_public::ty::Allocation;
 
 use super::BackendTypes;

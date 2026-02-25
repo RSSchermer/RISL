@@ -63,6 +63,7 @@ pub enum SynchronizationScope {
     CrossThread,
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum TypeKind {
     Void,

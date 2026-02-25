@@ -1,11 +1,11 @@
-use rustc_middle::{bug, span_bug};
+use rustc_middle::bug;
 use rustc_public::mir;
 use rustc_public::mir::NonDivergingIntrinsic;
 use tracing::instrument;
 
 use super::{FunctionCx, LocalRef};
+use crate::stable_cg::OperandValue;
 use crate::stable_cg::traits::*;
-use crate::stable_cg::{OperandValue, PlaceRef};
 
 impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
     #[instrument(level = "debug", skip(self, bx))]

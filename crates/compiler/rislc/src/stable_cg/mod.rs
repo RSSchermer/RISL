@@ -13,4 +13,4 @@ pub use self::layout::{ScalarExt, TyAndLayout};
 pub use self::mir::operand::{OperandRef, OperandValue};
 pub use self::mir::place::{PlaceRef, PlaceValue};
 pub use self::mono_item::MonoItemExt;
-pub use self::scalar::{Pointer, Scalar};
+pub use self::scalar::Scalar;

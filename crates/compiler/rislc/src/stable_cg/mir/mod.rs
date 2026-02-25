@@ -1,19 +1,15 @@
 use core::fmt;
-use std::fmt::Formatter;
-use std::io::Stdout;
 use std::{io, iter};
 
 use bit_set::BitSet;
 use bit_vec::BitVec;
-use index_vec::{IndexVec, index_vec};
-use rustc_middle::{bug, span_bug};
+use rustc_middle::bug;
 use rustc_public::abi::{FnAbi, PassMode};
-use rustc_public::mir;
 use rustc_public::mir::mono::Instance;
 use rustc_public::mir::{BasicBlockIdx, Body, Local, LocalDecl};
 use rustc_public::ty::{RigidTy, TyKind};
 use smallvec::SmallVec;
-use tracing::{debug, instrument};
+use tracing::debug;
 
 use crate::stable_cg::layout::TyAndLayout;
 use crate::stable_cg::mir::traversal::reachable_reverse_postorder;

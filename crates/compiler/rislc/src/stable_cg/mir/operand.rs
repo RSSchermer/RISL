@@ -5,9 +5,9 @@ use arrayvec::ArrayVec;
 use either::Either;
 use rustc_middle::bug;
 use rustc_public::abi::ValueAbi;
+use rustc_public::mir;
 use rustc_public::target::MachineInfo;
-use rustc_public::ty::{Align, Allocation, ConstantKind, MirConst, Size, Ty};
-use rustc_public::{abi, mir};
+use rustc_public::ty::{Align, ConstantKind, MirConst};
 use tracing::debug;
 
 use super::place::{PlaceRef, PlaceValue};
@@ -280,7 +280,7 @@ impl<'a, V: CodegenObject> OperandRef<V> {
             let b_llty = bx.immediate_backend_type(&b_layout);
 
             // Reconstruct the immediate aggregate.
-            let mut alloca = bx.alloca(&self.layout);
+            let alloca = bx.alloca(&self.layout);
 
             let a_ptr = bx.element_ptr(a_llty, alloca, &[bx.const_usize(0)]);
 

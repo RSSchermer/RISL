@@ -1,11 +1,9 @@
-use std::num::NonZero;
-
 use rustc_middle::bug;
-use rustc_public::abi::{FloatLength, IntegerLength, Primitive, ValueAbi, WrappingRange};
+use rustc_public::abi;
+use rustc_public::abi::{FloatLength, IntegerLength, Primitive, WrappingRange};
 use rustc_public::mir::alloc::AllocId;
-use rustc_public::target::{MachineInfo, MachineSize};
-use rustc_public::ty::{Allocation, Prov, RigidTy, Size, TyKind};
-use rustc_public::{Error, abi};
+use rustc_public::target::MachineInfo;
+use rustc_public::ty::{Allocation, Prov, RigidTy, TyKind};
 
 use crate::stable_cg::TyAndLayout;
 use crate::stable_cg::layout::ScalarExt;

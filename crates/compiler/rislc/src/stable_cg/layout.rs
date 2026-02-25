@@ -51,7 +51,7 @@ impl TyAndLayout {
                 }
 
                 // Types that are not supported by RISL.
-                RigidTy::Dynamic(..) | RigidTy::Coroutine(..) | RigidTy::CoroutineClosure(..) => {
+                RigidTy::Coroutine(..) | RigidTy::CoroutineClosure(..) => {
                     bug!("Type field projection not supported by RISL for {:?}", ty)
                 }
 

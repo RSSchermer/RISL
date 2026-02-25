@@ -1,4 +1,3 @@
-use rustc_public::DefId;
 use rustc_public::mir::mono::StaticDef;
 use rustc_public::ty::Align;
 

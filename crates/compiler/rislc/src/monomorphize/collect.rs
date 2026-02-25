@@ -31,6 +31,16 @@ use crate::monomorphize::errors::{
     EncounteredErrorWhileInstantiating, NoOptimizedMir, RecursionLimit,
 };
 
+// Note: the implementation here is based on rustc's regular mono-item collection implemention
+// in the `rustc_monomorphize` compiler crate. The implementation here uses `rustc_public` wherever
+// possible to reduce coupling to rustc's internal APIs.
+//
+// Another notable point of difference is the removal of the "mentioned-items" machinery. This makes
+// everything quite a bit simpler. rustc uses the concept of mentioned-items to provide consistent
+// errors, regardless of optimization level; building in release-mode should not result in a
+// different set of compilation errors than building in debug-mode. However, in our case, Phase Two
+// (the "regular Rust" phase) will report such errors.
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MonoItemCollectionStrategy {
     Eager,

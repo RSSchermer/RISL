@@ -3,7 +3,6 @@ use std::io::Read;
 
 use ar::Archive;
 use rustc_public::rustc_internal::run;
-use rustc_span::Symbol;
 use rustc_span::def_id::LOCAL_CRATE;
 use slir::{rvsdg, scf};
 

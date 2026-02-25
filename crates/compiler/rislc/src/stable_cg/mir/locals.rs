@@ -2,15 +2,14 @@
 //! be careful wrt to subtyping. To deal with this we only allow updates by using
 //! `FunctionCx::overwrite_local` which handles it automatically.
 
-use std::ops::{Index, IndexMut};
+use std::ops::Index;
 
 use bit_set::BitSet;
 use bit_vec::BitVec;
-use index_vec::IndexVec;
 use rustc_public::mir;
 use rustc_public::mir::visit::Location;
 use rustc_public::mir::{BasicBlockIdx, MirVisitor, Rvalue, Statement, StatementKind};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::stable_cg::mir::{FunctionCx, LocalRef};
 use crate::stable_cg::traits::BuilderMethods;

@@ -1,5 +1,3 @@
-use std::hash::Hash;
-
 use rustc_middle::bug;
 use rustc_public::abi::{FieldsShape, VariantsShape};
 use rustc_public::mir;

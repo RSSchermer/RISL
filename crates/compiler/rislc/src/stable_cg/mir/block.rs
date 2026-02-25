@@ -1,21 +1,16 @@
-use std::cmp;
-
-use index_vec::{IndexVec, index_vec};
 use rustc_middle::bug;
 use rustc_public::abi::{ArgAbi, FnAbi, PassMode, ValueAbi};
 use rustc_public::mir;
 use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{BasicBlockIdx, SwitchTargets, TerminatorKind};
 use rustc_public::ty::{Abi, IntrinsicDef, RigidTy, Ty, TyKind};
-use rustc_public_bridge::IndexedVal;
 use smallvec::SmallVec;
-use tracing::{debug, info};
+use tracing::debug;
 
 use super::operand::OperandRef;
 use super::operand::OperandValue::{Immediate, Pair, Ref, ZeroSized};
 use super::place::{PlaceRef, PlaceValue};
 use super::{CachedLlbb, FunctionCx, LocalRef};
-use crate::slir_build::value::Value;
 use crate::stable_cg::common::IntPredicate;
 use crate::stable_cg::layout::TyAndLayout;
 use crate::stable_cg::traits::*;
@@ -417,7 +412,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         let mut mergeable_succ = || {
             // Note: any call to `switch_to_block` will invalidate a `true` value
             // of `mergeable_succ`.
-            let mut successors = terminator.successors();
+            let successors = terminator.successors();
 
             if let Some(succ) = successors.first()
                 && successors.len() == 1

@@ -1,6 +1,5 @@
 use rustc_abi::{Float, Integer};
 use rustc_public::abi::{ArgAbi, FnAbi};
-use rustc_public::ty::VariantIdx;
 
 use super::{BackendTypes, MiscCodegenMethods};
 use crate::stable_cg::TyAndLayout;

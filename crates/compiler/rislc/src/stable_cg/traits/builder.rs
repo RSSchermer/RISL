@@ -4,12 +4,10 @@ use std::ops::Deref;
 use rustc_public::abi::{FnAbi, Scalar, ValueAbi};
 use rustc_public::mir::mono::Instance;
 use rustc_public::target::MachineSize;
-use rustc_public::ty::{Align, Size, Span, Ty, VariantIdx};
+use rustc_public::ty::{Align, Span, VariantIdx};
 
 use super::abi::AbiBuilderMethods;
-use super::consts::ConstCodegenMethods;
 use super::intrinsic::IntrinsicCallBuilderMethods;
-use super::misc::MiscCodegenMethods;
 use super::type_::{ArgAbiBuilderMethods, BaseTypeCodegenMethods, LayoutTypeCodegenMethods};
 use super::{CodegenMethods, StaticBuilderMethods};
 use crate::stable_cg::TyAndLayout;

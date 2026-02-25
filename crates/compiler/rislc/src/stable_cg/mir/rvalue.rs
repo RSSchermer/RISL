@@ -1,10 +1,8 @@
-use std::assert_matches::assert_matches;
-
 use arrayvec::ArrayVec;
-use rustc_middle::{bug, span_bug};
+use rustc_middle::bug;
 use rustc_public::abi::ValueAbi;
-use rustc_public::mir::{AggregateKind, CastKind, Mutability, NullOp, PointerCoercion, Rvalue};
-use rustc_public::ty::{Region, RegionKind, RigidTy, Span, Ty, TyKind, UintTy, VariantIdx};
+use rustc_public::mir::{AggregateKind, CastKind, PointerCoercion, Rvalue};
+use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public::{abi, mir};
 use rustc_public_bridge::IndexedVal;
 use tracing::{debug, instrument, trace};

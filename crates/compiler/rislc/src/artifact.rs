@@ -2,11 +2,11 @@ use std::fs::File;
 
 use ar::{GnuBuilder, Header};
 use rustc_span::def_id::LocalModDefId;
+use slir::Module;
 use slir::cfg::Cfg;
 use slir::rvsdg::Rvsdg;
 use slir::scf::Scf;
 use slir::smi::ShaderModuleInterface;
-use slir::{Module, Symbol};
 
 use crate::context::RislContext;
 

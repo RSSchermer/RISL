@@ -1,4 +1,4 @@
-use rustc_ast::{AttrKind, ast};
+use rustc_ast::ast;
 use rustc_hir::{MethodKind, Target};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::{ErrorGuaranteed, Span, Symbol};

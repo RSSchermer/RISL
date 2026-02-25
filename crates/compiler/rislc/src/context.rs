@@ -1,11 +1,11 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
 
 use rustc_hash::FxHashMap;
 use rustc_hir::{ItemId, Mod};
 use rustc_middle::ty::TyCtxt;
-use rustc_span::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE, LocalDefId, LocalModDefId};
+use rustc_span::def_id::{CrateNum, DefId, LOCAL_CRATE, LocalDefId, LocalModDefId};
 
 use crate::core_shim::{ShimDefLookup, is_core_shim_crate, resolve_shim_def_lookup};
 use crate::hir_ext::{ExtendedItem, HirExt, ModExt};

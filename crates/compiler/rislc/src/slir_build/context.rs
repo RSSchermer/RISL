@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::io;
 
 use rustc_hash::FxHashMap;
 use rustc_middle::bug;

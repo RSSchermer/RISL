@@ -8,6 +8,7 @@
 )]
 #![allow(unused_variables)]
 
+extern crate core;
 extern crate rustc_abi;
 extern crate rustc_ast;
 extern crate rustc_codegen_ssa;
@@ -17,14 +18,12 @@ extern crate rustc_errors;
 extern crate rustc_fluent_macro;
 extern crate rustc_hir;
 extern crate rustc_interface;
-#[macro_use]
-extern crate rustc_public_bridge;
-extern crate core;
 extern crate rustc_macros;
 extern crate rustc_metadata;
 extern crate rustc_middle;
 extern crate rustc_monomorphize;
 extern crate rustc_public;
+extern crate rustc_public_bridge;
 extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
@@ -43,8 +42,8 @@ mod monomorphize;
 mod slir_build;
 mod stable_cg;
 
+use std::process;
 use std::process::ExitCode;
-use std::{env, process};
 
 use rustc_driver::{args, catch_with_exit_code, init_rustc_env_logger};
 use rustc_session::EarlyDiagCtxt;
