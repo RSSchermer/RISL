@@ -362,7 +362,7 @@ mod tests {
         );
 
         assert_eq!(
-            rvsdg[switch_node].expect_switch().predicate().origin,
+            rvsdg[switch_node].expect_switch().branch_selector().origin,
             ValueOrigin::Output {
                 producer: bool_pred_node,
                 output: 0
@@ -464,7 +464,7 @@ mod tests {
         let switch_data = rvsdg[switch_node].expect_switch();
 
         assert_eq!(
-            switch_data.predicate().origin,
+            switch_data.branch_selector().origin,
             ValueOrigin::Output {
                 producer: bool_pred_node,
                 output: 0

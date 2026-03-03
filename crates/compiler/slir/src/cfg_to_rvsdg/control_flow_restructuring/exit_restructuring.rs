@@ -54,9 +54,9 @@ pub fn restructure_exit(cfg: &mut Cfg, function: Function) -> BasicBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::Branch;
     use crate::ty::{TY_BOOL, TY_DUMMY};
     use crate::{FnArg, FnSig, Module, Symbol};
-    use crate::cfg::Branch;
 
     #[test]
     fn test_restructure_exit() {

@@ -1,4 +1,4 @@
-use std::hash::{Hash};
+use std::hash::Hash;
 use std::ops::Index;
 
 use delegate::delegate;

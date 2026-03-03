@@ -4,9 +4,8 @@ use slotmap::{SecondaryMap, SlotMap};
 
 use crate::scf::visit::TopDownVisitor;
 use crate::scf::{
-    Block, ExprBinding, ExpressionKind, If, IntrinsicOp, LocalBinding, LocalBindingData,
-    Loop, LoopControl, Return, Scf, Statement, StatementKind, Switch,
-    visit,
+    Block, ExprBinding, ExpressionKind, If, IntrinsicOp, LocalBinding, LocalBindingData, Loop,
+    LoopControl, Return, Scf, Statement, StatementKind, Switch, visit,
 };
 
 struct UseCounter {

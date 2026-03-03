@@ -142,7 +142,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         use SimpleNode::*;
 
         let data = self.rvsdg[node].expect_switch();
-        let predicate_origin = data.predicate().origin;
+        let predicate_origin = data.branch_selector().origin;
         let predicate_binding = self.value_mapping.mapping(predicate_origin).expect_local();
 
         match predicate_origin {

@@ -4,10 +4,7 @@ use indexmap::IndexSet;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::Function;
-use crate::cfg::{
-    BasicBlock, BlockPosition, Cfg, LocalBinding,
-    Statement, Terminator,
-};
+use crate::cfg::{BasicBlock, BlockPosition, Cfg, LocalBinding, Statement, Terminator};
 use crate::cfg_to_rvsdg::control_flow_restructuring::exit_restructuring::restructure_exit;
 use crate::ty::Type;
 

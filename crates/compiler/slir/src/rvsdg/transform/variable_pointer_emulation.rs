@@ -219,10 +219,7 @@ impl SwitchEmulationRegistry {
                 let end = rvsdg[switch_node].value_outputs().len() as u32;
                 let branches_end = vec![end; branch_count];
 
-                SwitchEmulationValues {
-                    end,
-                    branches_end,
-                }
+                SwitchEmulationValues { end, branches_end }
             });
 
         let branch_end = emulation_values.branches_end[branch as usize];
@@ -672,7 +669,7 @@ impl EmulationContext {
         let switch_data = rvsdg[switch_node].expect_switch();
         let pointer_ty = switch_data.value_outputs()[output as usize].ty;
         let branch_count = switch_data.branches().len();
-        let branch_selector = switch_data.predicate().origin;
+        let branch_selector = switch_data.branch_selector().origin;
         let mut branches = Vec::with_capacity(branch_count);
 
         for i in 0..branch_count {
@@ -1174,7 +1171,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::{TypeKind, TY_DUMMY};
+    use crate::ty::{TY_DUMMY, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]

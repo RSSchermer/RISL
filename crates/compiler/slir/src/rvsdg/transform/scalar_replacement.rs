@@ -184,8 +184,8 @@ use crate::rvsdg::analyse::element_index::ElementIndex;
 use crate::rvsdg::transform::enum_replacement::replace_enum_alloca;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin,
-    ValueInput, ValueOrigin, ValueOutput, ValueUser, visit,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
+    ValueOutput, ValueUser, visit,
 };
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 
@@ -1638,7 +1638,7 @@ mod tests {
 
     use super::*;
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_PTR_U32};
-    use crate::{BinaryOperator, FnArg, FnSig, Symbol, thin_set, Module, Function};
+    use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
     fn test_scalar_replace_op_field_ptr() {

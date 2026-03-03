@@ -600,7 +600,7 @@ mod tests {
 
     use super::*;
     use crate::cfg::BlockPosition;
-    use crate::ty::{TypeKind, TY_DUMMY, TY_PREDICATE};
+    use crate::ty::{TY_DUMMY, TY_PREDICATE, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Symbol};
 
     #[test]

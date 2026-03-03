@@ -5,9 +5,7 @@ use rustc_hash::FxHashSet;
 use crate::Module;
 use crate::rvsdg::transform::region_replication::replicate_region;
 use crate::rvsdg::visit::bottom_up::{BottomUpVisitor, visit_node_bottom_up};
-use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, ValueInput, ValueOrigin,
-};
+use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueInput, ValueOrigin};
 
 /// Adds missing dependencies to the function we're inlining into.
 ///

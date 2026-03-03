@@ -1,4 +1,3 @@
-
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
@@ -529,7 +528,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueOutput};
     use crate::ty::{Enum, Struct, StructField, TY_DUMMY, TY_PREDICATE};
-    use crate::{FnArg, FnSig, Symbol, thin_set, Module, Function};
+    use crate::{FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
     fn test_enum_replacement() {

@@ -158,7 +158,6 @@ impl PtrOffsetReplacer {
         ptr_argument: u32,
     ) -> PtrOffset {
         use NodeKind::*;
-        
 
         let owner = rvsdg[region].owner();
 

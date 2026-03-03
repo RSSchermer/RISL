@@ -1468,9 +1468,7 @@ pub fn write_wgsl(module: &Module, scf: &Scf) -> String {
     let used_globals = collect_used_global_bindings(module, scf);
     let used_structs = collect_used_structs(module, scf, &used_globals);
 
-    let local_binding_use_counts = count_local_binding_use(
-        scf
-    );
+    let local_binding_use_counts = count_local_binding_use(scf);
 
     let cx = Context {
         module,

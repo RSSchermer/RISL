@@ -169,7 +169,7 @@ impl RegionSwitchMerger {
                     self.candidates.push_back(Candidate {
                         switch_node: node,
                         stratum,
-                        predicate_origin: n.predicate().origin,
+                        predicate_origin: n.branch_selector().origin,
                     });
                 }
             });

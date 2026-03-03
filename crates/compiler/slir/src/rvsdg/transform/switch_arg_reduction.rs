@@ -26,7 +26,7 @@ struct JobCollector<'a> {
 impl RegionNodesVisitor for JobCollector<'_> {
     fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
         if let NodeKind::Switch(switch_node) = rvsdg[node].kind() {
-            let predicate_origin = switch_node.predicate().origin;
+            let predicate_origin = switch_node.branch_selector().origin;
 
             for (i, entry) in switch_node.entry_inputs().iter().enumerate() {
                 if entry.origin == predicate_origin {

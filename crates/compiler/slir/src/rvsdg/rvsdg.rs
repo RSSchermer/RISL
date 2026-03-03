@@ -5,41 +5,115 @@ use std::path::Path;
 use std::slice;
 
 use indexmap::IndexSet;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
 use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::intrinsic::Intrinsic;
-use crate::ty::{
-    TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry,
-};
+use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::util::thin_set::ThinSet;
 use crate::{
     BinaryOperator, Constant, Function, Module, StorageBinding, UnaryOperator, UniformBinding,
     WorkgroupBinding, intrinsic, thin_set, ty,
 };
 
+/// Common interface that all nodes implement to describe how they are connected to other elements
+/// of the RVSDG.
 pub trait Connectivity {
+    /// List the [ValueInput]s the node consumes.
     fn value_inputs(&self) -> &[ValueInput];
 
+    #[doc(hidden)]
+    /// This is only used internally, we don't ever return `mut` references to nodes in the RVSDG;
+    /// modifications to nodes in RVSDG are done via method calls on the [Rvsdg] data structure.
     fn value_inputs_mut(&mut self) -> &mut [ValueInput];
 
+    /// List the [ValueOutput]s the node produces.
     fn value_outputs(&self) -> &[ValueOutput];
 
+    #[doc(hidden)]
+    /// This is only used internally, we don't ever return `mut` references to nodes in the RVSDG;
+    /// modifications to nodes in RVSDG are done via method calls on the [Rvsdg] data structure.
     fn value_outputs_mut(&mut self) -> &mut [ValueOutput];
 
+    /// Describes how the node connects to the state chain if the node is part of the state chain.
+    ///
+    /// A `None` value indicates that the node is not part of the state chain.
     fn state(&self) -> Option<&State>;
 
+    #[doc(hidden)]
+    /// This is only used internally, we don't ever return `mut` references to nodes in the RVSDG;
+    /// modifications to nodes in RVSDG are done via method calls on the [Rvsdg] data structure.
     fn state_mut(&mut self) -> Option<&mut State>;
 }
 
 slotmap::new_key_type! {
+    /// Identifies a node in a [Rvsdg].
+    ///
+    /// Can be used to resolve [NodeData] through the `Index<Node>` implementation on the [Rvsdg]
+    /// with which it is associated:
+    ///
+    /// ```
+    /// # fn f(node: Node) {
+    /// let node_data = &rvsdg[node];
+    /// # }
+    /// ```
     pub struct Node;
+
+    /// Identifies a region in a [Rvsdg].
+    ///
+    /// Can be used to resolve [RegionData] through the `Index<Region>` implementation on the
+    /// [Rvsdg] with which it is associated:
+    ///
+    /// ```
+    /// # fn f(region: Region) {
+    /// let node_data = &rvsdg[region];
+    /// # }
+    /// ```
     pub struct Region;
 }
 
+/// [Rvsdg] node that models a function.
+///
+/// Function nodes may only appear in the [Rvsdg::global_region] region.
+///
+/// # Dependency Inputs
+///
+/// A function node may have any number of value-inputs. Since a function may only appear in the
+/// global region, the origins of these inputs can only originate from the following node kinds:
+///
+/// - Uniform Binding nodes (see [UniformBindingNode] and [NodeKind::UniformBinding]).
+/// - Storage Binding nodes (see [StorageBindingNode] and [NodeKind::StorageBinding]).
+/// - Workgroup Binding nodes (see [WorkgroupBindingNode] and [NodeKind::WorkgroupBinding]).
+/// - Constant nodes (see [ConstantNode] and [NodeKind::Constant]).
+/// - Other function nodes.
+///
+/// The inputs to a function node represent its dependencies. These dependencies are made available
+/// as argument values inside the function node's body region, see the `Body Region` section below
+/// for details.
+///
+/// # Output
+///
+/// A function node has a single output value that represents the node's function itself as a
+/// value. Other function nodes can use this [ValueOutput] as a dependency input. This makes this
+/// function value available as an argument in that dependent function's body region. [OpCall]
+/// nodes may then use this value as their first input to invoke the function.
+///
+/// # Body Region
+///
+/// A function node has an associated [Region] that represents the function body; this region
+/// contains the nodes that model the function's instructions.
+///
+/// The body region receives a set of arguments. These region arguments represent first the
+/// function node's dependencies, then the function's call arguments. A function with 2 dependencies
+/// and 3 call arguments will have a body region with 5 arguments: region arguments `0..2` will
+/// represent the dependencies, and region arguments `2..5` will represent the call arguments.
+///
+/// For functions that have a return value, the body region will have a single value result that
+/// represents the function's return value; for functions that have no return value, the body region
+/// will not have any value results.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct FunctionNode {
     dependencies: Vec<ValueInput>,
@@ -48,14 +122,25 @@ pub struct FunctionNode {
 }
 
 impl FunctionNode {
+    /// The function node's body region.
+    ///
+    /// See the `Body Region` section of the documentation for the [FunctionNode] struct for
+    /// details.
     pub fn body_region(&self) -> Region {
         self.region
     }
 
+    /// The function's dependency inputs.
+    ///
+    /// See the `Dependency Inputs` section of the documentation for the [FunctionNode] struct for
+    /// details.
     pub fn dependencies(&self) -> &[ValueInput] {
         &self.dependencies
     }
 
+    /// The output value of this function node.
+    ///
+    /// See the `Output` section of the documentation for the [FunctionNode] struct for details.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -87,13 +172,24 @@ impl Connectivity for FunctionNode {
     }
 }
 
+/// Models the consuming end of a value-flow edge in the RVSDG.
+///
+/// A combination of a [Type] and a [ValueOrigin]. The origin must resolve to a [ValueOutput] in the
+/// same [Region]. The type of that [ValueOutput] must be compatible with the [Type] of the
+/// [ValueInput], as defined by [TypeRegistry::is_compatible].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct ValueInput {
+    /// The type of the value.
     pub ty: Type,
+
+    /// The origin of the value.
     pub origin: ValueOrigin,
 }
 
 impl ValueInput {
+    /// Shorthand function for creating a new value-input for which the [origin] is a "placeholder".
+    ///
+    /// See [ValueOrigin::placeholder] for details.
     pub fn placeholder(ty: Type) -> Self {
         ValueInput {
             ty,
@@ -101,6 +197,8 @@ impl ValueInput {
         }
     }
 
+    /// Shorthand function for creating a new value-input for which the [origin] is a region
+    /// argument.
     pub fn argument(ty: Type, arg: u32) -> Self {
         ValueInput {
             ty,
@@ -108,6 +206,7 @@ impl ValueInput {
         }
     }
 
+    /// Shorthand function for creating a new value-input for which the [origin] is a node output.
     pub fn output(ty: Type, node: Node, output: u32) -> Self {
         ValueInput {
             ty,
@@ -119,29 +218,62 @@ impl ValueInput {
     }
 }
 
+/// Enumerates the possible origins of a [ValueInput].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum ValueOrigin {
+    /// The origin is a region argument in the same region as the [ValueInput].
     Argument(u32),
-    Output { producer: Node, output: u32 },
+
+    /// The origin is a node output in the same region as the [ValueInput].
+    Output {
+        /// The node producing the output.
+        producer: Node,
+
+        /// The specific index of the output on the [producer] node.
+        output: u32,
+    },
 }
 
 impl ValueOrigin {
+    /// Creates a new "placeholder" value-origin.
+    ///
+    /// A placeholder value-origin can be used for value-inputs that cannot immediately be assigned
+    /// a valid origin. For example, when adding a new branch region to a [SwitchNode] (see
+    /// [Rvsdg::add_switch_branch]), this branch region will initially be empty with placeholder
+    /// origins for each of the region results. These placeholder origins must then be replaced with
+    /// valid origins, for example, by connecting them to a region argument or by connecting them
+    /// to node outputs as nodes are added to the region. Placeholder value-origins are only meant
+    /// to be a temporary part of an RVSDG during construction or a transformation; there should be
+    /// no placeholder value-inputs in the "final" RVSDG.
     pub fn placeholder() -> Self {
         ValueOrigin::Argument(u32::MAX)
     }
 
+    /// Whether or not this origin is a "placeholder".
+    ///
+    /// See [placeholder] for details.
     pub fn is_placeholder(&self) -> bool {
         self == &ValueOrigin::Argument(u32::MAX)
     }
 }
 
+/// Models the producing end of a value-flow edge in the RVSDG.
+///
+/// A combination of a [Type] and a set of [ValueUser]s. Each user origin must resolve to a
+/// [ValueInput] in the same [Region]. The type of that [ValueInput] must be compatible with the
+/// [Type] of the [ValueOutput], as defined by [TypeRegistry::is_compatible]. It is valid for the
+/// set of users to be empty.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ValueOutput {
+    /// The type of the value.
     pub ty: Type,
+
+    /// The users of the value.
     pub users: ThinSet<ValueUser>,
 }
 
 impl ValueOutput {
+    /// Create a new [ValueOutput] with the given [Type] and empty set of users.
     pub fn new(ty: Type) -> Self {
         ValueOutput {
             ty,
@@ -150,50 +282,78 @@ impl ValueOutput {
     }
 }
 
+/// Enumerates the possible users of a [ValueOutput].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum ValueUser {
+    /// The user is a region argument in the same region as the [ValueOutput].
     Result(u32),
-    Input { consumer: Node, input: u32 },
+
+    /// The user is a node input in the same region as the [ValueInput].
+    Input {
+        /// The node consuming the output.
+        consumer: Node,
+
+        /// The specific index of the input on the [consumer] node.
+        input: u32,
+    },
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-pub enum StateOrigin {
-    Argument,
-    Node(Node),
-}
-
-impl StateOrigin {
-    pub fn as_node(&self) -> Option<Node> {
-        if let StateOrigin::Node(node) = self {
-            Some(*node)
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-pub enum StateUser {
-    Result,
-    Node(Node),
-}
-
-impl StateUser {
-    pub fn as_node(&self) -> Option<Node> {
-        if let StateUser::Node(node) = self {
-            Some(*node)
-        } else {
-            None
-        }
-    }
-}
-
+/// Describes how a node is linked into a region's state chain.
+///
+/// While we model a node's value-inputs and value-outputs separately, we use this single data
+/// structure to model both a node's state-input and state-output at once. This is because, while it
+/// is perfectly valid for a node to have a value-input but no value-output (or multiple
+/// value-inputs, or multiple value-outputs), a state-input and state-output are always paired
+/// together; it is not possible for a node to have a state-input but no state-output. Also, while
+/// it's valid for a value-output to have no users, a state-output must always be used; a region's
+/// state chain must always flow from the region's state argument to the region's state result, the
+/// chain may not have any "breaks". The public modification interface of the [Rvsdg] type is
+/// designed to ensure that this invariant is always maintained.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct State {
+    /// The origin of the state.
+    ///
+    /// Must resolve to a state output in the same region as the node with which this [State] is
+    /// associated.
     pub origin: StateOrigin,
+
+    /// The user of the state.
+    ///
+    /// Must resolve to a state input in the same region as the node with which this [State] is
+    /// associated.
     pub user: StateUser,
 }
 
+/// Enumerates the possible origins of a node's state-input.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum StateOrigin {
+    /// The origin is the region's state argument.
+    Argument,
+
+    /// The origin is the state-output of the given [Node].
+    ///
+    /// The node must be in the same region as the region of the node with which this [State] is
+    /// associated.
+    Node(Node),
+}
+
+/// Enumerates the possible users of a node's state-output.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum StateUser {
+    /// The user is the region's state result.
+    Result,
+
+    /// The user is the state-input of the given [Node].
+    ///
+    /// The node must be in the same region as the region of the node with which this [State] is
+    /// associated.
+    Node(Node),
+}
+
+/// Describes a region in an [Rvsdg].
+///
+/// See also the [Regions and Region Data](crate::rvsdg#regions-and-region-data) section of the
+/// module-level documentation.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct RegionData {
     owner: Option<Node>,
@@ -205,31 +365,57 @@ pub struct RegionData {
 }
 
 impl RegionData {
+    /// The [Node] that owns this region.
+    ///
+    /// All regions have an owner node, except for the [Rvsdg::global_region].
+    ///
+    /// # Panics
+    ///
+    /// Panics when called on the [Rvsdg::global_region].
     pub fn owner(&self) -> Node {
         self.owner.expect("region not correctly initialized")
     }
 
+    /// An ordered set of all nodes in this region.
+    ///
+    /// Only includes "direct children" of the region: if the region contains nested regions (e.g.,
+    /// the branch regions of a [SwitchNode]), then only the owner nodes of those nested regions
+    /// are included in this set, not any of the nodes inside the nested regions.
     pub fn nodes(&self) -> &IndexSet<Node> {
         &self.nodes
     }
 
+    /// The list of [ValueOutput]s that represent this region's arguments.
     pub fn value_arguments(&self) -> &[ValueOutput] {
         &self.value_arguments
     }
 
+    /// The list of [ValueInput]s that represent this region's results.
     pub fn value_results(&self) -> &[ValueInput] {
         &self.value_results
     }
 
+    /// The user of the region's state-argument.
+    ///
+    /// If the region does not contain any nodes that link into the state chain, then the user will
+    /// be the region's state-result.
     pub fn state_argument(&self) -> &StateUser {
         &self.state_argument
     }
 
+    /// The origin of the region's state-result.
+    ///
+    /// If the region does not contain any nodes that link into the state chain, then the origin
+    /// will be the region's state-argument.
     pub fn state_result(&self) -> &StateOrigin {
         &self.state_result
     }
 }
 
+/// Describes a node in an [Rvsdg].
+///
+/// See also the [Nodes and Node Data](crate::rvsdg#nodes-and-node-data) section of the
+/// module-level documentation.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct NodeData {
     kind: NodeKind,
@@ -255,15 +441,24 @@ macro_rules! gen_node_data_is_and_expect_simple_kind {
 }
 
 impl NodeData {
-    pub fn kind(&self) -> &NodeKind {
-        &self.kind
-    }
-
+    /// The region to which this node belongs.
     pub fn region(&self) -> Region {
         self.region
             .expect("should have a region after initialization")
     }
 
+    /// A reference to the data specific to this node's kind.
+    ///
+    /// See the [NodeKind] enum for an overview of the different node kinds.
+    pub fn kind(&self) -> &NodeKind {
+        &self.kind
+    }
+
+    /// Searches through the node's [value_inputs] for the first input that has an origin that
+    /// matches the given `origin`.
+    ///
+    /// Returns the index of the value-input for which a matching origin is found, or `None`
+    /// otherwise.
     pub fn value_input_for_origin(&self, origin: ValueOrigin) -> Option<u32> {
         for (i, input) in self.value_inputs().iter().enumerate() {
             if input.origin == origin {
@@ -430,6 +625,7 @@ impl NodeData {
     }
 }
 
+/// Enumerates the different kinds of nodes that can be contained in an [Rvsdg].
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub enum NodeKind {
     Switch(SwitchNode),
@@ -532,6 +728,13 @@ impl Connectivity for NodeData {
     }
 }
 
+/// [Rvsdg] node that models a uniform-binding global value.
+///
+/// A uniform-binding node must always belong to the [Rvsdg::global_region] region. It has a single
+/// value-output that may serve as the origin of a dependency input for a [FunctionNode].
+///
+/// See also [UniformBindingData](crate::core::UniformBindingData) and the
+/// [UniformBindingRegistry](crate::core::UniformBindingRegistry).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct UniformBindingNode {
     binding: UniformBinding,
@@ -539,10 +742,19 @@ pub struct UniformBindingNode {
 }
 
 impl UniformBindingNode {
+    /// Returns the [UniformBinding] key for this node's uniform binding.
+    ///
+    /// May be resolved to a [UniformBindingData] reference with the
+    /// [Module::uniform_bindings](crate::core::Module::uniform_bindings) registry for the
+    /// [Module] with which this node's [Rvsdg] is associated.
     pub fn binding(&self) -> UniformBinding {
         self.binding
     }
 
+    /// The output value of this node.
+    ///
+    /// Represents the uniform-binding's value. May serve as the origin of a dependency input for
+    /// a [FunctionNode], which makes the value available inside the [FunctionNode]'s body region.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -574,6 +786,13 @@ impl Connectivity for UniformBindingNode {
     }
 }
 
+/// [Rvsdg] node that models a storage-binding global value.
+///
+/// A storage-binding node must always belong to the [Rvsdg::global_region] region. It has a single
+/// value-output that may serve as the origin of a dependency input for a [FunctionNode].
+///
+/// See also [StorageBindingData](crate::core::StorageBindingData) and the
+/// [StorageBindingRegistry](crate::core::StorageBindingRegistry).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct StorageBindingNode {
     binding: StorageBinding,
@@ -581,10 +800,19 @@ pub struct StorageBindingNode {
 }
 
 impl StorageBindingNode {
+    /// Returns the [StorageBinding] key for this node's storage binding.
+    ///
+    /// May be resolved to a [StorageBindingData] reference with the
+    /// [Module::storage_bindings](crate::core::Module::storage_bindings) registry for the
+    /// [Module] with which this node's [Rvsdg] is associated.
     pub fn binding(&self) -> StorageBinding {
         self.binding
     }
 
+    /// The output value of this node.
+    ///
+    /// Represents the storage-binding's value. May serve as the origin of a dependency input for
+    /// a [FunctionNode], which makes the value available inside the [FunctionNode]'s body region.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -616,6 +844,13 @@ impl Connectivity for StorageBindingNode {
     }
 }
 
+/// [Rvsdg] node that models a workgroup-binding global value.
+///
+/// A workgroup-binding node must always belong to the [Rvsdg::global_region] region. It has a
+/// single value-output that may serve as the origin of a dependency input for a [FunctionNode].
+///
+/// See also [WorkgroupBindingData](crate::core::WorkgroupBindingData) and the
+/// [WorkgroupBindingRegistry](crate::core::WorkgroupBindingRegistry).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct WorkgroupBindingNode {
     binding: WorkgroupBinding,
@@ -623,10 +858,19 @@ pub struct WorkgroupBindingNode {
 }
 
 impl WorkgroupBindingNode {
+    /// Returns the [WorkgroupBinding] key for this node's workgroup binding.
+    ///
+    /// May be resolved to a [WorkgroupBindingData] reference with the
+    /// [Module::workgroup_bindings](crate::core::Module::workgroup_bindings) registry for the
+    /// [Module] with which this node's [Rvsdg] is associated.
     pub fn binding(&self) -> WorkgroupBinding {
         self.binding
     }
 
+    /// The output value of this node.
+    ///
+    /// Represents the workgroup-binding's value. May serve as the origin of a dependency input for
+    /// a [FunctionNode], which makes the value available inside the [FunctionNode]'s body region.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -658,6 +902,12 @@ impl Connectivity for WorkgroupBindingNode {
     }
 }
 
+/// [Rvsdg] node that models a constant value.
+///
+/// A constant node must always belong to the [Rvsdg::global_region] region. It has a single
+/// value-output that may serve as the origin of a dependency input for a [FunctionNode].
+///
+/// See also [Constant] and the [ConstantRegistry](crate::core::ConstantRegistry).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ConstantNode {
     constant: Constant,
@@ -665,10 +915,19 @@ pub struct ConstantNode {
 }
 
 impl ConstantNode {
+    /// Returns the [Constant] key for this node's constant value.
+    ///
+    /// May be resolved to a [ConstantData](crate::core::ConstantData) reference with the
+    /// [Module::constants](crate::core::Module::constants) registry for the
+    /// [Module] with which this node's [Rvsdg] is associated.
     pub fn constant(&self) -> Constant {
         self.constant
     }
 
+    /// The output value of this node.
+    ///
+    /// Represents the constant value. May serve as the origin of a dependency input for
+    /// a [FunctionNode], which makes the value available inside the [FunctionNode]'s body region.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -700,6 +959,61 @@ impl Connectivity for ConstantNode {
     }
 }
 
+/// Models the symmetric splitting-then-merging of control-flow in an [Rvsdg].
+///
+/// A switch node owns one or more "branch" regions. Based on a "branch selector" value-input,
+/// control-flow is directed to one specific branch region. After this branch region completes,
+/// control-flow is directed back to the region that contains the switch node.
+///
+/// # Value-Inputs and Branch Arguments
+///
+/// The first [ValueInput] to a switch node is always the branch-selector value. Additionally, it
+/// may take any number of "entry" input-values. Any such entry-values are made available as region
+/// arguments in each of the switch node's branch regions. The `N`th argument of a branch region
+/// corresponds to the `N`th entry-value of the switch node, which corresponds to the `N+1`th
+/// value-input of the switch node (as the first value-input is the branch-selector value).
+///
+/// A set of entry input-values may be declared when first creating the switch node with
+/// [Rvsdg::add_switch_node]. An entry input-value may also be added to an existing switch node
+/// with [Rvsdg::add_switch_input], or removed from an existing switch node with
+/// [Rvsdg::remove_switch_input].
+///
+/// Branch region arguments may be unused (in fact, it is typical for each branch to only use a
+/// subset of its arguments). An entry input-value is considered used if the corresponding branch
+/// argument is used in *any* of the switch node's branch regions; an entry input-value is
+/// considered unused if the corresponding branch argument is unused in *all* of the switch node's
+/// branch regions. Only unused entry input-values may be removed from a switch node.
+///
+/// # Value Outputs and Branch Results
+///
+/// Switch nodes have value-outputs. For every value-output, each branch region has a corresponding
+/// result. A switch node's value-outputs may be specified when first creating the switch node with
+/// [Rvsdg::add_switch_node]. A value-output may also be added to an existing switch node with
+/// [Rvsdg::add_switch_output], or removed from an existing switch node with
+/// [Rvsdg::remove_switch_output].
+///
+/// If a switch node is created with value-outputs, or value outputs are later added, then their
+/// corresponding branch results will have been initialized with "placeholder" origins (see
+/// [ValueOrigin::placeholder]). These placeholder origins must then be replaced with valid origins,
+/// for example, by reconnecting the region results (see [Rvsdg::reconnect_result]) to region
+/// arguments or to node outputs (after nodes have been added to the branch). Placeholder
+/// value-origins are only meant to be a temporary part of an RVSDG during construction or a
+/// transformation; in the "final" RVSDG, all results for all branches must have valid origins.
+///
+/// # State
+///
+/// A region is said to "not use state" if the region's state argument connects directly to its
+/// state result; conversely, a region is said to "use state" if the region's state argument does
+/// not connect to the region's state result, but instead flows through one or more nodes.
+///
+/// A switch node is said to "use state" if any of its branch regions "use state". If a switch node
+/// uses state, then it must be linked into its region's state chain (see
+/// [Rvsdg::link_switch_state]).
+///
+/// It is not invalid for a switch node that does *not* use state to be linked into its region's
+/// state chain. However, this creates a reordering constraint that may restrict optimization
+/// opportunities. Therefore, switch nodes that no longer use state should be unlinked from the
+/// state chain (see [Rvsdg::unlink_switch_state]).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct SwitchNode {
     value_inputs: Vec<ValueInput>,
@@ -709,14 +1023,25 @@ pub struct SwitchNode {
 }
 
 impl SwitchNode {
-    pub fn predicate(&self) -> &ValueInput {
+    /// The branch-selector value-input for this switch node.
+    ///
+    /// This is always the first value-input of the switch node.
+    pub fn branch_selector(&self) -> &ValueInput {
         &self.value_inputs[0]
     }
 
+    /// The entry value-inputs for this switch node.
+    ///
+    /// For a [SwitchNode] with `N` total value-inputs, these are inputs `1..N` (the first
+    /// value-input is the branch-selector input).
+    ///
+    /// See the [Value-Inputs and Branch Arguments](SwitchNode#value-inputs-and-branch-arguments)
+    /// section of the documentation for the [SwitchNode] struct for details.
     pub fn entry_inputs(&self) -> &[ValueInput] {
         &self.value_inputs[1..]
     }
 
+    /// List the branch regions for this switch node.
     pub fn branches(&self) -> &[Region] {
         &self.branches
     }
@@ -748,6 +1073,57 @@ impl Connectivity for SwitchNode {
     }
 }
 
+/// Models looping control-flow in an [Rvsdg].
+///
+/// Owns a "loop region". When control-flow reaches the loop node, control-flow is passed into this
+/// loop region. The loop region's first result is the "reentry condition" value. Once the loop
+/// region completes, if the reentry-condition is `true`, then control-flow is redirected back to
+/// the start of the loop region. This repeats until the reentry-condition is `false`, at which
+/// point control-flow is passed back to the loop node's outer region.
+///
+/// Note that the reentry-condition does not ever need to become false; this creates an infinite
+/// loop. Also note that the loop region will always run at least once; a loop-node models a
+/// "tail-controlled" loop.
+///
+/// # Loop Values
+///
+/// For loop nodes, value-inputs and value-outputs (and consequently loop region arguments and
+/// loop region results) are closely tied together. A loop node with `N` value-inputs will have
+/// `N` value-outputs, `N` loop region arguments, and `N+1` loop region results. Additionally,
+/// if the value-input with index `I` is of type `T`, the value-output `I` will be of type `T`,
+/// loop region argument `I` will be of type `T`, and loop region result `I+1` will be of type `T`.
+///
+/// When control-flow first reaches the loop node and is passed into the loop region, the loop
+/// region's argument values will flow from the loop node's value-inputs. The first loop region
+/// result will be the loop node's reentry-condition. If the reentry-condition is `true`, then loop
+/// region results `1..N+1` will be "reentry" values: control-flow will be redirected to the start
+/// of the loop region, but on this iteration the loop region's argument values will flow from the
+/// region's result values from the previous iteration. If the reentry-condition is `false`, then
+/// the loop region's result will flow to the loop node's output-values.
+///
+/// A set of loop values may be declared when first creating the loop node with
+/// [Rvsdg::add_loop_node]. This method takes as an argument a set of value-inputs for the loop
+/// node, and because of the strong coupling described above, this then also completely defines
+/// the loop node's value-outputs, and its loop region's arguments and results. Loop values may
+/// also be added to existing loop nodes with [Rvsdg::add_loop_input] or removed from existing
+/// loop nodes with [Rvsdg::remove_loop_input].
+///
+/// When a loop-value with value-input index `I` is first created/added, the loop region result
+/// `I+1` for that loop-value will be connected to the loop region argument `I` for that loop-value.
+///
+/// # State
+///
+/// A region is said to "not use state" if the region's state argument connects directly to its
+/// state result; conversely, a region is said to "use state" if the region's state argument does
+/// not connect to the region's state result, but instead flows through one or more nodes.
+///
+/// A loop node is said to "use state" if its loop region uses state. If a loop node uses state,
+/// then it must be linked into its region's state chain (see [Rvsdg::link_loop_state]).
+///
+/// It is not invalid for a loop node that does *not* use state to be linked into its region's state
+/// chain. However, this creates a reordering constraint that may restrict optimization
+/// opportunities. Therefore, loop nodes that no longer use state should be unlinked from the state
+/// chain (see [Rvsdg::unlink_loop_state]).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct LoopNode {
     value_inputs: Vec<ValueInput>,
@@ -757,6 +1133,7 @@ pub struct LoopNode {
 }
 
 impl LoopNode {
+    /// This loop node's loop region.
     pub fn loop_region(&self) -> Region {
         self.loop_region
     }
@@ -788,6 +1165,18 @@ impl Connectivity for LoopNode {
     }
 }
 
+/// Represents an SLIR intrinsic operation as a node in an [Rvsdg].
+///
+/// SLIR consists of three different intermediate representations: the [cfg](crate::cfg)
+/// representation, the [rvsdg](crate::rvsdg) representation, and the [scf](crate::scf)
+/// representation. Across all representations, SLIR's intrinsic operations share common behavior
+/// (e.g.: argument type validation, result type inference, etc.). Rather than reimplement this
+/// common behavior for each of the IRs, we implement the common logic in the [intrinsic] module.
+/// This node kind represents such intrinsic operations for the RVSDG representation.
+///
+/// We define a set of type-aliases to allow for concise type names. A type-alias (e.g., [OpBinary])
+/// should typically be preferred over the underlying [IntrinsicNode] type (e.g.,
+/// `IntrinsicNode<OpBinary>`).
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct IntrinsicNode<T> {
     intrinsic: T,
@@ -797,6 +1186,7 @@ pub struct IntrinsicNode<T> {
 }
 
 impl<T: Intrinsic> IntrinsicNode<T> {
+    /// The intrinsic operation represented by this node.
     pub fn intrinsic(&self) -> &T {
         &self.intrinsic
     }
@@ -1074,6 +1464,33 @@ impl OpArrayLength {
     gen_intrinsic_value_output!();
 }
 
+/// Node that models a function call in an [Rvsdg].
+///
+/// # Value Inputs
+///
+/// The first input to an op-call node represents the function that is being called. This function
+/// value will flow from a dependency argument of the body region that contains this node, see the
+/// [Dependency Inputs](FunctionNode#depenency-inputs) section of the [FunctionNode] documentation.
+/// Note that this dependency value may be passed into [SwitchNode]s and [LoopNode] for function
+/// calls inside nested branch or loop regions.
+///
+/// The remaining value-inputs represent the call arguments. These value-inputs will flow into the
+/// callee's body region as "call arguments", see the [Body Region](FunctionNode#body-region)
+/// section of the [FunctionNode] documentation.
+///
+/// # Value Output
+///
+/// If an op-call node's callee function has a return value, then the op-call node has a single
+/// value-output that represents the return value; otherwise the op-call node does not have any
+/// value-outputs.
+///
+/// # State
+///
+/// An op-call function must currently always be linked into its region's state chain, even if the
+/// callee function's body region does not "use state" (its state argument connects directly to its
+/// state result, without passing through any nodes). This is because currently, we immediately
+/// exhaustively inline all function calls before performing any optimizations, and therefore this
+/// does not end up constraining any optimizations.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpCall {
     value_inputs: Vec<ValueInput>,
@@ -1082,16 +1499,25 @@ pub struct OpCall {
 }
 
 impl OpCall {
+    /// The value-input that represents the callee function.
     pub fn fn_input(&self) -> &ValueInput {
         &self.value_inputs[0]
     }
 
+    /// List the value-inputs that will be passed as call arguments to the callee.
     pub fn argument_inputs(&self) -> &[ValueInput] {
         &self.value_inputs[1..]
     }
 
+    /// Resolves the [Function] identifier from the [fn_input]'s type using the `ty_registry`.
     pub fn resolve_fn(&self, ty_registry: &TypeRegistry) -> Function {
         *ty_registry.kind(self.value_inputs[0].ty).expect_fn()
+    }
+
+    /// Returns the value-output that represents the callee function's return value if the callee
+    /// function has a return value, or `None` otherwise.
+    pub fn value_output(&self) -> Option<&ValueOutput> {
+        self.value_output.as_ref()
     }
 }
 
@@ -1230,10 +1656,12 @@ pub struct ConstFallback {
 }
 
 impl ConstFallback {
+    /// The type of the value.
     pub fn ty(&self) -> Type {
         self.output.ty
     }
 
+    /// The origin for users of the value.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -1265,6 +1693,20 @@ impl Connectivity for ConstFallback {
     }
 }
 
+/// A node that proxies a value origin.
+///
+/// This is a helper node used by transformation passes. The main purpose for this node kind is to
+/// allow the modification of a node's value-outputs, while the RVSDG graph is being visited.
+/// Without proxy nodes, adding value-users to a value-output grows that value-output's user-set. If
+/// that value-output's user-set is currently being iterated over, this may disturb that iteration
+/// and lead to unexpected results.
+///
+/// Proxying the value-user with [Rvsdg::proxy_origin_user] can avoid such problems. This replaces
+/// a single user with the new proxy node without changing the user count or user order. A proxy
+/// node has a single value-output, and the original value-user is added as the only initial user of
+/// the proxy node's value-output. Additional value-users can now be added to the proxy node's
+/// value-output. Because the proxy node was newly added, we can be assured that the proxy node's
+/// value-users are not already being visited or iterated over.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ValueProxy {
     input: ValueInput,
@@ -1272,10 +1714,12 @@ pub struct ValueProxy {
 }
 
 impl ValueProxy {
+    /// The value that is being proxied.
     pub fn input(&self) -> &ValueInput {
         &self.input
     }
 
+    /// The proxy value.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -1330,14 +1774,17 @@ pub struct Reaggregation {
 }
 
 impl Reaggregation {
+    /// Value-input for the original aggregate value.
     pub fn original(&self) -> &ValueInput {
         &self.inputs[0]
     }
 
+    /// The value-inputs for the part-values the [original] aggregate value is being split into.
     pub fn parts(&self) -> &[ValueInput] {
         &self.inputs[1..]
     }
 
+    /// The reaggregated output-value.
     pub fn output(&self) -> &ValueOutput {
         &self.output
     }
@@ -1371,6 +1818,12 @@ impl Connectivity for Reaggregation {
 
 macro_rules! gen_simple_node {
     ($($ty:ident,)*) => {
+        /// Enumerates all "simple" node kinds that can be contained in an [Rvsdg].
+        ///
+        /// These are node kinds that cannot be part of the global region and do not themselves
+        /// contain a region.
+        ///
+        /// See also [NodeKind].
         #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
         pub enum SimpleNode {
             $($ty($ty)),*
@@ -1515,6 +1968,9 @@ pub struct RvsdgData {
     function_node: FxHashMap<Function, Node>,
 }
 
+/// A Regionalized Value-State Dependency Graph.
+///
+/// For details, refer to the [module-level documentation](crate::rvsdg).
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Rvsdg {
     ty: TypeRegistry,
@@ -1525,6 +1981,10 @@ pub struct Rvsdg {
 }
 
 impl Rvsdg {
+    /// Creates a new [Rvsdg] instance with the given `type_registry`.
+    ///
+    /// The `type_registry` should be a clone of the [Module::ty] type-registry for the [Module]
+    /// with which this [Rvsdg] is associated.
     pub fn new(type_registry: TypeRegistry) -> Self {
         let mut regions = SlotMap::default();
         let global_region = regions.insert(RegionData {
@@ -1591,6 +2051,12 @@ impl Rvsdg {
         Ok(())
     }
 
+    /// Serializes the RVSDG to a bincode format and writes it to a file with the given path.
+    ///
+    /// Shorthand for [Rvsdg::dump] where the `writer` is a [File]. Creates the file if it does not
+    /// yet exist, or truncates an existing file before writing the RVSDG dump.
+    ///
+    /// Depending on the platform, this function may fail if the full directory path does not exist.
     pub fn dump_to_file<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         let mut file = File::create(path)?;
 
@@ -1599,14 +2065,30 @@ impl Rvsdg {
         Ok(())
     }
 
+    /// The [TypeRegistry] that stores the type information for all types used by this [Rvsdg].
     pub fn ty(&self) -> &TypeRegistry {
         &self.ty
     }
 
+    /// The RVSDG's global region,
+    ///
+    /// Contains [FunctionNode]s and global value nodes ([ConstantNode], [UniformBindingNode],
+    /// [StorageBindingNode], [WorkgroupBindingNode]). The global region has no arguments and no
+    /// results. This is also the only region in an RVSDG that does not have an owner node.
     pub fn global_region(&self) -> Region {
         self.global_region
     }
 
+    /// Creates a new [UniformBindingNode] in this [Rvsdg]'s global region for the given `binding`.
+    ///
+    /// The `module` should be the [Module] with which this [Rvsdg] is associated (this [Rvsdg]'s
+    /// [Rvsdg::ty] type-registry should be the same type-registry as the `module`'s [Module::ty]
+    /// type-registry).
+    ///
+    /// # Panics
+    ///
+    /// Panics of the binding cannot be resolved with the `module`'s [Module::uniform_bindings]
+    /// registry.
     pub fn register_uniform_binding(&mut self, module: &Module, binding: UniformBinding) -> Node {
         let ty = module.uniform_bindings[binding].ty;
 
@@ -1623,6 +2105,16 @@ impl Rvsdg {
         node
     }
 
+    /// Creates a new [StorageBindingNode] in this [Rvsdg]'s global region for the given `binding`.
+    ///
+    /// The `module` should be the [Module] with which this [Rvsdg] is associated (this [Rvsdg]'s
+    /// [Rvsdg::ty] type-registry should be the same type-registry as the `module`'s [Module::ty]
+    /// type-registry).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the binding cannot be resolved with the `module`'s [Module::storage_bindings]
+    /// registry.
     pub fn register_storage_binding(&mut self, module: &Module, binding: StorageBinding) -> Node {
         let ty = module.storage_bindings[binding].ty;
 
@@ -1639,6 +2131,16 @@ impl Rvsdg {
         node
     }
 
+    /// Creates a new [WorkgroupBindingNode] in this [Rvsdg]'s global region for the given `binding`.
+    ///
+    /// The `module` should be the [Module] with which this [Rvsdg] is associated (this [Rvsdg]'s
+    /// [Rvsdg::ty] type-registry should be the same type-registry as the `module`'s [Module::ty]
+    /// type-registry).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the binding cannot be resolved with the `module`'s [Module::workgroup_bindings]
+    /// registry.
     pub fn register_workgroup_binding(
         &mut self,
         module: &Module,
@@ -1659,6 +2161,15 @@ impl Rvsdg {
         node
     }
 
+    /// Creates a new [ConstantNode] in this [Rvsdg]'s global region for the given `constant`.
+    ///
+    /// The `module` should be the [Module] with which this [Rvsdg] is associated (this [Rvsdg]'s
+    /// [Rvsdg::ty] type-registry should be the same type-registry as the `module`'s [Module::ty]
+    /// type-registry).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the constant cannot be resolved with the `module`'s [Module::constants] registry.
     pub fn register_constant(&mut self, module: &Module, constant: Constant) -> Node {
         let ty = module.constants[constant].ty();
 
@@ -1675,6 +2186,37 @@ impl Rvsdg {
         node
     }
 
+    /// Registers the given `function` with this [Rvsdg].
+    ///
+    /// Creates a new [FunctionNode] in this [Rvsdg]'s global region. The `module` should be the
+    /// [Module] with which this [Rvsdg] is associated (this [Rvsdg]'s [Rvsdg::ty] type-registry
+    /// should be the same type-registry as the `module`'s [Module::ty] type-registry). The
+    /// [FunctionNode]'s value-inputs will connect to the provided set of `dependencies`. For more
+    /// information on a [FunctionNode]'s dependencies, see the
+    /// [Dependency Inputs](FunctionNode#depdendency-inputs) section of the [FunctionNode]
+    /// documentation.
+    ///
+    /// Will look up the [FnSig] for the `function` in the `module`'s
+    /// [FnSigRegistry](crate::core::FnSigRegistry). The [FnSig] is used to derive the set of
+    /// call arguments for the [FunctionNode]'s body region. If the [FnSig] specifies a return type,
+    /// then the [FunctionNode] will have a single value-output that represents the function's
+    /// return value, and the body region has a single result that flows to that value-output; if
+    /// the [FnSig] does not specify a return type, then the [FunctionNode] will have no
+    /// value-outputs and its body region will have no results. If the body region has a result,
+    /// then this result will initially be connected to a "placeholder" origin (see
+    /// [ValueOrigin::placeholder]). The region result must later be adjusted to connect to a valid
+    /// origin with [Rvsdg::reconnect_region_result]. For details on a [FunctionNode]'s body region,
+    /// refer to the [Body Region](FunctionNode#body-region) section of the [FunctionNode]
+    /// documentation.
+    ///
+    /// Returns a `(Node, Region)` pair where the [Node] is the identifier for the [FunctionNode]
+    /// that was added to the global region, and the [Region] is the identifier for that
+    /// [FunctionNode]'s body region.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `function` does not resolve to an [FnSig] in the `module`'s
+    /// [FnSigRegistry](crate::core::FnSigRegistry).
     pub fn register_function(
         &mut self,
         module: &Module,
@@ -1746,35 +2288,55 @@ impl Rvsdg {
         (node, region)
     }
 
+    /// Returns an iterator over all functions registered with this [Rvsdg].
+    ///
+    /// The iterator produces `(Function, Node)` pairs where the [Function] is the identifier for
+    /// the registered function and the [Node] identifies the [FunctionNode] that was added to this
+    /// [Rvsdg]'s body region.
+    ///
+    /// See also [Rvsdg::register_function].
     pub fn registered_functions(&self) -> impl Iterator<Item = (Function, Node)> {
         self.function_node.iter().map(|(f, n)| (*f, *n))
     }
 
+    /// Returns the [FunctionNode] for the `function` if the `function` is registered with this
+    /// [Rvsdg], or `None` otherwise.
+    ///
+    /// See also [Rvsdg::register_function].
     pub fn get_function_node(&self, function: Function) -> Option<Node> {
         self.function_node.get(&function).copied()
     }
 
+    /// Whether this [Rvsdg] still contains [RegionData] for the given `region`.
     pub fn is_live_region(&self, region: Region) -> bool {
         self.regions.contains_key(region)
     }
 
+    /// Whether this [Rvsdg] still contains [NodeData] for the given `node`.
     pub fn is_live_node(&self, node: Node) -> bool {
         self.nodes.contains_key(node)
     }
 
-    /// Adds a switch node to the given `region`.
+    /// Adds a [SwitchNode] to the given `region`.
     ///
-    /// Must supply the `value_inputs` and `value_outputs` for the node at creation. May optionally
-    /// supply a `state_origin`: if supplied, then the node will be inserted into the state chain
-    /// between the origin and the origin's prior user; if `None` the switch node will not be part
-    /// of the state chain.
+    /// May supply a set of `value_inputs` and `value_outputs` for the node at creation.
+    /// [ValueInput]s may also be added later with [Rvsdg::add_switch_input], or removed with
+    /// [Rvsdg::remove_switch_input]; [ValueOutput]s may also be added later with
+    /// [Rvsdg::add_switch_output], or removed with [Rvsdg::remove_switch_output].
     ///
-    /// The first of the `value_inputs` must be the predicate that selects which branch will be
-    /// taken.
+    /// May optionally supply a `state_origin`: if supplied, then the node will be inserted into the
+    /// state chain between the origin and the origin's prior user; if `None` the switch node will
+    /// not be part of the state chain. The [SwitchNode] may also be linked into the state chain
+    /// later with [Rvsdg::link_switch_node], or unlinked with [Rvsdg::unlink_switch_node].
     ///
-    /// The branch regions for the switch node are added after the creation of the switch node,
-    /// by calling [add_switch_branch] with the [Node] handle return from this [add_switch]
-    /// operation.
+    /// The first of the `value_inputs` must be the [SwitchNode]'s branch-selector value.
+    ///
+    /// Returns a [Node] handle for the newly created switch node.
+    ///
+    /// The branch regions for the switch node are added after the creation of the switch node
+    /// by calling [add_switch_branch] with the [Node] handle returned from this operation.
+    ///
+    /// See the [SwitchNode] documentation for more information.
     pub fn add_switch(
         &mut self,
         region: Region,
@@ -1850,18 +2412,49 @@ impl Rvsdg {
         region
     }
 
+    /// Reorder's a [SwitchNode]'s branches based on the given `permutation`.
+    ///
+    /// The `permutation` must be a list of valid (in bounds) branch indices; it should not contain
+    /// duplicates. Given a [SwitchNode] with three branches `A`, `B` and `C`, with the initial
+    /// order being `A -> B -> C`, the permutation `[2, 0, 1]` would result in the branches being
+    /// reordered to the order `C -> A -> B`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `permutations` list contains duplicate indices. Panics if one of the indices
+    /// in the `permutations` list is out of bounds.
     pub fn permute_switch_branches(&mut self, switch_node: Node, permutation: &[usize]) {
+        let mut uniques = FxHashSet::default();
+
+        uniques.extend(permutation.iter().copied());
+
+        assert_eq!(
+            uniques.len(),
+            permutation.len(),
+            "permutation indices must be unique"
+        );
+
         let mut branches_new = Vec::with_capacity(permutation.len());
 
         let data = self.nodes[switch_node].kind.expect_switch_mut();
 
         for index in permutation {
-            branches_new.push(data.branches[*index as usize]);
+            branches_new.push(data.branches[*index]);
         }
 
         data.branches = branches_new;
     }
 
+    /// Adds a new "entry" [ValueInput] to a [SwitchNode].
+    ///
+    /// Returns the index of the new value-input.
+    ///
+    /// The new [ValueInput] will be appended onto the end of the [SwitchNode]'s list of inputs. If
+    /// a [SwitchNode] had `N` prior value-inputs (including the branch-selector input), then the
+    /// index of the new value-input will be `N`. Each of the [SwitchNode]'s branch regions will
+    /// have a new region argument appended to their list of region arguments. This argument will
+    /// have a matching type and will initially have an empty user-set. The argument's index will
+    /// be `N-1`.
     pub fn add_switch_input(&mut self, switch_node: Node, input: ValueInput) -> u32 {
         let region = self.nodes[switch_node].region();
 
@@ -1883,6 +2476,25 @@ impl Rvsdg {
         input_index as u32
     }
 
+    /// Removes the value-input at the given `input` index from a [SwitchNode].
+    ///
+    /// The value-input at index `0` (the branch-selector input) cannot be removed. Also removes
+    /// the region argument associated with the value-input in each of the [SwitchNode]'s branch
+    /// regions. For all of these region arguments, their user-set (see [ValueOutput::users]) must
+    /// be empty.
+    ///
+    /// This also removes the [ValueInput] from the user-set of its [ValueInput::origin].
+    ///
+    /// Unless the `input` is the [SwitchNode]s last input, then this will affect the indices
+    /// associated with any value-inputs/arguments at greater indices, which will all be reduced by
+    /// `1`. This needs to be taken into account when holding onto indices to identify
+    /// switch-values. Internal to the [Rvsdg], this method will automatically adjust connections to
+    /// value-input/arguments at greater indices.
+    ///
+    /// # Panics
+    ///
+    /// Panics of the `input` index is `0`. Panics if for any of the [SwitchNode]'s branch region
+    /// the argument associated with the value-input does not have an empty user-set.
     pub fn remove_switch_input(&mut self, switch_node: Node, input: u32) {
         assert_ne!(input, 0, "cannot remove the branch selector input");
 
@@ -1926,6 +2538,18 @@ impl Rvsdg {
         );
     }
 
+    /// Adds a new [ValueOutput] to a [SwitchNode].
+    ///
+    /// Returns the index for the new [ValueOutput].
+    ///
+    /// The [ValueOutput] will be of the specified `ty` and will initially have an empty user-set.
+    /// The new [ValueOutput] will be appended onto the end of the [SwitchNode]'s list of
+    /// value-outputs. If a [SwitchNode] had `N` prior value-outputs, then the index of the new
+    /// value-output will be `N`. Each of the [SwitchNode]'s branch regions will
+    /// have a new region result appended to their list of region results. This result will have a
+    /// matching type and will initially have a "placeholder" value-origin (see
+    /// [ValueOrigin::placeholder]); you must replace this placeholder origin with a valid origin
+    /// with [Rvsdg::reconnect_region_result].
     pub fn add_switch_output(&mut self, switch_node: Node, ty: Type) -> u32 {
         let node_data = self.nodes[switch_node].expect_switch_mut();
         let index = node_data.value_outputs.len();
@@ -1941,6 +2565,17 @@ impl Rvsdg {
         index as u32
     }
 
+    /// Removes the value-output at the given `output` index from a [SwitchNode].
+    ///
+    /// The value-output cannot be removed if its user-set is not empty (see [ValueOutput::users]).
+    /// This also removes the associated region result for each of the [SwitchNode]'s branch
+    /// regions.
+    ///
+    /// Unless the `output` is the [SwitchNode]'s last output, then this will affect the indices
+    /// associated with any value-outputs/branch-results at greater indices, which will all be
+    /// reduced by `1`. This needs to be taken into account when holding onto indices to identify
+    /// switch-values. Internal to the [Rvsdg], this method will automatically adjust connections to
+    /// value-outputs/results at greater indices.
     pub fn remove_switch_output(&mut self, switch_node: Node, output: u32) {
         let index = output as usize;
         let node_data = self.nodes[switch_node].expect_switch_mut();
@@ -1969,6 +2604,15 @@ impl Rvsdg {
         }
     }
 
+    /// Links a [SwitchNode] into its region's state chain, in between the given `state_origin` and
+    /// its original user.
+    ///
+    /// The [SwitchNode] will be the `state_origin`'s new user, and the [SwitchNode] will be the
+    /// new [StateOrigin] for the `state_origin`'s original user.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [SwitchNode] is already linked into the state chain.
     pub fn link_switch_state(&mut self, switch_node: Node, state_origin: StateOrigin) {
         if self.nodes[switch_node].state().is_some() {
             panic!("switch node is already linked into the state chain")
@@ -1984,16 +2628,36 @@ impl Rvsdg {
         self.link_state(region, switch_node, state_origin);
     }
 
-    pub fn unlink_switch_state(&mut self, switch_node: Node, _state_origin: StateOrigin) {
+    /// Unlinks the [SwitchNode] from its region's state chain.
+    ///
+    /// Will leave the [SwitchNode]'s [StateOrigin] directly connected to the [SwitchNode]'s
+    /// [StateUser].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [SwitchNode] is not linked into its region's state chain.
+    pub fn unlink_switch_state(&mut self, switch_node: Node) {
         if self.nodes[switch_node].state().is_none() {
             panic!("switch node is not linked into the state chain")
         }
 
-        let _region = self.nodes[switch_node].region();
-
         self.unlink_state(switch_node);
     }
 
+    /// Adds a [LoopNode] to the given `region`.
+    ///
+    /// May supply a set of `value_inputs` that define the loop node's loop-values the node at
+    /// creation (see the [Loop Values](LoopNode#loop-values)). Loop-values may also be added later
+    /// with [Rvsdg::add_loop_input], or removed with [Rvsdg::remove_loop_input].
+    ///
+    /// May optionally supply a `state_origin`: if supplied, then the node will be inserted into the
+    /// state chain between the origin and the origin's prior user; if `None` the switch node will
+    /// not be part of the state chain. The [LoopNode] may also be linked into the state chain
+    /// later with [Rvsdg::link_loop_node], or unlinked with [Rvsdg::unlink_loop_node].
+    ///
+    /// Returns a [Node] handle for the newly created loop node.
+    ///
+    /// See the [LoopNode] documentation for more information.
     pub fn add_loop(
         &mut self,
         region: Region,
@@ -2058,6 +2722,25 @@ impl Rvsdg {
         (node, loop_region)
     }
 
+    /// Adds a new loop-value to a [SwitchNode].
+    ///
+    /// Since all parts of a loop-value (value-input, value-output, region-argument, and
+    /// region-result) are tightly coupled, we use a [ValueInput] to fully define all loop-value
+    /// parts.
+    ///
+    /// Returns the index of the new value-input and the new value-output.
+    ///
+    /// The new [ValueInput] will be appended onto the end of the [SwitchNode]'s list of inputs. If
+    /// a [SwitchNode] had `N` prior value-inputs (including the branch-selector input), then the
+    /// index of the new value-input will be `N`. Likewise, the new [ValueOutput] will be appended
+    /// onto the end of the [SwitchNode]'s list of outputs at index `N`; the [ValueOutput] will
+    /// initially have an empty user-set (see [ValueOutput::users]). A new argument will be appended
+    /// to the loop region's arguments with index `N`. A new result will be appended to the loop
+    /// region's result with index `N+1` (the first loop region argument is the reentry-condition,
+    /// so all loop-value result indices are offset by `1`). The new loop region result will use
+    /// the new loop region argument as its [ValueOrigin]; the new loop region argument will have
+    /// the new loop region result as its only [ValueUser]. The loop region result may be
+    /// reconnected to another value-output later with [Rvsdg::reconnect_region_result].
     pub fn add_loop_input(&mut self, loop_node: Node, input: ValueInput) -> u32 {
         let region = self.nodes[loop_node].region();
 
@@ -2081,6 +2764,21 @@ impl Rvsdg {
         input_index as u32
     }
 
+    /// Removes the loop-value for the given `input` index from a [LoopNode].
+    ///
+    /// Because for [LoopNode]s, value-inputs and value-outputs are tightly coupled, this also
+    /// removes the value-output at the same index, and its associated result in the loop region.
+    /// This value-output's user-set (see [ValueOutput::users]) must be empty. Because all
+    /// value-inputs for a [LoopNode] flow to the loop region's arguments, this also removes the
+    /// loop region argument at the same index. This argument's user-set must also be empty.
+    ///
+    /// This also removes the value-input from the user-set of its [ValueInput::origin].
+    ///
+    /// Unless the `input` is the [LoopNode]s last input, this will affect the indices associated
+    /// with any value-inputs/value-outputs/argument/results at greater indices, which will all be
+    /// reduced by `1`. This needs to be taken into account when holding onto indices to identify
+    /// loop-values. Internal to the [Rvsdg], this method will automatically adjust connections to
+    /// value-inputs/value-outputs/arguments/results at greater indices.
     pub fn remove_loop_input(&mut self, loop_node: Node, input: u32) {
         let index = input as usize;
 
@@ -2130,6 +2828,46 @@ impl Rvsdg {
                 input,
             },
         );
+    }
+
+    /// Links a [LoopNode] into its region's state chain, in between the given `state_origin` and
+    /// its original user.
+    ///
+    /// The [LoopNode] will be the `state_origin`'s new user, and the [LoopNode] will be the new
+    /// [StateOrigin] for the `state_origin`'s original user.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [LoopNode] is already linked into the state chain.
+    pub fn link_loop_state(&mut self, loop_node: Node, state_origin: StateOrigin) {
+        if self.nodes[loop_node].state().is_some() {
+            panic!("loop node is already linked into the state chain")
+        }
+
+        self.nodes[loop_node].expect_loop_mut().state = Some(State {
+            origin: state_origin,
+            user: StateUser::Result,
+        });
+
+        let region = self.nodes[loop_node].region();
+
+        self.link_state(region, loop_node, state_origin);
+    }
+
+    /// Unlinks the [LoopNode] from its region's state chain.
+    ///
+    /// Will leave the [LoopNode]'s [StateOrigin] directly connected to the [LoopNode]'s
+    /// [StateUser].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [LoopNode] is not linked into its region's state chain.
+    pub fn unlink_loop_state(&mut self, loop_node: Node) {
+        if self.nodes[loop_node].state().is_none() {
+            panic!("loop node is not linked into the state chain")
+        }
+
+        self.unlink_state(loop_node);
     }
 
     add_const_methods! {
@@ -2806,14 +3544,8 @@ impl Rvsdg {
 
     /// Inserts a proxy node into the given `region` in between the `origin` and the `user`.
     ///
-    /// A proxy node simply passes its input on to its output unmodified. This serves no semantic
-    /// function in the program, but can be useful as an intermediate construct during a transform.
-    /// For example, transformations may want to concurrently transform a graph during traversal.
-    /// However, removing/adding users from/to an output during concurrent iteration over that same
-    /// output's users may result in double visits or skipped visits. When replacing one node with
-    /// multiple nodes, rather than removing the node and adding the replacements as additional
-    /// users to the original producer, you might insert a proxy and instead modify the users of the
-    /// proxy.
+    /// For details on the purpose of proxy nodes, see the documentation for the [ValueProxy]
+    /// struct.
     ///
     /// # Panics
     ///
