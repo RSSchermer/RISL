@@ -67,11 +67,9 @@ fn render_forward_trace<W: Write>(
     writeln!(writer, "  Forward Trace:")?;
 
     for user in users {
-        writeln!(
-            writer,
-            "    - User: {}",
-            renderer.format_value_user(user, region)
-        )?;
+        write!(writer, "    - User: ")?;
+        renderer.write_value_user(writer, user, region)?;
+        writeln!(writer)?;
     }
 
     Ok(())
@@ -84,11 +82,9 @@ fn render_backward_trace<W: Write>(
     region: Option<Region>,
 ) -> Result<()> {
     writeln!(writer, "  Backward Trace:")?;
-    writeln!(
-        writer,
-        "    - Origin: {}",
-        renderer.format_value_origin(origin, region)
-    )?;
+    write!(writer, "    - Origin: ")?;
+    renderer.write_value_origin(writer, origin, region)?;
+    writeln!(writer)?;
 
     Ok(())
 }

@@ -11,13 +11,11 @@ pub fn render_list_mode<W: Write>(
 ) -> Result<()> {
     writeln!(writer, "Functions:")?;
     for (function, node) in rvsdg.registered_functions() {
-        writeln!(
-            writer,
-            "  - {}: {}{}",
-            renderer.format_node_id(node),
-            function.name.as_str(),
-            renderer.format_function_signature(node)
-        )?;
+        write!(writer, "  - ")?;
+        renderer.write_node_id(writer, node)?;
+        write!(writer, ": {}", function.name.as_str())?;
+        renderer.write_function_signature(writer, node)?;
+        writeln!(writer)?;
     }
 
     writeln!(writer, "\nGlobal Bindings:")?;
@@ -26,28 +24,25 @@ pub fn render_list_mode<W: Write>(
         let node_data = &rvsdg[node];
         match node_data.kind() {
             NodeKind::UniformBinding(_) => {
-                writeln!(
-                    writer,
-                    "  - Uniform: {} -> {}",
-                    renderer.format_node_id(node),
-                    renderer.format_type(node_data.value_outputs()[0].ty)
-                )?;
+                write!(writer, "  - Uniform: ")?;
+                renderer.write_node_id(writer, node)?;
+                write!(writer, " -> ")?;
+                renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
+                writeln!(writer)?;
             }
             NodeKind::StorageBinding(_) => {
-                writeln!(
-                    writer,
-                    "  - Storage: {} -> {}",
-                    renderer.format_node_id(node),
-                    renderer.format_type(node_data.value_outputs()[0].ty)
-                )?;
+                write!(writer, "  - Storage: ")?;
+                renderer.write_node_id(writer, node)?;
+                write!(writer, " -> ")?;
+                renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
+                writeln!(writer)?;
             }
             NodeKind::WorkgroupBinding(_) => {
-                writeln!(
-                    writer,
-                    "  - Workgroup: {} -> {}",
-                    renderer.format_node_id(node),
-                    renderer.format_type(node_data.value_outputs()[0].ty)
-                )?;
+                write!(writer, "  - Workgroup: ")?;
+                renderer.write_node_id(writer, node)?;
+                write!(writer, " -> ")?;
+                renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
+                writeln!(writer)?;
             }
             _ => {}
         }
@@ -57,13 +52,11 @@ pub fn render_list_mode<W: Write>(
     for &node in rvsdg[global_region].nodes() {
         let node_data = &rvsdg[node];
         if let NodeKind::Constant(c) = node_data.kind() {
-            writeln!(
-                writer,
-                "  - {} -> {} (\"{}\")",
-                renderer.format_node_id(node),
-                renderer.format_type(node_data.value_outputs()[0].ty),
-                c.constant().name.as_str()
-            )?;
+            write!(writer, "  - ")?;
+            renderer.write_node_id(writer, node)?;
+            write!(writer, " -> ")?;
+            renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
+            writeln!(writer, " (\"{}\")", c.constant().name.as_str())?;
         }
     }
 
@@ -102,7 +95,7 @@ mod tests {
 
         let mut rvsdg = Rvsdg::new(module.ty.clone());
 
-        // Register function
+        // Register functions
         rvsdg.register_function(&module, function, iter::empty());
 
         // Register a uniform binding

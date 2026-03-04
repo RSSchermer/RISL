@@ -60,12 +60,9 @@ fn render_function_internal<W: Write>(
     let node_data = &rvsdg[node];
     let f = node_data.expect_function();
 
-    writeln!(
-        writer,
-        "Function: {}{}",
-        name,
-        renderer.format_function_signature(node)
-    )?;
+    write!(writer, "Function: {}", name)?;
+    renderer.write_function_signature(writer, node)?;
+    writeln!(writer)?;
 
     // Render dependencies
     if !f.dependencies().is_empty() {
@@ -73,12 +70,11 @@ fn render_function_internal<W: Write>(
         for dep in f.dependencies() {
             match dep.origin {
                 ValueOrigin::Output { producer, .. } => {
-                    writeln!(
-                        writer,
-                        "    - {} -> {}",
-                        renderer.format_node_id(producer),
-                        renderer.format_type(dep.ty)
-                    )?;
+                    write!(writer, "    - ")?;
+                    renderer.write_node_id(writer, producer)?;
+                    write!(writer, " -> ")?;
+                    renderer.write_type(writer, dep.ty)?;
+                    writeln!(writer)?;
                 }
                 _ => {}
             }

@@ -110,9 +110,8 @@ mod tests {
 
         let renderer = Renderer::new(&rvsdg, 2, 1, true);
         let mut writer = Vec::new();
-        let node_id_str = renderer.format_node_id(switch_node);
 
-        render_node_mode(&rvsdg, &renderer, &mut writer, &node_id_str).unwrap();
+        render_node_mode(&rvsdg, &renderer, &mut writer, "Node(2v1)").unwrap();
 
         let output = String::from_utf8(writer).unwrap();
 

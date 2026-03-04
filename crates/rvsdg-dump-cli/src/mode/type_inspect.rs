@@ -14,7 +14,8 @@ pub fn render_type_inspect_mode<W: Write>(
     let ty_id = id_resolution::parse_type_id(ty_id_str)?;
     let ty = Type::from_registration_id(ty_id as usize);
 
-    write!(writer, "{}", renderer.format_type_detail(ty))?;
+    renderer.write_type_detail(writer, ty)?;
+    writeln!(writer)?;
 
     Ok(())
 }

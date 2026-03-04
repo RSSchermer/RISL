@@ -93,9 +93,8 @@ mod tests {
 
         let renderer = Renderer::new(&rvsdg, 0, 0, true);
         let mut writer = Vec::new();
-        let region_id_str = renderer.format_region_id(region);
 
-        render_region_mode(&rvsdg, &renderer, &mut writer, &region_id_str).unwrap();
+        render_region_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();
 
         let output = String::from_utf8(writer).unwrap();
         let expected = "\
@@ -213,9 +212,8 @@ Region (Region(2v1)):
 
         let renderer = Renderer::new(&rvsdg, 2, 1, true);
         let mut writer = Vec::new();
-        let region_id_str = renderer.format_region_id(region);
 
-        render_region_mode(&rvsdg, &renderer, &mut writer, &region_id_str).unwrap();
+        render_region_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();
 
         let output = String::from_utf8(writer).unwrap();
 

@@ -23,7 +23,9 @@ pub fn render_trace_state_mode<W: Write>(
     loop {
         match current_user {
             StateUser::Node(node) => {
-                writeln!(writer, "    -> {}", renderer.format_node_id(node))?;
+                write!(writer, "    -> ")?;
+                renderer.write_node_id(writer, node)?;
+                writeln!(writer)?;
 
                 if let Some(state) = rvsdg[node].state() {
                     current_user = state.user;
@@ -73,13 +75,12 @@ mod tests {
         );
 
         let mut rvsdg = Rvsdg::new(module.ty.clone());
-        let (_func_node, region) = rvsdg.register_function(&module, function, iter::empty());
+        let (_func_node, _region) = rvsdg.register_function(&module, function, iter::empty());
 
         let renderer = Renderer::new(&rvsdg, 0, 0, true);
         let mut writer = Vec::new();
-        let region_id_str = renderer.format_region_id(region);
 
-        render_trace_state_mode(&rvsdg, &renderer, &mut writer, &region_id_str).unwrap();
+        render_trace_state_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();
 
         let output = String::from_utf8(writer).unwrap();
         let expected = "\
@@ -135,9 +136,8 @@ State Trace for Region(2v1):
 
         let renderer = Renderer::new(&rvsdg, 0, 0, true);
         let mut writer = Vec::new();
-        let region_id_str = renderer.format_region_id(region);
 
-        render_trace_state_mode(&rvsdg, &renderer, &mut writer, &region_id_str).unwrap();
+        render_trace_state_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();
 
         let output = String::from_utf8(writer).unwrap();
 
