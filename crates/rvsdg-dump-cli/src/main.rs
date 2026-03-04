@@ -1,13 +1,16 @@
-mod id_resolution;
-mod renderer;
-mod mode;
+use crate::renderer::Renderer;
 
-use std::path::PathBuf;
-use clap::Parser;
-use anyhow::{Context, Result};
-use slir::rvsdg::Rvsdg;
+mod id_resolution;
+mod mode;
+mod renderer;
+
 use std::fs::File;
 use std::io::{BufReader, Write};
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use slir::rvsdg::Rvsdg;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -37,7 +40,8 @@ struct Args {
 
     /// Mode: Type Inspection (inspect declaration of a specific registered type)
     #[arg(long, value_name = "ID")]
-    #[clap(name = "type")] // Rename it to "type" for CLI usage if needed, but it's --type anyway.
+    #[clap(name = "type")]
+    // Rename it to "type" for CLI usage if needed, but it's --type anyway.
     type_inspect: Option<String>,
 
     /// Mode: Node Inspection (inspect a single node in isolation)
@@ -63,7 +67,7 @@ fn main() -> Result<()> {
     // Load RVSDG from file
     let rvsdg = load_rvsdg(&args.path)?;
 
-    let renderer = renderer::Renderer::new(
+    let renderer = Renderer::new(
         &rvsdg,
         args.inline_max_node_count,
         args.inline_max_nesting_level,
@@ -73,29 +77,32 @@ fn main() -> Result<()> {
     let mut stdout = std::io::stdout();
 
     if args.list {
-        mode::render_list(&rvsdg, &renderer, &mut stdout)?;
+        mode::render_list_mode(&rvsdg, &renderer, &mut stdout)?;
     } else if let Some(ref func_name) = args.function {
-        mode::render_function(&rvsdg, &renderer, &mut stdout, func_name)?;
+        mode::render_function_mode(&rvsdg, &renderer, &mut stdout, func_name)?;
     } else if let Some(ref region_id_str) = args.region {
         mode::render_region_mode(&rvsdg, &renderer, &mut stdout, region_id_str)?;
     } else if let Some(ref ty_id_str) = args.type_inspect {
-        mode::render_type_inspect(&renderer, &mut stdout, ty_id_str)?;
+        mode::render_type_inspect_mode(&renderer, &mut stdout, ty_id_str)?;
     } else if let Some(ref value_id_str) = args.trace_value {
-        mode::render_trace_value(&rvsdg, &renderer, &mut stdout, value_id_str)?;
+        mode::render_trace_value_mode(&rvsdg, &renderer, &mut stdout, value_id_str)?;
     } else if let Some(ref region_id_str) = args.trace_state {
-        mode::render_trace_state(&rvsdg, &renderer, &mut stdout, region_id_str)?;
+        mode::render_trace_state_mode(&rvsdg, &renderer, &mut stdout, region_id_str)?;
     } else if let Some(ref node_id_str) = args.node {
         mode::render_node_mode(&rvsdg, &renderer, &mut stdout, node_id_str)?;
     } else {
-        writeln!(stdout, "No mode selected. Use --help for usage information.")?;
+        writeln!(
+            stdout,
+            "No mode selected. Use --help for usage information."
+        )?;
     }
 
     Ok(())
 }
 
 fn load_rvsdg(path: &PathBuf) -> Result<Rvsdg> {
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open RVSDG dump file: {:?}", path))?;
+    let file =
+        File::open(path).with_context(|| format!("Failed to open RVSDG dump file: {:?}", path))?;
     let mut reader = BufReader::new(file);
 
     // Using bincode 2 with serde.

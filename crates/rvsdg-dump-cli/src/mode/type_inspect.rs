@@ -1,19 +1,94 @@
 use std::io::Write;
-use crate::renderer::Renderer;
-use anyhow::{Result, Context};
 
-pub fn render_type_inspect<W: Write>(renderer: &Renderer, writer: &mut W, ty_id_str: &str) -> Result<()> {
+use anyhow::{Context, Result};
+use slir::ty::Type;
+
+use crate::renderer::Renderer;
+
+pub fn render_type_inspect_mode<W: Write>(
+    renderer: &Renderer,
+    writer: &mut W,
+    ty_id_str: &str,
+) -> Result<()> {
     // Resolve type ID
     // types are just indices in TypeRegistry
     let ty_id: u32 = if ty_id_str.starts_with("struct(") || ty_id_str.starts_with("enum(") {
         let start = ty_id_str.find('(').unwrap() + 1;
         let end = ty_id_str.find(')').unwrap();
-        ty_id_str[start..end].parse().context("Failed to parse type ID")?
+        ty_id_str[start..end]
+            .parse()
+            .context("Failed to parse type ID")?
     } else {
         ty_id_str.parse().context("Failed to parse type ID")?
     };
 
-    let ty = slir::ty::Type::from_registration_id(ty_id as usize);
-    writeln!(writer, "{}", renderer.format_type_detail(ty))?;
+    let ty = Type::from_registration_id(ty_id as usize);
+    write!(writer, "{}", renderer.format_type_detail(ty))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use slir::rvsdg::Rvsdg;
+    use slir::ty::{Enum, Struct, StructField, TY_F32, TY_U32, TypeKind, TypeRegistry};
+
+    use super::*;
+    use crate::renderer::Renderer;
+
+    #[test]
+    fn test_render_type_struct() {
+        let registry = TypeRegistry::default();
+        let struct_ty = registry.register(TypeKind::Struct(Struct {
+            fields: vec![
+                StructField {
+                    ty: TY_U32,
+                    offset: 0,
+                    io_binding: None,
+                },
+                StructField {
+                    ty: TY_F32,
+                    offset: 4,
+                    io_binding: None,
+                },
+            ],
+        }));
+
+        let rvsdg = Rvsdg::new(registry.into());
+        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let mut writer = Vec::new();
+
+        let ty_id_str = format!("struct({})", struct_ty.registration_id().unwrap());
+        render_type_inspect_mode(&renderer, &mut writer, &ty_id_str).unwrap();
+
+        let output = String::from_utf8(writer).unwrap();
+        let expected = "\
+struct(0):
+  - field 0: u32 (offset: 0)
+  - field 1: f32 (offset: 4)
+";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_render_type_enum() {
+        let registry = TypeRegistry::default();
+        let enum_ty = registry.register(TypeKind::Enum(Enum {
+            variants: vec![TY_U32, TY_F32],
+        }));
+
+        let rvsdg = Rvsdg::new(registry.into());
+        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let mut writer = Vec::new();
+
+        let ty_id_str = format!("enum({})", enum_ty.registration_id().unwrap());
+        render_type_inspect_mode(&renderer, &mut writer, &ty_id_str).unwrap();
+
+        let output = String::from_utf8(writer).unwrap();
+        let expected = "\
+enum(0):
+  - variant 0: u32
+  - variant 1: f32
+";
+        assert_eq!(output, expected);
+    }
 }
