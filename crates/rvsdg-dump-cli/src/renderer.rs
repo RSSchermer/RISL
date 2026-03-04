@@ -108,7 +108,7 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    pub fn format_value_user(&self, user: ValueUser) -> String {
+    pub fn format_value_user(&self, user: ValueUser, _region: Option<Region>) -> String {
         match user {
             ValueUser::Result(res) => format!("r{}", res),
             ValueUser::Input { consumer, input } => {
@@ -156,17 +156,11 @@ impl<'a> Renderer<'a> {
         sig
     }
 
-    pub fn render_region(&self, region: Region, indent: usize, nesting_level: u32) -> String {
-        let mut output = Vec::new();
-        self.write_region(&mut output, region, indent, nesting_level)
-            .unwrap();
-        String::from_utf8(output).unwrap()
-    }
-
     pub fn write_region<W: std::io::Write>(
         &self,
         writer: &mut W,
         region: Region,
+        header_name: &str,
         indent: usize,
         nesting_level: u32,
     ) -> std::io::Result<()> {
@@ -174,7 +168,7 @@ impl<'a> Renderer<'a> {
         let id_str = self.format_region_id(region);
         let indent_str = " ".repeat(indent);
 
-        writeln!(writer, "{}Region({}):", indent_str, id_str)?;
+        writeln!(writer, "{}{} ({}):", indent_str, header_name, id_str)?;
 
         // Arguments
         let args: Vec<String> = region_data
@@ -197,11 +191,8 @@ impl<'a> Renderer<'a> {
         for nodes in strata.values() {
             for &node in nodes {
                 write!(writer, "{}  ", indent_str)?;
-                self.write_node(writer, node)?;
+                self.write_node(writer, node, indent + 4, nesting_level)?;
                 writeln!(writer)?;
-
-                // Handle nested regions (Smart Inlining)
-                self.write_nested_regions(writer, node, indent + 4, nesting_level)?;
             }
         }
 
@@ -224,47 +215,11 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    pub fn render_nested_regions(
-        &self,
-        node: Node,
-        output: &mut String,
-        indent: usize,
-        nesting_level: u32,
-    ) {
-        let mut buf = Vec::new();
-        self.write_nested_regions(&mut buf, node, indent, nesting_level)
-            .unwrap();
-        output.push_str(&String::from_utf8(buf).unwrap());
-    }
-
-    pub fn write_nested_regions<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-        node: Node,
-        indent: usize,
-        nesting_level: u32,
-    ) -> std::io::Result<()> {
-        let node_data = &self.rvsdg[node];
-
-        match node_data.kind() {
-            NodeKind::Switch(n) => {
-                for &region in n.branches() {
-                    self.write_nested_region_with_inlining(writer, region, indent, nesting_level)?;
-                }
-            }
-            NodeKind::Loop(n) => {
-                let region = n.loop_region();
-                self.write_nested_region_with_inlining(writer, region, indent, nesting_level)?;
-            }
-            _ => {}
-        };
-        Ok(())
-    }
-
     fn write_nested_region_with_inlining<W: std::io::Write>(
         &self,
         writer: &mut W,
         region: Region,
+        header_name: &str,
         indent: usize,
         nesting_level: u32,
     ) -> std::io::Result<()> {
@@ -273,13 +228,15 @@ impl<'a> Renderer<'a> {
 
         if node_count <= self.inline_max_node_count && nesting_level < self.inline_max_nesting_level
         {
-            self.write_region(writer, region, indent, nesting_level + 1)?;
+            write!(writer, "\n")?;
+            self.write_region(writer, region, header_name, indent, nesting_level + 1)?;
         } else {
             let indent_str = " ".repeat(indent);
-            writeln!(
+            write!(
                 writer,
-                "{}Region({}): {} child nodes",
+                "{}{} ({}): {} child nodes",
                 indent_str,
+                header_name,
                 self.format_region_id(region),
                 node_count
             )?;
@@ -287,26 +244,207 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    pub fn render_node(&self, node: Node) -> String {
-        let mut output = Vec::new();
-        self.write_node(&mut output, node).unwrap();
-        String::from_utf8(output).unwrap()
+    pub fn write_node<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+        indent: usize,
+        nesting_level: u32,
+    ) -> std::io::Result<()> {
+        match self.rvsdg[node].kind() {
+            NodeKind::Function(_) => self.write_node_common(writer, node, "FunctionNode"),
+            NodeKind::UniformBinding(_) => self.write_node_common(writer, node, "UniformBinding"),
+            NodeKind::StorageBinding(_) => self.write_node_common(writer, node, "StorageBinding"),
+            NodeKind::WorkgroupBinding(_) => {
+                self.write_node_common(writer, node, "WorkgroupBinding")
+            }
+            NodeKind::Constant(_) => self.write_node_common(writer, node, "Constant"),
+            NodeKind::Simple(_) => self.write_simple_node(writer, node),
+            NodeKind::Switch(_) => self.write_switch_node(writer, node, indent, nesting_level),
+            NodeKind::Loop(_) => self.write_loop_node(writer, node, indent, nesting_level),
+        }
     }
 
-    pub fn write_node<W: std::io::Write>(&self, writer: &mut W, node: Node) -> std::io::Result<()> {
+    fn write_simple_node<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+    ) -> std::io::Result<()> {
+        use slir::rvsdg::SimpleNode;
+        let node_data = &self.rvsdg[node];
+        let simple = node_data.expect_simple();
+        match simple {
+            SimpleNode::ConstU32(n) => {
+                self.write_node_common(writer, node, &format!("ConstU32{{{}}}", n.value()))
+            }
+            SimpleNode::ConstI32(n) => {
+                self.write_node_common(writer, node, &format!("ConstI32{{{}}}", n.value()))
+            }
+            SimpleNode::ConstF32(n) => {
+                self.write_node_common(writer, node, &format!("ConstF32{{{}}}", n.value()))
+            }
+            SimpleNode::ConstBool(n) => {
+                self.write_node_common(writer, node, &format!("ConstBool{{{}}}", n.value()))
+            }
+            SimpleNode::ConstPredicate(n) => {
+                self.write_node_common(writer, node, &format!("ConstPredicate{{{}}}", n.value()))
+            }
+            SimpleNode::ConstPtr(n) => self.write_node_common(
+                writer,
+                node,
+                &format!(
+                    "ConstPtr{{pointee_ty: {}}}",
+                    self.format_type(n.pointee_ty())
+                ),
+            ),
+            SimpleNode::ConstFallback(_) => self.write_node_common(writer, node, "ConstFallback"),
+            SimpleNode::OpAlloca(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpAlloca{{ty: {}}}", self.format_type(n.ty())),
+            ),
+            SimpleNode::OpLoad(_) => self.write_node_common(writer, node, "OpLoad"),
+            SimpleNode::OpStore(_) => self.write_node_common(writer, node, "OpStore"),
+            SimpleNode::OpExtractField(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpExtractField{{field_index: {}}}", n.field_index()),
+            ),
+            SimpleNode::OpExtractElement(_) => {
+                self.write_node_common(writer, node, "OpExtractElement")
+            }
+            SimpleNode::OpFieldPtr(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpFieldPtr{{field_index: {}}}", n.field_index()),
+            ),
+            SimpleNode::OpElementPtr(_) => self.write_node_common(writer, node, "OpElementPtr"),
+            SimpleNode::OpDiscriminantPtr(_) => {
+                self.write_node_common(writer, node, "OpDiscriminantPtr")
+            }
+            SimpleNode::OpVariantPtr(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpVariantPtr{{variant_index: {}}}", n.variant_index()),
+            ),
+            SimpleNode::OpGetDiscriminant(_) => {
+                self.write_node_common(writer, node, "OpGetDiscriminant")
+            }
+            SimpleNode::OpSetDiscriminant(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpSetDiscriminant{{variant_index: {}}}", n.variant_index()),
+            ),
+            SimpleNode::OpOffsetSlice(_) => self.write_node_common(writer, node, "OpOffsetSlice"),
+            SimpleNode::OpGetSliceOffset(_) => {
+                self.write_node_common(writer, node, "OpGetSliceOffset")
+            }
+            SimpleNode::OpUnary(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpUnary{{operator: {}}}", n.operator()),
+            ),
+            SimpleNode::OpBinary(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpBinary{{operator: {}}}", n.operator()),
+            ),
+            SimpleNode::OpVector(n) => {
+                self.write_node_common(writer, node, &format!("OpVector{{ty: {}}}", n.ty()))
+            }
+            SimpleNode::OpMatrix(n) => {
+                self.write_node_common(writer, node, &format!("OpMatrix{{ty: {}}}", n.ty()))
+            }
+            SimpleNode::OpCaseToBranchSelector(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpCaseToBranchSelector{{cases: {:?}}}", n.cases()),
+            ),
+            SimpleNode::OpBoolToBranchSelector(_) => {
+                self.write_node_common(writer, node, "OpBoolToBranchSelector")
+            }
+            SimpleNode::OpU32ToBranchSelector(n) => self.write_node_common(
+                writer,
+                node,
+                &format!(
+                    "OpU32ToBranchSelector{{branch_count: {}}}",
+                    n.branch_count()
+                ),
+            ),
+            SimpleNode::OpBranchSelectorToCase(n) => self.write_node_common(
+                writer,
+                node,
+                &format!("OpBranchSelectorToCase{{cases: {:?}}}", n.cases()),
+            ),
+            SimpleNode::OpConvertToU32(_) => self.write_node_common(writer, node, "OpConvertToU32"),
+            SimpleNode::OpConvertToI32(_) => self.write_node_common(writer, node, "OpConvertToI32"),
+            SimpleNode::OpConvertToF32(_) => self.write_node_common(writer, node, "OpConvertToF32"),
+            SimpleNode::OpConvertToBool(_) => {
+                self.write_node_common(writer, node, "OpConvertToBool")
+            }
+            SimpleNode::OpArrayLength(_) => self.write_node_common(writer, node, "OpArrayLength"),
+            SimpleNode::OpCall(_) => self.write_node_common(writer, node, "OpCall"),
+            SimpleNode::ValueProxy(_) => self.write_node_common(writer, node, "ValueProxy"),
+            SimpleNode::Reaggregation(_) => self.write_node_common(writer, node, "Reaggregation"),
+        }
+    }
+
+    fn write_switch_node<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+        indent: usize,
+        nesting_level: u32,
+    ) -> std::io::Result<()> {
+        self.write_node_common(writer, node, "Switch")?;
+
+        let node_data = &self.rvsdg[node];
+        if let NodeKind::Switch(n) = node_data.kind() {
+            for (i, &region) in n.branches().iter().enumerate() {
+                let header = format!("Branch {}", i);
+                self.write_nested_region_with_inlining(
+                    writer,
+                    region,
+                    &header,
+                    indent,
+                    nesting_level,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_loop_node<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+        indent: usize,
+        nesting_level: u32,
+    ) -> std::io::Result<()> {
+        self.write_node_common(writer, node, "Loop")?;
+
+        let node_data = &self.rvsdg[node];
+        if let NodeKind::Loop(n) = node_data.kind() {
+            let region = n.loop_region();
+            self.write_nested_region_with_inlining(
+                writer,
+                region,
+                "Loop Region",
+                indent,
+                nesting_level,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_node_common<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+        op_str: &str,
+    ) -> std::io::Result<()> {
         let node_data = &self.rvsdg[node];
         let id_str = self.format_node_id(node);
-
-        let op_str = match node_data.kind() {
-            NodeKind::Function(_) => format!("FunctionNode"),
-            NodeKind::UniformBinding(_) => format!("UniformBinding"),
-            NodeKind::StorageBinding(_) => format!("StorageBinding"),
-            NodeKind::WorkgroupBinding(_) => format!("WorkgroupBinding"),
-            NodeKind::Constant(_) => format!("Constant"),
-            NodeKind::Simple(_n) => self.format_simple_node(node),
-            NodeKind::Switch(_) => format!("Switch"),
-            NodeKind::Loop(_) => format!("Loop"),
-        };
 
         let inputs: Vec<String> = node_data
             .value_inputs()
@@ -337,40 +475,15 @@ impl<'a> Renderer<'a> {
 
         write!(
             writer,
-            "[{}] {}({}){} -> {}",
+            "[{}] {}({}){}",
             id_str,
             op_str,
             inputs.join(", "),
-            state_str,
-            all_outputs.join(", ")
-        )
-    }
+            state_str
+        )?;
 
-    fn format_simple_node(&self, node: Node) -> String {
-        let node_data = &self.rvsdg[node];
-        if node_data.is_simple() {
-            let simple = node_data.expect_simple();
-            let debug_str = format!("{:?}", simple);
-            // Example: IntrinsicNode { intrinsic: OpLoad, ... }
-            // or IntrinsicNode { intrinsic: OpFieldPtr { field_index: 0 }, ... }
-            if let Some(start) = debug_str.find("intrinsic: ") {
-                let rest = &debug_str[start + 11..];
-                if let Some(end) = rest.find(", value_inputs") {
-                    let intrinsic_debug = rest[..end].to_string();
-                    // Clean up: OpFieldPtr { field_index: 0 } -> OpFieldPtr(field_index: 0)
-                    if let Some(brace_start) = intrinsic_debug.find(" { ") {
-                        if let Some(brace_end) = intrinsic_debug.rfind(" }") {
-                            let fields = &intrinsic_debug[brace_start + 3..brace_end];
-                            let name = &intrinsic_debug[..brace_start];
-                            return format!("{}({})", name, fields);
-                        }
-                    }
-                    return intrinsic_debug;
-                }
-            }
-            "Op".to_string()
-        } else {
-            "Simple".to_string()
-        }
+        write!(writer, " -> {}", all_outputs.join(", "))?;
+
+        Ok(())
     }
 }

@@ -86,7 +86,7 @@ fn render_function_internal<W: Write>(
         writeln!(writer)?;
     }
 
-    renderer.write_region(writer, f.body_region(), 0, 0)?;
+    renderer.write_region(writer, f.body_region(), "Body Region", 0, 0)?;
 
     Ok(())
 }
@@ -194,9 +194,9 @@ Function: test_func(arg0: u32, arg1: u32) -> u32
     - Node(1v1) -> u32
     - Node(2v1) -> u32
 
-Region(Region(2v1)):
+Body Region (Region(2v1)):
   Arguments: [Region(2v1)a0: u32, Region(2v1)a1: u32, Region(2v1)a2: u32, Region(2v1)a3: u32, Region(2v1)s: State]
-  [Node(4v1)] OpBinary(operator: Add)(Region(2v1)a2, Region(2v1)a3) -> Node(4v1)e0 : u32
+  [Node(4v1)] OpBinary{operator: +}(Region(2v1)a2, Region(2v1)a3) -> Node(4v1)e0 : u32
   Results: [Node(4v1)e0, Region(2v1)s]
 ";
         assert_eq!(output, expected);

@@ -27,6 +27,7 @@ pub fn render_trace_value_mode<W: Write>(
                     .users
                     .iter()
                     .copied(),
+                node_data.region().into(),
             )?;
         }
         id_resolution::ParsedValueId::NodeInput(node, input_idx) => {
@@ -45,6 +46,7 @@ pub fn render_trace_value_mode<W: Write>(
                     .users
                     .iter()
                     .copied(),
+                Some(region),
             )?;
         }
         id_resolution::ParsedValueId::RegionResult(region, res_idx) => {
@@ -60,11 +62,16 @@ fn render_forward_trace<W: Write>(
     writer: &mut W,
     renderer: &Renderer,
     users: impl IntoIterator<Item = ValueUser>,
+    region: Option<Region>,
 ) -> Result<()> {
     writeln!(writer, "  Forward Trace:")?;
 
     for user in users {
-        writeln!(writer, "    - User: {}", renderer.format_value_user(user))?;
+        writeln!(
+            writer,
+            "    - User: {}",
+            renderer.format_value_user(user, region)
+        )?;
     }
 
     Ok(())

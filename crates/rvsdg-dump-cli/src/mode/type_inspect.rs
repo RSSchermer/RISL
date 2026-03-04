@@ -1,8 +1,9 @@
 use std::io::Write;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use slir::ty::Type;
 
+use crate::id_resolution;
 use crate::renderer::Renderer;
 
 pub fn render_type_inspect_mode<W: Write>(
@@ -10,20 +11,11 @@ pub fn render_type_inspect_mode<W: Write>(
     writer: &mut W,
     ty_id_str: &str,
 ) -> Result<()> {
-    // Resolve type ID
-    // types are just indices in TypeRegistry
-    let ty_id: u32 = if ty_id_str.starts_with("struct(") || ty_id_str.starts_with("enum(") {
-        let start = ty_id_str.find('(').unwrap() + 1;
-        let end = ty_id_str.find(')').unwrap();
-        ty_id_str[start..end]
-            .parse()
-            .context("Failed to parse type ID")?
-    } else {
-        ty_id_str.parse().context("Failed to parse type ID")?
-    };
-
+    let ty_id = id_resolution::parse_type_id(ty_id_str)?;
     let ty = Type::from_registration_id(ty_id as usize);
+
     write!(writer, "{}", renderer.format_type_detail(ty))?;
+
     Ok(())
 }
 

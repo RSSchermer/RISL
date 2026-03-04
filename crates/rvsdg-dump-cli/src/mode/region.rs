@@ -14,7 +14,7 @@ pub fn render_region_mode<W: Write>(
 ) -> Result<()> {
     let region_id = id_resolution::parse_region_id(region_id_str)?;
 
-    renderer.write_region(writer, region_id, 0, 0)?;
+    renderer.write_region(writer, region_id, "Region", 0, 0)?;
 
     Ok(())
 }
@@ -99,7 +99,7 @@ mod tests {
 
         let output = String::from_utf8(writer).unwrap();
         let expected = "\
-Region(Region(2v1)):
+Region (Region(2v1)):
   Arguments: [Region(2v1)a0: u32, Region(2v1)a1: ptr<u32>, Region(2v1)s: State]
   [Node(3v1)] OpLoad(Region(2v1)a1) (state: Arg) -> Node(3v1)e0 : u32, Node(3v1)s : State
   [Node(4v1)] OpStore(Region(2v1)a1, Node(3v1)e0) (state: Node(3v1)) -> Node(4v1)s : State
@@ -233,14 +233,14 @@ Region(Region(2v1)):
         // Node(8v1): node_c
 
         let expected = "\
-Region(Region(2v1)):
+Region (Region(2v1)):
   Arguments: [Region(2v1)a0: predicate, Region(2v1)a1: u32, Region(2v1)s: State]
   [Node(4v1)] Switch(Region(2v1)a0, Region(2v1)a1) -> Node(4v1)e0 : u32
-    Region(Region(3v1)):
+    Branch 0 (Region(3v1)):
       Arguments: [Region(3v1)a0: u32, Region(3v1)s: State]
-      [Node(5v1)] OpBinary(operator: Add)(Region(3v1)a0, Region(3v1)a0) -> Node(5v1)e0 : u32
+      [Node(5v1)] OpBinary{operator: +}(Region(3v1)a0, Region(3v1)a0) -> Node(5v1)e0 : u32
       Results: [Node(5v1)e0, Region(3v1)s]
-    Region(Region(4v1)): 3 child nodes
+    Branch 1 (Region(4v1)): 3 child nodes
   Results: [Node(4v1)e0, Region(2v1)s]
 ";
         assert_eq!(output, expected);

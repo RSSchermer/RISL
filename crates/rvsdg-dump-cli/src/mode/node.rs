@@ -13,15 +13,8 @@ pub fn render_node_mode<W: Write>(
     node_id_str: &str,
 ) -> Result<()> {
     let node_id = id_resolution::parse_node_id(node_id_str)?;
-    renderer.write_node(writer, node_id)?;
+    renderer.write_node(writer, node_id, 0, 0)?;
     writeln!(writer)?;
-    // Also show nested regions
-    let mut nested = String::new();
-    renderer.render_nested_regions(node_id, &mut nested, 2, 0);
-    if !nested.is_empty() {
-        writeln!(writer, "  Nested Regions:")?;
-        write!(writer, "{}", nested)?;
-    }
     Ok(())
 }
 
@@ -137,12 +130,11 @@ mod tests {
 
         let expected = "\
 [Node(2v1)] Switch(Region(2v1)a0, Region(2v1)a1) -> Node(2v1)e0 : u32
-  Nested Regions:
-  Region(Region(3v1)):
-    Arguments: [Region(3v1)a0: u32, Region(3v1)s: State]
-    [Node(3v1)] OpBinary(operator: Add)(Region(3v1)a0, Region(3v1)a0) -> Node(3v1)e0 : u32
-    Results: [Node(3v1)e0, Region(3v1)s]
-  Region(Region(4v1)): 3 child nodes
+Branch 0 (Region(3v1)):
+  Arguments: [Region(3v1)a0: u32, Region(3v1)s: State]
+  [Node(3v1)] OpBinary{operator: +}(Region(3v1)a0, Region(3v1)a0) -> Node(3v1)e0 : u32
+  Results: [Node(3v1)e0, Region(3v1)s]
+Branch 1 (Region(4v1)): 3 child nodes
 ";
         assert_eq!(output, expected);
     }

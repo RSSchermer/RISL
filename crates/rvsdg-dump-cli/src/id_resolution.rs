@@ -1,20 +1,20 @@
-use std::sync::OnceLock;
-
-use anyhow::{Context, Result, anyhow};
-use regex::Regex;
+use anyhow::{Result, anyhow};
+use nom::bytes::complete::tag;
+use nom::character::complete::{char, digit1, one_of};
+use nom::combinator::map_res;
+use nom::sequence::delimited;
+use nom::{IResult, Parser};
 use slir::rvsdg::{Node, Region};
 use slotmap::KeyData;
 
-static NODE_REGION_REGEX: OnceLock<Regex> = OnceLock::new();
-static VALUE_ID_REGEX: OnceLock<Regex> = OnceLock::new();
-
-fn get_node_region_regex() -> &'static Regex {
-    NODE_REGION_REGEX.get_or_init(|| Regex::new(r"^(Node|Region)\((\d+)v(\d+)\)$").unwrap())
+fn parse_u32(input: &str) -> IResult<&str, u32> {
+    map_res(digit1, |s: &str| s.parse::<u32>()).parse(input)
 }
 
-fn get_value_id_regex() -> &'static Regex {
-    VALUE_ID_REGEX
-        .get_or_init(|| Regex::new(r"^(Node|Region)\((\d+)v(\d+)\)([eiar])(\d+)$").unwrap())
+fn parse_id_inner(input: &str) -> IResult<&str, (u32, u32)> {
+    (parse_u32, char('v'), parse_u32)
+        .map(|(index, _, version)| (index, version))
+        .parse(input)
 }
 
 fn construct_key<T: From<KeyData>>(index: u32, version: u32) -> T {
@@ -23,33 +23,47 @@ fn construct_key<T: From<KeyData>>(index: u32, version: u32) -> T {
 }
 
 pub fn parse_node_id(id: &str) -> Result<Node> {
-    let caps = get_node_region_regex()
-        .captures(id)
-        .ok_or_else(|| anyhow!("Invalid ID format: {}. Expected Node(indexvversion)", id))?;
-
-    if &caps[1] != "Node" {
-        return Err(anyhow!("Expected Node ID, found {}", &caps[1]));
-    }
-
-    let index: u32 = caps[2].parse().context("Failed to parse node index")?;
-    let version: u32 = caps[3].parse().context("Failed to parse node version")?;
+    let (_, (index, version)) = delimited(tag("Node("), parse_id_inner, char(')'))
+        .parse(id)
+        .map_err(|e| {
+            anyhow!(
+                "Invalid Node ID format: {}. Expected Node(<index>v<version>)",
+                e
+            )
+        })?;
 
     Ok(construct_key(index, version))
 }
 
 pub fn parse_region_id(id: &str) -> Result<Region> {
-    let caps = get_node_region_regex()
-        .captures(id)
-        .ok_or_else(|| anyhow!("Invalid ID format: {}. Expected Region(indexvversion)", id))?;
-
-    if &caps[1] != "Region" {
-        return Err(anyhow!("Expected Region ID, found {}", &caps[1]));
-    }
-
-    let index: u32 = caps[2].parse().context("Failed to parse region index")?;
-    let version: u32 = caps[3].parse().context("Failed to parse region version")?;
+    let (_, (index, version)) = delimited(tag("Region("), parse_id_inner, char(')'))
+        .parse(id)
+        .map_err(|e| {
+            anyhow!(
+                "Invalid Region ID format: {}. Expected Region(<index>v<version>)",
+                e
+            )
+        })?;
 
     Ok(construct_key(index, version))
+}
+
+pub fn parse_type_id(id: &str) -> Result<u32> {
+    // Matches "struct(0)", "enum(0)" or "0"
+    let mut parser = nom::branch::alt((
+        delimited(tag("struct("), parse_u32, char(')')),
+        delimited(tag("enum("), parse_u32, char(')')),
+        parse_u32,
+    ));
+
+    let (_, ty_id) = parser.parse(id).map_err(|e| {
+        anyhow!(
+            "Invalid Type ID format: {}. Expected struct(<id>), enum(<id>), or <id>",
+            e
+        )
+    })?;
+
+    Ok(ty_id)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,29 +75,35 @@ pub enum ParsedValueId {
 }
 
 pub fn parse_value_id(id: &str) -> Result<ParsedValueId> {
-    let caps = get_value_id_regex().captures(id)
-        .ok_or_else(|| anyhow!("Invalid Value ID format: {}. Expected Node(indexvversion)[ei]index or Region(indexvversion)[ar]index", id))?;
-
-    let kind = &caps[1];
-    let index: u32 = caps[2].parse().context("Failed to parse index")?;
-    let version: u32 = caps[3].parse().context("Failed to parse version")?;
-    let type_char = &caps[4];
-    let sub_index: u32 = caps[5].parse().context("Failed to parse sub-index")?;
+    let (_, (kind, (index, version), type_char, sub_index)) = (
+        nom::branch::alt((tag("Node"), tag("Region"))),
+        delimited(char('('), parse_id_inner, char(')')),
+        one_of("eiar"),
+        parse_u32,
+    )
+        .parse(id)
+        .map_err(|e| {
+            anyhow!(
+                "Invalid Value ID format: {}. Expected Node(<index>v<version>)[ei]<index> or \
+                Region(<index>v<version>)[ar]<index>",
+                e
+            )
+        })?;
 
     match (kind, type_char) {
-        ("Node", "e") => Ok(ParsedValueId::NodeOutput(
+        ("Node", 'e') => Ok(ParsedValueId::NodeOutput(
             construct_key(index, version),
             sub_index,
         )),
-        ("Node", "i") => Ok(ParsedValueId::NodeInput(
+        ("Node", 'i') => Ok(ParsedValueId::NodeInput(
             construct_key(index, version),
             sub_index,
         )),
-        ("Region", "a") => Ok(ParsedValueId::RegionArgument(
+        ("Region", 'a') => Ok(ParsedValueId::RegionArgument(
             construct_key(index, version),
             sub_index,
         )),
-        ("Region", "r") => Ok(ParsedValueId::RegionResult(
+        ("Region", 'r') => Ok(ParsedValueId::RegionResult(
             construct_key(index, version),
             sub_index,
         )),
