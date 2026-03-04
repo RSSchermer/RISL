@@ -1,0 +1,16 @@
+[package]
+name = "rvsdg-dump-cli"
+description = "Command line interface for the exploration of RVSDG dump files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }
+clap = { workspace = true, features = ["derive"] }
+color-print = { workspace = true }
+slir = { workspace = true }
+slotmap = { workspace = true }
+regex = { workspace = true }

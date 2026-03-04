@@ -8,6 +8,7 @@ members = [
     "crates/library/risl_request",
     "crates/library/risl_smi",
     "crates/risl_cargo",
+    "crates/rvsdg-dump-cli",
     "crates/slir-explorer",
     "tests/behavioral-tests",
     "tests/behavioral-tests-macros",
@@ -25,6 +26,7 @@ default-members = [
     "crates/compiler/slir",
     "crates/library/risl",
     "crates/library/risl_macros",
+    "crates/rvsdg-dump-cli",
     "crates/slir-explorer",
 ]
 
@@ -43,6 +45,7 @@ bit-set = "0.8"
 bit-vec = "0.8"
 cargo = "0.93"
 cargo-util = "0.2"
+clap = "4.5"
 color-print = "0.3"
 delegate = "0.13"
 either = "1"
