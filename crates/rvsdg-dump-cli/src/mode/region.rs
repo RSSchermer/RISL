@@ -15,6 +15,7 @@ pub fn render_region_mode<W: Write>(
     let region_id = id_resolution::parse_region_id(region_id_str)?;
 
     renderer.write_region(writer, region_id, "Region", 0, 0)?;
+    writeln!(writer)?;
 
     Ok(())
 }

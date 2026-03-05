@@ -242,15 +242,22 @@ impl<'a> Renderer<'a> {
         }
 
         match region_data.state_result() {
-            StateOrigin::Argument | StateOrigin::Node(_) => {
+            StateOrigin::Argument => {
                 if res_count > 0 {
                     write!(writer, ", ")?;
                 }
                 self.write_region_id(writer, region)?;
                 write!(writer, "s")?;
             }
+            StateOrigin::Node(node) => {
+                if res_count > 0 {
+                    write!(writer, ", ")?;
+                }
+                self.write_node_id(writer, *node)?;
+                write!(writer, "s")?;
+            }
         }
-        writeln!(writer, "]")?;
+        write!(writer, "]")?;
 
         Ok(())
     }
@@ -266,9 +273,10 @@ impl<'a> Renderer<'a> {
         let region_data = &self.rvsdg[region];
         let node_count = region_data.nodes().len() as u32;
 
+        writeln!(writer)?;
+
         if node_count <= self.inline_max_node_count && nesting_level < self.inline_max_nesting_level
         {
-            write!(writer, "\n")?;
             self.write_region(writer, region, header_name, indent, nesting_level + 1)?;
         } else {
             let indent_str = " ".repeat(indent);

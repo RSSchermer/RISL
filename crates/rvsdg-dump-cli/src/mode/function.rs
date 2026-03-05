@@ -35,6 +35,8 @@ pub fn render_function_mode<W: Write>(
 
     if let Some(node) = found_node {
         renderer.write_node(writer, node, 0, 0)?;
+        writeln!(writer)?;
+
         Ok(())
     } else {
         anyhow::bail!("Function '{}' not found", func_name);
