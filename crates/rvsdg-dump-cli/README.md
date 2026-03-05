@@ -91,15 +91,20 @@ rvsdg-dump-cli <path-to-dump> [mode-flag] [options]
 ### Node Rendering
 
 A typical node is rendered as:
-`[Node(ID)] OpName{metadata}(inputs) (state: origin) -> outputs : types`
+`[Node(ID)] OpName{opconfig}(inputs) (state: origin) -> outputs`
 
 Example:
 `[Node(4v1)] OpBinary{operator: +}(Region(2v1)a2, Region(2v1)a3) -> Node(4v1)e0 : u32`
 
-- **Intrinsics**: Names like `OpLoad`, `OpStore`, `OpBinary`.
-- **Metadata**: Static parameters in curly braces (e.g., `{operator: +}`, `{field_index: 1}`).
-- **State**: If the node is side-effecting, its state dependency is shown as `(state: origin)`,
+- **OpName**: Names like `OpLoad`, `OpStore`, `OpBinary`.
+- **opconfig**: Static parameters in curly braces that configure the nodes behavior (e.g., 
+  `{operator: +}`, `{field_index: 1}`).
+- **inputs**: A list of value IDs that describe the node's inputs. These can be region
+  arguments (e.g., `Region(2v1)a2`), or node-outputs (e.g., `Node(4v1)e2`).
+- **state**: If the node is side-effecting, its state dependency is shown as `(state: origin)`,
   where origin is either `Arg` (region state argument) or a preceding `Node(ID)`.
+- **outputs**: If the node producer output-values, a list of the value `valueID : type` pairs.
+  (e.g., `Node(4v1)e0 : u32`).
 
 ### Region Rendering
 
