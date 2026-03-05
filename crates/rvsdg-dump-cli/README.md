@@ -15,37 +15,13 @@ semantic view of this graph, making it easier to trace data and state flow, iden
 issues, and debug compiler transformations. For more information on the RVSDG, refer to the 
 documentation for the `slir::rvsdg` module in the `slir` crate.
 
-## Building
-
-`rvsdg-dump-cli` is a Rust crate and is managed with `cargo`. To build the tool, run the following
-command from the project root:
-
-```bash
-cargo build -p rvsdg-dump-cli
-```
-
-This should have created a debug build of the tool at `target/debug/rvsdg-dump-cli`.
-
-### Dependency on `slir`
-
-The tool depends directly on the `slir` crate, which defines the `Rvsdg` and `Type` data structures.
-RVSDG dumps are serialized using `bincode`, which is sensitive to changes in the underlying Rust
-data structures.
-
-**Important**: If the `Rvsdg` or related data structures in the `slir` crate are modified, you MUST
-recompile `rvsdg-dump-cli` to ensure it can correctly deserialize and interpret the dump files. If
-the recompiled tool still fails to load a dump, try a clean rebuild:
-
-```bash
-cargo clean -p rvsdg-dump-cli && cargo build -p rvsdg-dump-cli
-```
-
 ## Usage
 
-After building the tool and while in the RISL project root:
+The RISL project defines the Cargo alias `rvsdg-dump` to ensure this tool runs with an up-to-date 
+build. The recommended way to invoke this tool is through this Cargo alias:
 
 ```bash
-target/debug/rvsdg-dump-cli <path-to-dump> [mode-flag] [options]
+cargo rvsdg-dump <path-to-dump> [mode-flag] [options]
 ```
 
 ### Exploration Modes
@@ -69,6 +45,13 @@ target/debug/rvsdg-dump-cli <path-to-dump> [mode-flag] [options]
   state result.
 - **Type Inspection (`--type <TypeID>`)**: Displays the detailed structure of a registered type
   (fields for structs, variants for enums).
+
+Note that because node IDs, region IDs, and value IDs contain parentheses, they need to be wrapped in
+quotes. For example:
+
+```bash
+cargo rvsdg-dump rvsdg.dump --node "Node(1v1)"
+```
 
 ### Options
 
