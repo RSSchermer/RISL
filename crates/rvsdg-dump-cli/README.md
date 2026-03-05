@@ -103,8 +103,8 @@ Example:
 
 ### Region Rendering
 
-A region (e.g., a function body, a loop body, or a switch branch) is rendered as a stratified list
-of nodes, following a header and an argument list:
+A region (e.g., a function body, a loop body, or a switch branch) is rendered as a an argument
+list, followed by a list of nodes, followed by a result list:
 
 ```text
 Body Region (Region(2v1)):
