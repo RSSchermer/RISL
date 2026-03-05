@@ -24,6 +24,8 @@ command from the project root:
 cargo build -p rvsdg-dump-cli
 ```
 
+This should have created a debug build of the tool at `target/debug/rvsdg-dump-cli`.
+
 ### Dependency on `slir`
 
 The tool depends directly on the `slir` crate, which defines the `Rvsdg` and `Type` data structures.
@@ -40,8 +42,10 @@ cargo clean -p rvsdg-dump-cli && cargo build -p rvsdg-dump-cli
 
 ## Usage
 
+After building the tool and while in the RISL project root:
+
 ```bash
-rvsdg-dump-cli <path-to-dump> [mode-flag] [options]
+target/debug/rvsdg-dump-cli <path-to-dump> [mode-flag] [options]
 ```
 
 ### Exploration Modes
