@@ -311,13 +311,8 @@ impl<'a> Renderer<'a> {
         let f = node_data.expect_function();
         let indent_str = " ".repeat(indent);
 
-        // Find the function's name if registered
-        let name = self
-            .rvsdg
-            .registered_functions()
-            .find(|(_, n)| *n == node)
-            .map(|(f, _)| f.name.as_str().to_string())
-            .unwrap_or_else(|| "unnamed_func".to_string());
+        let function = f.function();
+        let name = function.name.as_str();
 
         write!(writer, "[")?;
         self.write_node_id(writer, node)?;

@@ -116,12 +116,18 @@ slotmap::new_key_type! {
 /// will not have any value results.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct FunctionNode {
+    function: Function,
     dependencies: Vec<ValueInput>,
     output: ValueOutput,
     region: Region,
 }
 
 impl FunctionNode {
+    /// The function this node represents.
+    pub fn function(&self) -> Function {
+        self.function
+    }
+
     /// The function node's body region.
     ///
     /// See the `Body Region` section of the documentation for the [FunctionNode] struct for
@@ -2265,6 +2271,7 @@ impl Rvsdg {
 
         let node = self.nodes.insert(NodeData {
             kind: NodeKind::Function(FunctionNode {
+                function,
                 dependencies: dependencies.clone(),
                 output: ValueOutput::new(sig.ty),
                 region,
