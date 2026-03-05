@@ -20,6 +20,7 @@ members = [
     "tests/examples/slice",
     "tests/examples/variable_pointers",
     "tests/examples/workgroup_binding",
+    "xtask",
 ]
 default-members = [
     "crates/compiler/rislc",
