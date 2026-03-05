@@ -162,12 +162,11 @@ impl<'a> Renderer<'a> {
         let dep_count = function_node.dependencies().len();
 
         write!(writer, "(")?;
-        for (i, arg) in args.iter().enumerate().skip(dep_count) {
-            // TODO: I find the order here weird. Why not skip first and then enumerate?
-            if i > dep_count {
+        for (i, arg) in args.iter().skip(dep_count).enumerate() {
+            if i > 0 {
                 write!(writer, ", ")?;
             }
-            write!(writer, "arg{}: ", i - dep_count)?;
+            write!(writer, "arg{}: ", i)?;
             self.write_type(writer, arg.ty)?;
         }
         write!(writer, ") -> ")?;
@@ -227,7 +226,7 @@ impl<'a> Renderer<'a> {
         for nodes in strata.values() {
             for &node in nodes {
                 write!(writer, "{}  ", indent_str)?;
-                self.write_node(writer, node, indent + 4, nesting_level)?;
+                self.write_node(writer, node, indent + 2, nesting_level)?;
                 writeln!(writer)?;
             }
         }
@@ -288,7 +287,7 @@ impl<'a> Renderer<'a> {
         nesting_level: u32,
     ) -> std::io::Result<()> {
         match self.rvsdg[node].kind() {
-            NodeKind::Function(_) => self.write_node_common(writer, node, "FunctionNode"),
+            NodeKind::Function(_) => self.write_function_node(writer, node, indent, nesting_level),
             NodeKind::UniformBinding(_) => self.write_node_common(writer, node, "UniformBinding"),
             NodeKind::StorageBinding(_) => self.write_node_common(writer, node, "StorageBinding"),
             NodeKind::WorkgroupBinding(_) => {
@@ -299,6 +298,57 @@ impl<'a> Renderer<'a> {
             NodeKind::Switch(_) => self.write_switch_node(writer, node, indent, nesting_level),
             NodeKind::Loop(_) => self.write_loop_node(writer, node, indent, nesting_level),
         }
+    }
+
+    fn write_function_node<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+        indent: usize,
+        nesting_level: u32,
+    ) -> std::io::Result<()> {
+        let node_data = &self.rvsdg[node];
+        let f = node_data.expect_function();
+        let indent_str = " ".repeat(indent);
+
+        // Find the function's name if registered
+        let name = self
+            .rvsdg
+            .registered_functions()
+            .find(|(_, n)| *n == node)
+            .map(|(f, _)| f.name.as_str().to_string())
+            .unwrap_or_else(|| "unnamed_func".to_string());
+
+        write!(writer, "[")?;
+        self.write_node_id(writer, node)?;
+        write!(writer, "] {}", name)?;
+        self.write_function_signature(writer, node)?;
+        writeln!(writer)?;
+
+        // Render dependencies
+        if !f.dependencies().is_empty() {
+            writeln!(writer, "{}  Dependencies:", indent_str)?;
+            for dep in f.dependencies() {
+                if let ValueOrigin::Output { producer, .. } = dep.origin {
+                    write!(writer, "{}    - ", indent_str)?;
+                    self.write_node_id(writer, producer)?;
+                    write!(writer, " -> ")?;
+                    self.write_type(writer, dep.ty)?;
+                    writeln!(writer)?;
+                }
+            }
+            writeln!(writer)?;
+        }
+
+        self.write_region(
+            writer,
+            f.body_region(),
+            "Body Region",
+            indent + 2,
+            nesting_level,
+        )?;
+
+        Ok(())
     }
 
     fn write_simple_node<W: std::io::Write>(
@@ -615,7 +665,13 @@ impl<'a> Renderer<'a> {
         let n = node_data.expect_switch();
         for (i, &region) in n.branches().iter().enumerate() {
             let header = format!("Branch {}", i);
-            self.write_nested_region_with_inlining(writer, region, &header, indent, nesting_level)?;
+            self.write_nested_region_with_inlining(
+                writer,
+                region,
+                &header,
+                indent + 2,
+                nesting_level,
+            )?;
         }
         Ok(())
     }
@@ -636,7 +692,7 @@ impl<'a> Renderer<'a> {
             writer,
             region,
             "Loop Region",
-            indent,
+            indent + 2,
             nesting_level,
         )?;
         Ok(())

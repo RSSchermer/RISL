@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use anyhow::Result;
-use slir::rvsdg::{Connectivity, NodeKind, Rvsdg};
+use slir::rvsdg::{NodeKind, Rvsdg};
 
 use crate::renderer::Renderer;
 pub fn render_list_mode<W: Write>(
@@ -23,25 +23,11 @@ pub fn render_list_mode<W: Write>(
     for &node in rvsdg[global_region].nodes() {
         let node_data = &rvsdg[node];
         match node_data.kind() {
-            NodeKind::UniformBinding(_) => {
-                write!(writer, "  - Uniform: ")?;
-                renderer.write_node_id(writer, node)?;
-                write!(writer, " -> ")?;
-                renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
-                writeln!(writer)?;
-            }
-            NodeKind::StorageBinding(_) => {
-                write!(writer, "  - Storage: ")?;
-                renderer.write_node_id(writer, node)?;
-                write!(writer, " -> ")?;
-                renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
-                writeln!(writer)?;
-            }
-            NodeKind::WorkgroupBinding(_) => {
-                write!(writer, "  - Workgroup: ")?;
-                renderer.write_node_id(writer, node)?;
-                write!(writer, " -> ")?;
-                renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
+            NodeKind::UniformBinding(_)
+            | NodeKind::StorageBinding(_)
+            | NodeKind::WorkgroupBinding(_) => {
+                write!(writer, "  - ")?;
+                renderer.write_node(writer, node, 0, 0)?;
                 writeln!(writer)?;
             }
             _ => {}
@@ -51,12 +37,10 @@ pub fn render_list_mode<W: Write>(
     writeln!(writer, "\nGlobal Constants:")?;
     for &node in rvsdg[global_region].nodes() {
         let node_data = &rvsdg[node];
-        if let NodeKind::Constant(c) = node_data.kind() {
+        if let NodeKind::Constant(_) = node_data.kind() {
             write!(writer, "  - ")?;
-            renderer.write_node_id(writer, node)?;
-            write!(writer, " -> ")?;
-            renderer.write_type(writer, node_data.value_outputs()[0].ty)?;
-            writeln!(writer, " (\"{}\")", c.constant().name.as_str())?;
+            renderer.write_node(writer, node, 0, 0)?;
+            writeln!(writer)?;
         }
     }
 
@@ -146,12 +130,12 @@ Functions:
   - Node(1v1): test_func(arg0: u32) -> u32
 
 Global Bindings:
-  - Uniform: Node(2v1) -> u32
-  - Storage: Node(3v1) -> u32
-  - Workgroup: Node(4v1) -> u32
+  - [Node(2v1)] UniformBinding() -> Node(2v1)e0 : u32
+  - [Node(3v1)] StorageBinding() -> Node(3v1)e0 : u32
+  - [Node(4v1)] WorkgroupBinding() -> Node(4v1)e0 : u32
 
 Global Constants:
-  - Node(5v1) -> u32 (\"test_const\")
+  - [Node(5v1)] Constant() -> Node(5v1)e0 : u32
 ";
         assert_eq!(output, expected);
     }

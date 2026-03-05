@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use anyhow::Result;
-use slir::rvsdg::{Node, Rvsdg, ValueOrigin};
+use slir::rvsdg::Rvsdg;
 
 use crate::id_resolution;
 use crate::renderer::Renderer;
@@ -12,79 +12,33 @@ pub fn render_function_mode<W: Write>(
     writer: &mut W,
     func_name: &str,
 ) -> Result<()> {
-    let mut found = false;
+    let mut found_node = None;
 
     for (function, node) in rvsdg.registered_functions() {
         if function.name.as_str() == func_name {
-            render_function_internal(writer, rvsdg, renderer, node, function.name.as_str())?;
-
-            found = true;
-
+            found_node = Some(node);
             break;
         }
     }
 
-    if !found {
+    if found_node.is_none() {
         // Try as ID
         if let Ok(node_id) = id_resolution::parse_node_id(func_name) {
-            let node_data = &rvsdg[node_id];
-
-            if node_data.is_function() {
-                let name = rvsdg
-                    .registered_functions()
-                    .find(|(_, n)| *n == node_id)
-                    .map(|(f, _)| f.name.as_str().to_string())
-                    .unwrap_or_else(|| func_name.to_string());
-
-                render_function_internal(writer, rvsdg, renderer, node_id, &name)?;
-
-                found = true;
+            if rvsdg.is_live_node(node_id) {
+                let node_data = &rvsdg[node_id];
+                if node_data.is_function() {
+                    found_node = Some(node_id);
+                }
             }
         }
     }
 
-    if !found {
+    if let Some(node) = found_node {
+        renderer.write_node(writer, node, 0, 0)?;
+        Ok(())
+    } else {
         anyhow::bail!("Function '{}' not found", func_name);
     }
-
-    Ok(())
-}
-
-fn render_function_internal<W: Write>(
-    writer: &mut W,
-    rvsdg: &Rvsdg,
-    renderer: &Renderer,
-    node: Node,
-    name: &str,
-) -> Result<()> {
-    let node_data = &rvsdg[node];
-    let f = node_data.expect_function();
-
-    write!(writer, "Function: {}", name)?;
-    renderer.write_function_signature(writer, node)?;
-    writeln!(writer)?;
-
-    // Render dependencies
-    if !f.dependencies().is_empty() {
-        writeln!(writer, "  Dependencies:")?;
-        for dep in f.dependencies() {
-            match dep.origin {
-                ValueOrigin::Output { producer, .. } => {
-                    write!(writer, "    - ")?;
-                    renderer.write_node_id(writer, producer)?;
-                    write!(writer, " -> ")?;
-                    renderer.write_type(writer, dep.ty)?;
-                    writeln!(writer)?;
-                }
-                _ => {}
-            }
-        }
-        writeln!(writer)?;
-    }
-
-    renderer.write_region(writer, f.body_region(), "Body Region", 0, 0)?;
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -185,15 +139,15 @@ mod tests {
 
         let output = String::from_utf8(writer).unwrap();
         let expected = "\
-Function: test_func(arg0: u32, arg1: u32) -> u32
+[Node(3v1)] test_func(arg0: u32, arg1: u32) -> u32
   Dependencies:
     - Node(1v1) -> u32
     - Node(2v1) -> u32
 
-Body Region (Region(2v1)):
-  Arguments: [Region(2v1)a0: u32, Region(2v1)a1: u32, Region(2v1)a2: u32, Region(2v1)a3: u32, Region(2v1)s: State]
-  [Node(4v1)] OpBinary{operator: +}(Region(2v1)a2, Region(2v1)a3) -> Node(4v1)e0 : u32
-  Results: [Node(4v1)e0, Region(2v1)s]
+  Body Region (Region(2v1)):
+    Arguments: [Region(2v1)a0: u32, Region(2v1)a1: u32, Region(2v1)a2: u32, Region(2v1)a3: u32, Region(2v1)s: State]
+    [Node(4v1)] OpBinary{operator: +}(Region(2v1)a2, Region(2v1)a3) -> Node(4v1)e0 : u32
+    Results: [Node(4v1)e0, Region(2v1)s]
 ";
         assert_eq!(output, expected);
     }

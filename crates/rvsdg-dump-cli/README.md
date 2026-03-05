@@ -113,6 +113,15 @@ Body Region (Region(2v1)):
   Results: [Node(4v1)e0, Region(2v1)s]
 ```
 
+Example of a nested region (Switch branch):
+```text
+[Node(5v1)] Switch(Region(2v1)a0) -> Node(5v1)e0 : u32
+  Branch 0 (Region(3v1)):
+    Arguments: [Region(3v1)a0: u32, Region(3v1)s: State]
+    [Node(6v1)] Constant -> Node(6v1)e0 : u32
+    Results: [Node(6v1)e0, Region(3v1)s]
+```
+
 - **Header**: Identifies the region's role and its ID (e.g., `Body Region (Region(2v1)):`, 
   `Branch 0 (Region(3v1)):`, or `Loop Region (Region(4v1)):`).
 - **Arguments**: A list of value arguments (`Region(ID)aN`) and their types, plus the implicit 
