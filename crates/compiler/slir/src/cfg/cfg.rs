@@ -1058,7 +1058,7 @@ impl Cfg {
 
         let ty = self.value_ty(&value);
 
-        assert!(self.ty().is_compatible(ty, dest_ty));
+        assert!(self.ty().can_coerce(ty, dest_ty));
 
         let local_binding = self.add_local_binding(owner, dest_ty);
 

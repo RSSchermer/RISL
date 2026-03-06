@@ -129,12 +129,12 @@
 //! [Rvsdg::add_switch_branch] can be used to add a new (empty) branch region to an existing switch
 //! node.
 //!
-//! If a modification operation resulted in the addition or a new node or region, the operation
-//! will typically return a [Node] or [Region] respectively (or both; for example,
+//! If a modification operation results in the addition of a new node or region, the operation will
+//! typically return a [Node] or [Region] respectively (or both; for example,
 //! [Rvsdg::register_function] returns a `(Node, Region)` pair that represents the newly added
 //! [FunctionNode] and its "body" region).
 //!
-//! All methods that modify the RVSDG strive maintain certain invariants:
+//! All methods that modify the RVSDG strive to maintain certain invariants:
 //!
 //! - Value-flow edges must never cross region boundaries. For example, when adding a new node to
 //!   the RVSDG, the "add" method will verify that the node's inputs originate from the same region
@@ -143,11 +143,11 @@
 //!   needs to be linked into the state chain, the state edge into which the node is being added
 //!   must be in the same region as the region to which the node is being added.
 //! - The type of the [ValueOutput] to which a [ValueInput]s origin resolves, must be compatible
-//!   with the type declared for the [ValueInput], as defined by [TypeRegistry::is_compatible].
+//!   (as defined by [TypeRegistry::can_coerce]) with the type declared for the [ValueInput].
 //!
-//! In addition, specific operations may enforce additional invariants. For example,
-//! [Rvsdg::add_op_load] will verify that the value provided as its `ptr_input` (which represents
-//! the pointer to load from) does in fact have a pointer type.
+//! Specific operations may enforce additional invariants. For example, [Rvsdg::add_op_load] will
+//! verify that the value provided as its `ptr_input` (which represents the pointer to load from)
+//! does in fact have a pointer type.
 //!
 //! If a modification operation is invoked with arguments that violate any of its invariants, this
 //! will result in a panic.
@@ -174,4 +174,6 @@ pub mod transform;
 pub mod visit;
 
 mod rvsdg;
+
 pub use self::rvsdg::*;
+use crate::ty::TypeRegistry;

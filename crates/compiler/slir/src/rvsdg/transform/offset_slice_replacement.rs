@@ -415,6 +415,11 @@ mod tests {
             stride: 4,
         });
         let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let slice_ty = module.ty.register(TypeKind::Slice {
+            element_ty: TY_U32,
+            stride: 4,
+        });
+        let slice_ptr_ty = module.ty.register(TypeKind::Ptr(slice_ty));
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_node = rvsdg.add_const_u32(region, 2);
@@ -424,7 +429,7 @@ mod tests {
             ValueInput::output(TY_U32, offset_node, 0),
         );
         let get_offset_node = rvsdg
-            .add_op_get_ptr_offset(region, ValueInput::output(array_ptr_ty, add_offset_node, 0));
+            .add_op_get_ptr_offset(region, ValueInput::output(slice_ptr_ty, add_offset_node, 0));
         let index_node = rvsdg.add_const_u32(region, 1);
         let add_node = rvsdg.add_op_binary(
             region,
@@ -434,7 +439,7 @@ mod tests {
         );
         let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
-            ValueInput::output(array_ptr_ty, add_offset_node, 0),
+            ValueInput::output(slice_ptr_ty, add_offset_node, 0),
             ValueInput::output(TY_U32, add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
@@ -505,6 +510,11 @@ mod tests {
             stride: 4,
         });
         let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let slice_ty = module.ty.register(TypeKind::Slice {
+            element_ty: TY_U32,
+            stride: 4,
+        });
+        let slice_ptr_ty = module.ty.register(TypeKind::Ptr(slice_ty));
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_0_node = rvsdg.add_const_u32(region, 1);
@@ -516,12 +526,12 @@ mod tests {
         let offset_1_node = rvsdg.add_const_u32(region, 1);
         let add_offset_1_node = rvsdg.add_op_offset_slice(
             region,
-            ValueInput::output(array_ptr_ty, add_offset_0_node, 0),
+            ValueInput::output(slice_ptr_ty, add_offset_0_node, 0),
             ValueInput::output(TY_U32, offset_1_node, 0),
         );
         let get_offset_node = rvsdg.add_op_get_ptr_offset(
             region,
-            ValueInput::output(array_ptr_ty, add_offset_1_node, 0),
+            ValueInput::output(slice_ptr_ty, add_offset_1_node, 0),
         );
         let index_node = rvsdg.add_const_u32(region, 1);
         let index_add_node = rvsdg.add_op_binary(
@@ -532,7 +542,7 @@ mod tests {
         );
         let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
-            ValueInput::output(array_ptr_ty, add_offset_1_node, 0),
+            ValueInput::output(slice_ptr_ty, add_offset_1_node, 0),
             ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
@@ -627,6 +637,11 @@ mod tests {
             stride: 4,
         });
         let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let slice_ty = module.ty.register(TypeKind::Slice {
+            element_ty: TY_U32,
+            stride: 4,
+        });
+        let slice_ptr_ty = module.ty.register(TypeKind::Ptr(slice_ty));
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_0_node = rvsdg.add_const_u32(region, 1);
@@ -642,7 +657,7 @@ mod tests {
                 ValueInput::argument(TY_PREDICATE, 0),
                 ValueInput::output(array_ptr_ty, add_offset_0_node, 0),
             ],
-            vec![ValueOutput::new(array_ptr_ty)],
+            vec![ValueOutput::new(slice_ptr_ty)],
             None,
         );
 
@@ -669,7 +684,7 @@ mod tests {
         rvsdg.reconnect_region_result(branch_1, 0, ValueOrigin::Argument(0));
 
         let get_offset_node =
-            rvsdg.add_op_get_ptr_offset(region, ValueInput::output(array_ptr_ty, switch_node, 0));
+            rvsdg.add_op_get_ptr_offset(region, ValueInput::output(slice_ptr_ty, switch_node, 0));
         let index_node = rvsdg.add_const_u32(region, 1);
         let index_add_node = rvsdg.add_op_binary(
             region,
@@ -679,7 +694,7 @@ mod tests {
         );
         let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
-            ValueInput::output(array_ptr_ty, switch_node, 0),
+            ValueInput::output(slice_ptr_ty, switch_node, 0),
             ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(
@@ -820,6 +835,11 @@ mod tests {
             stride: 4,
         });
         let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let slice_ty = module.ty.register(TypeKind::Slice {
+            element_ty: TY_U32,
+            stride: 4,
+        });
+        let slice_ptr_ty = module.ty.register(TypeKind::Ptr(slice_ty));
 
         let array_node = rvsdg.add_op_alloca(region, array_ty);
         let offset_0_node = rvsdg.add_const_u32(region, 1);
@@ -831,7 +851,7 @@ mod tests {
 
         let (loop_node, loop_region) = rvsdg.add_loop(
             region,
-            vec![ValueInput::output(array_ptr_ty, add_offset_0_node, 0)],
+            vec![ValueInput::output(slice_ptr_ty, add_offset_0_node, 0)],
             None,
         );
 
@@ -839,7 +859,7 @@ mod tests {
         let offset_1_node = rvsdg.add_const_u32(loop_region, 1);
         let add_offset_1_node = rvsdg.add_op_offset_slice(
             loop_region,
-            ValueInput::argument(array_ptr_ty, 0),
+            ValueInput::argument(slice_ptr_ty, 0),
             ValueInput::output(TY_U32, offset_1_node, 0),
         );
 
@@ -861,7 +881,7 @@ mod tests {
         );
 
         let get_offset_node =
-            rvsdg.add_op_get_ptr_offset(region, ValueInput::output(array_ptr_ty, loop_node, 0));
+            rvsdg.add_op_get_ptr_offset(region, ValueInput::output(slice_ptr_ty, loop_node, 0));
         let index_node = rvsdg.add_const_u32(region, 1);
         let index_add_node = rvsdg.add_op_binary(
             region,
@@ -871,7 +891,7 @@ mod tests {
         );
         let element_ptr_node = rvsdg.add_op_element_ptr(
             region,
-            ValueInput::output(array_ptr_ty, loop_node, 0),
+            ValueInput::output(slice_ptr_ty, loop_node, 0),
             ValueInput::output(TY_U32, index_add_node, 0),
         );
         let load_node = rvsdg.add_op_load(

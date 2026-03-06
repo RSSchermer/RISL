@@ -1747,7 +1747,7 @@ mod tests {
                 name: Default::default(),
                 ty: TY_DUMMY,
                 args: vec![],
-                ret_ty: Some(TY_U32),
+                ret_ty: Some(TY_PTR_U32),
             },
         );
 
@@ -1755,6 +1755,9 @@ mod tests {
 
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
+        // Note: we're explicitly using a pointer type for the element because scalar replacement
+        // only splits arrays if needed for legalization (and arrays with a pointer element type are
+        // not legal).
         let ty = module.ty.register(TypeKind::Array {
             element_ty: TY_PTR_U32,
             count: 2,
@@ -1838,7 +1841,7 @@ mod tests {
                     ty: TY_U32,
                     shader_io_binding: None,
                 }],
-                ret_ty: Some(TY_U32),
+                ret_ty: Some(TY_PTR_U32),
             },
         );
 
@@ -1846,6 +1849,9 @@ mod tests {
 
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
+        // Note: we're explicitly using a pointer type for the element because scalar replacement
+        // only splits arrays if needed for legalization (and arrays with a pointer element type are
+        // not legal).
         let ty = module.ty.register(TypeKind::Array {
             element_ty: TY_PTR_U32,
             count: 2,

@@ -827,31 +827,40 @@ impl TypeRegistry {
         self.register(ty_kind)
     }
 
-    pub fn is_compatible(&self, t0: Type, t1: Type) -> bool {
-        if t0 == t1 {
-            // A type is always compatible with itself
+    /// Whether the `src_ty` can be "coerced" into the `dst_ty`.
+    ///
+    /// A type can always be coerced into itself, so when the `src_ty` and `dst_ty` are the same
+    /// type, this always returns `true`.
+    ///
+    /// In addition, we currently allow a pointer to a sized array to coerce into a pointer to an
+    /// unsized array (a slice) with the same element type and the same stride. For example,
+    /// `ptr<array<u32, 4>>` can coerce into `ptr<array<u32>>` (note: not the other way around,
+    /// `ptr<array<u32>>` cannot be coerced into `ptr<array<u32, 4>>`).
+    ///
+    /// Otherwise, returns `false`.
+    pub fn can_coerce(&self, src_ty: Type, dst_ty: Type) -> bool {
+        if src_ty == dst_ty {
             return true;
         }
 
-        return true;
-        //
-        // use ScalarKind::*;
-        // use TypeKind::*;
-        //
-        // let k0 = self.kind(t0);
-        // let k1 = self.kind(t1);
-        //
-        // match (&*k0, &*k1) {
-        //     // TODO: the predicate compatibilities are a bit of a stop-gap. I think the predicate
-        //     // type itself needs to be rethought.
-        //     (Predicate, Scalar(U32))
-        //     | (Scalar(U32), Predicate)
-        //     | (Predicate, Scalar(Bool))
-        //     | (Scalar(Bool), Predicate) => return true,
-        //     _ => {}
-        // }
-        //
-        // false
+        if let TypeKind::Ptr(src_pointee_ty) = *self.kind(src_ty)
+            && let TypeKind::Array {
+                element_ty: src_element_ty,
+                stride: src_stride,
+                ..
+            } = *self.kind(src_pointee_ty)
+        {
+            if let TypeKind::Ptr(dst_pointee_ty) = *self.kind(dst_ty)
+                && let TypeKind::Slice {
+                    element_ty: dst_element_ty,
+                    stride: dst_stride,
+                } = *self.kind(dst_pointee_ty)
+            {
+                return src_element_ty == dst_element_ty && src_stride == dst_stride;
+            }
+        }
+
+        false
     }
 }
 

@@ -593,7 +593,7 @@ mod tests {
                 name: Default::default(),
                 ty: TY_DUMMY,
                 args: vec![],
-                ret_ty: Some(TY_VEC2_F32),
+                ret_ty: Some(TY_VEC3_F32),
             },
         );
 
@@ -734,7 +734,7 @@ mod tests {
                 name: Default::default(),
                 ty: TY_DUMMY,
                 args: vec![],
-                ret_ty: Some(TY_VEC2_F32),
+                ret_ty: Some(TY_VEC3_F32),
             },
         );
 

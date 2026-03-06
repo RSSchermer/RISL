@@ -900,14 +900,12 @@ mod tests {
             ValueInput::output(TY_U32, add_node, 0),
             ValueInput::output(TY_U32, compare_value_node, 0),
         );
-        let predicate_node = expected
-            .add_op_bool_to_branch_selector(loop_region, ValueInput::output(TY_BOOL, cmp_node, 0));
 
         expected.reconnect_region_result(
             loop_region,
             0,
             ValueOrigin::Output {
-                producer: predicate_node,
+                producer: cmp_node,
                 output: 0,
             },
         );

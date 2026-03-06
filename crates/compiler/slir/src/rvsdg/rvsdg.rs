@@ -182,7 +182,7 @@ impl Connectivity for FunctionNode {
 ///
 /// A combination of a [Type] and a [ValueOrigin]. The origin must resolve to a [ValueOutput] in the
 /// same [Region]. The type of that [ValueOutput] must be compatible with the [Type] of the
-/// [ValueInput], as defined by [TypeRegistry::is_compatible].
+/// [ValueInput], as defined by [TypeRegistry::can_coerce].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct ValueInput {
     /// The type of the value.
@@ -267,7 +267,7 @@ impl ValueOrigin {
 ///
 /// A combination of a [Type] and a set of [ValueUser]s. Each user origin must resolve to a
 /// [ValueInput] in the same [Region]. The type of that [ValueInput] must be compatible with the
-/// [Type] of the [ValueOutput], as defined by [TypeRegistry::is_compatible]. It is valid for the
+/// [Type] of the [ValueOutput], as defined by [TypeRegistry::can_coerce]. It is valid for the
 /// set of users to be empty.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ValueOutput {
@@ -3945,7 +3945,7 @@ impl Rvsdg {
                 let region = &self[region];
 
                 if let Some(a) = region.value_arguments().get(*i as usize) {
-                    if !self.ty.is_compatible(value_input.ty, a.ty) {
+                    if !self.ty.can_coerce(a.ty, value_input.ty) {
                         panic!(
                             "cannot connect a node input of type `{}` to a region argument of type \
                             `{}`",
@@ -3970,10 +3970,11 @@ impl Rvsdg {
                 }
 
                 if let Some(output) = producer.value_outputs().get(*output as usize) {
-                    if !self.ty.is_compatible(value_input.ty, output.ty) {
+                    if !self.ty.can_coerce(output.ty, value_input.ty) {
                         panic!(
                             "cannot connect a node input of type `{:?}` to an output of type `{:?}",
-                            value_input.ty, output.ty
+                            value_input.ty.to_string(self.ty()),
+                            output.ty.to_string(self.ty())
                         );
                     }
                 } else {
