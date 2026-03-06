@@ -92,7 +92,7 @@ mod tests {
         // Reconnect result to the value we loaded
         rvsdg.reconnect_region_result(region, 0, ValueInput::output(TY_U32, load_node, 0).origin);
 
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
 
         render_region_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();
@@ -103,7 +103,7 @@ Region (Region(2v1)):
   Arguments: [Region(2v1)a0: u32, Region(2v1)a1: ptr<u32>, Region(2v1)s: State]
   [Node(3v1)] OpLoad(Region(2v1)a1) (state: Arg) -> Node(3v1)e0 : u32, Node(3v1)s : State
   [Node(4v1)] OpStore(Region(2v1)a1, Node(3v1)e0) (state: Node(3v1)) -> Node(4v1)s : State
-  Results: [Node(3v1)e0, Region(2v1)s]
+  Results: [Node(3v1)e0, Node(4v1)s]
 ";
         assert_eq!(output, expected);
     }
@@ -211,7 +211,7 @@ Region (Region(2v1)):
         // Reconnect function result
         rvsdg.reconnect_region_result(region, 0, ValueInput::output(TY_U32, switch_node, 0).origin);
 
-        let renderer = Renderer::new(&rvsdg, 2, 1, true);
+        let renderer = Renderer::new(&rvsdg, 2, 1);
         let mut writer = Vec::new();
 
         render_region_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();

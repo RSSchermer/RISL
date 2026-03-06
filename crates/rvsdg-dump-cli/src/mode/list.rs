@@ -120,7 +120,7 @@ mod tests {
             .register_byte_data(constant, TY_U32, vec![42, 0, 0, 0]);
         rvsdg.register_constant(&module, constant);
 
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
         render_list_mode(&rvsdg, &renderer, &mut writer).unwrap();
 

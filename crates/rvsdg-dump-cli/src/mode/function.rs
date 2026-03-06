@@ -134,7 +134,7 @@ mod tests {
             },
         );
 
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
 
         render_function_mode(&rvsdg, &renderer, &mut writer, "test_func").unwrap();

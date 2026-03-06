@@ -10,10 +10,7 @@ use slotmap::{Key, KeyData};
 pub struct Renderer<'a> {
     rvsdg: &'a Rvsdg,
     inline_max_node_count: u32,
-    #[allow(dead_code)]
     inline_max_nesting_level: u32,
-    #[allow(dead_code)]
-    no_color: bool,
 }
 
 impl<'a> Renderer<'a> {
@@ -21,13 +18,11 @@ impl<'a> Renderer<'a> {
         rvsdg: &'a Rvsdg,
         inline_max_node_count: u32,
         inline_max_nesting_level: u32,
-        no_color: bool,
     ) -> Self {
         Self {
             rvsdg,
             inline_max_node_count,
             inline_max_nesting_level,
-            no_color,
         }
     }
 

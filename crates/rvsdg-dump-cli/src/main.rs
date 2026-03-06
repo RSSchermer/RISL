@@ -55,10 +55,6 @@ struct Args {
     /// Smart Inlining: Maximum nesting level for inlining
     #[arg(long, default_value_t = 1)]
     inline_max_nesting_level: u32,
-
-    /// Disable ANSI-colored output
-    #[arg(long)]
-    no_color: bool,
 }
 
 fn main() -> Result<()> {
@@ -71,7 +67,6 @@ fn main() -> Result<()> {
         &rvsdg,
         args.inline_max_node_count,
         args.inline_max_nesting_level,
-        args.no_color,
     );
 
     let mut stdout = std::io::stdout();

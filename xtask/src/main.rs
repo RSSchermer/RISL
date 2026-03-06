@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use xshell::{cmd, Shell};
+use xshell::{Shell, cmd};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

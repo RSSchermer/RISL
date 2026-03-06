@@ -47,7 +47,7 @@ mod tests {
         }));
 
         let rvsdg = Rvsdg::new(registry.into());
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
 
         let ty_id_str = format!("struct({})", struct_ty.registration_id().unwrap());
@@ -70,7 +70,7 @@ struct(0):
         }));
 
         let rvsdg = Rvsdg::new(registry.into());
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
 
         let ty_id_str = format!("enum({})", enum_ty.registration_id().unwrap());

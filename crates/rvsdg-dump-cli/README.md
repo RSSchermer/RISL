@@ -57,7 +57,6 @@ cargo rvsdg-dump rvsdg.dump --node "Node(1v1)"
 
 - `--inline-max-node-count <N>`: Maximum nodes a region can have to be rendered inline (default: 5).
 - `--inline-max-nesting_level <N>`: Maximum depth of region inlining (default: 1).
-- `--no-color`: Disables ANSI color output (recommended for LLM processing).
 
 ## Interpreting the Output
 

@@ -146,7 +146,7 @@ mod tests {
         // Reconnect result to node2:e0
         rvsdg.reconnect_region_result(region, 0, ValueInput::output(TY_U32, node2, 0).origin);
 
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
 
         // IDs:
         // Node(1v1): Function

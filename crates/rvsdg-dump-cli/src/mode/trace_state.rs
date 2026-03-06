@@ -77,7 +77,7 @@ mod tests {
         let mut rvsdg = Rvsdg::new(module.ty.clone());
         let (_func_node, _region) = rvsdg.register_function(&module, function, iter::empty());
 
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
 
         render_trace_state_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();
@@ -134,7 +134,7 @@ State Trace for Region(2v1):
             StateOrigin::Node(load_node),
         );
 
-        let renderer = Renderer::new(&rvsdg, 0, 0, true);
+        let renderer = Renderer::new(&rvsdg, 0, 0);
         let mut writer = Vec::new();
 
         render_trace_state_mode(&rvsdg, &renderer, &mut writer, "Region(2v1)").unwrap();

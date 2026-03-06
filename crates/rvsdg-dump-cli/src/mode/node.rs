@@ -108,7 +108,7 @@ mod tests {
         );
         rvsdg.reconnect_region_result(branch2, 0, ValueInput::output(TY_U32, node_c, 0).origin);
 
-        let renderer = Renderer::new(&rvsdg, 2, 1, true);
+        let renderer = Renderer::new(&rvsdg, 2, 1);
         let mut writer = Vec::new();
 
         render_node_mode(&rvsdg, &renderer, &mut writer, "Node(2v1)").unwrap();
