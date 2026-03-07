@@ -3,7 +3,7 @@ use std::ops::Index;
 use index_vec::IndexVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::cfg::{BasicBlock, LocalBinding};
+use crate::cfg::BasicBlock;
 use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
 
 index_vec::define_index_type! {
@@ -17,13 +17,15 @@ pub struct LinearNode {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct BranchingNode {
-    pub selector: LocalBinding,
+    /// The basic block that ends in the terminator that selects the branch.
+    pub selector_bb: BasicBlock,
     pub branches: Vec<ControlTreeNode>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct LoopNode {
-    pub reentry_predicate: LocalBinding,
+    /// The tail block of the loop that ends in the terminator that decides on reentry.
+    pub tail_bb: BasicBlock,
     pub inner: ControlTreeNode,
 }
 
@@ -130,16 +132,11 @@ impl<'a> ControlTreeGenerator<'a> {
         }
 
         if let Some(loop_tail) = self.loop_info.remove(&bb) {
-            let reentry_predicate = self
-                .graph
-                .selector(loop_tail)
-                .expect("loop tail should have a reentry predicate selector");
-
             let child_node = self
                 .nodes
                 .push(ControlTreeNodeKind::Linear(Default::default()));
             let loop_node = self.nodes.push(ControlTreeNodeKind::Loop(LoopNode {
-                reentry_predicate,
+                tail_bb: loop_tail,
                 inner: child_node,
             }));
 
@@ -164,14 +161,12 @@ impl<'a> ControlTreeGenerator<'a> {
                 .children
                 .push(tail_node);
 
-            let continuation = self.graph.children(loop_tail)[0];
+            // After loop restructuring the tail block's first target will be the loop's entry block
+            // and the second target will be the loop's continuation block.
+            let continuation = self.graph.children(loop_tail)[1];
 
             self.visit(continuation, Some(parent), end);
         } else if let Some(branch_exit) = self.branch_info.get(&bb).copied() {
-            let selector = self
-                .graph
-                .selector(bb)
-                .expect("branching node must have a selector");
             let mut branches = Vec::with_capacity(self.graph.children(bb).len());
 
             for child in self.graph.children(bb) {
@@ -193,7 +188,7 @@ impl<'a> ControlTreeGenerator<'a> {
             let branching_node = self
                 .nodes
                 .push(ControlTreeNodeKind::Branching(BranchingNode {
-                    selector,
+                    selector_bb: bb,
                     branches,
                 }));
 
@@ -268,7 +263,7 @@ mod tests {
     use crate::cfg_to_rvsdg::control_flow_restructuring::{
         restructure_branches, restructure_loops,
     };
-    use crate::ty::{TY_DUMMY, TY_U32};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
@@ -313,7 +308,7 @@ mod tests {
         let bb4 = cfg.add_basic_block(function);
         let exit = cfg.add_basic_block(function);
 
-        let (_, r) = cfg.add_stmt_uninitialized(enter, BlockPosition::Append, TY_U32);
+        let (_, r) = cfg.add_stmt_uninitialized(enter, BlockPosition::Append, TY_BOOL);
         cfg.set_terminator(enter, Terminator::branch_single(bb0));
 
         let (_, c) = cfg.add_stmt_op_binary(
@@ -323,27 +318,27 @@ mod tests {
             y.into(),
             0u32.into(),
         );
-        cfg.set_terminator(bb0, Terminator::branch_multiple(c, [bb1, bb2]));
+        cfg.set_terminator(bb0, Terminator::branch_bool(c, bb1, bb2));
 
-        cfg.add_stmt_assign(bb1, BlockPosition::Append, r, 0u32.into());
+        cfg.add_stmt_assign(bb1, BlockPosition::Append, r, true.into());
         cfg.set_terminator(bb1, Terminator::branch_single(bb4));
 
         let (_, t) = cfg.add_stmt_bind(bb2, BlockPosition::Append, y.into());
-        let (_, mod_result) = cfg.add_stmt_op_binary(
+        let (_, s) = cfg.add_stmt_op_binary(
             bb2,
             BlockPosition::Append,
             BinaryOperator::Mod,
             x.into(),
             y.into(),
         );
-        cfg.add_stmt_assign(bb2, BlockPosition::Append, y, mod_result.into());
+        cfg.add_stmt_assign(bb2, BlockPosition::Append, y, s.into());
         cfg.add_stmt_assign(bb2, BlockPosition::Append, x, t.into());
         cfg.set_terminator(bb2, Terminator::branch_single(bb3));
 
-        cfg.add_stmt_assign(bb3, BlockPosition::Append, r, 1u32.into());
+        cfg.add_stmt_assign(bb3, BlockPosition::Append, r, false.into());
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
 
-        cfg.set_terminator(bb4, Terminator::branch_multiple(r, [exit, bb0]));
+        cfg.set_terminator(bb4, Terminator::branch_bool(r, bb0, exit));
 
         cfg.set_terminator(exit, Terminator::Return(Some(x.into())));
 
@@ -462,12 +457,7 @@ mod tests {
             add_result.into(),
             10u32.into(),
         );
-        let (_, predicate) =
-            cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, test_result.into());
-        cfg.set_terminator(
-            bb0,
-            Terminator::branch_multiple(predicate.into(), [bb1, bb0]),
-        );
+        cfg.set_terminator(bb0, Terminator::branch_bool(test_result, bb0, bb1));
 
         cfg.set_terminator(bb1, Terminator::return_value(add_result.into()));
 

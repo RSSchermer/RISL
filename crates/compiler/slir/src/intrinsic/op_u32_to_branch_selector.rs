@@ -7,9 +7,7 @@ use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 ///
 /// The branch selected is the `u32` value clamped to the range `0..branch_count`.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpU32ToBranchSelector {
-    pub branch_count: u32,
-}
+pub struct OpU32ToBranchSelector;
 
 impl Intrinsic for OpU32ToBranchSelector {
     fn process_args(

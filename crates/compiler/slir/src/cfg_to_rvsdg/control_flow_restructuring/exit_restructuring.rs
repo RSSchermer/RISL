@@ -98,10 +98,7 @@ mod tests {
         let bb1 = cfg.add_basic_block(function);
         let bb2 = cfg.add_basic_block(function);
 
-        let (_, predicate) =
-            cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, arg_0.into());
-
-        cfg.set_terminator(bb0, Terminator::branch_multiple(predicate, [bb1, bb2]));
+        cfg.set_terminator(bb0, Terminator::branch_bool(arg_0, bb1, bb2));
 
         restructure_exit(&mut cfg, function);
 

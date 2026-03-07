@@ -4,7 +4,9 @@ use indexmap::IndexSet;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::Function;
-use crate::cfg::{BasicBlock, BlockPosition, Cfg, LocalBinding, Statement, Terminator};
+use crate::cfg::{
+    BasicBlock, BlockPosition, BranchSelector, Cfg, LocalBinding, Statement, Terminator,
+};
 use crate::cfg_to_rvsdg::control_flow_restructuring::exit_restructuring::restructure_exit;
 use crate::ty::Type;
 
@@ -81,11 +83,32 @@ impl<'a> Graph<'a> {
         bb
     }
 
-    pub fn append_block_branch_multiple(&mut self, predicate: LocalBinding) -> BasicBlock {
+    pub fn append_block_branch_bool(
+        &mut self,
+        value: LocalBinding,
+        true_branch: BasicBlock,
+        false_branch: BasicBlock,
+    ) -> BasicBlock {
+        let bb = self.cfg.add_basic_block(self.function);
+
+        self.cfg.set_terminator(
+            bb,
+            Terminator::branch_bool(value, true_branch, false_branch),
+        );
+
+        bb
+    }
+
+    /// Adds a new empty [BasicBlock] to the function body with a [Branch] terminator that uses a
+    /// `u32` value as its branch selector.
+    ///
+    /// The [Branch] terminator will initially have an empty `targets` list. This is an invalid
+    /// state, so branch targets must be added later (e.g., with [Graph::connect]).
+    pub fn append_block_branch_u32(&mut self, value: LocalBinding) -> BasicBlock {
         let bb = self.cfg.add_basic_block(self.function);
 
         self.cfg
-            .set_terminator(bb, Terminator::branch_multiple(predicate, []));
+            .set_terminator(bb, Terminator::branch_u32(value, []));
 
         bb
     }
@@ -100,12 +123,17 @@ impl<'a> Graph<'a> {
             .1
     }
 
-    pub fn selector(&self, bb: BasicBlock) -> Option<LocalBinding> {
+    pub fn selector(&self, bb: BasicBlock) -> &BranchSelector {
         self.cfg[bb].terminator().expect_branch().selector()
     }
 
-    pub fn set_selector(&mut self, bb: BasicBlock, selector: LocalBinding) {
+    pub fn set_selector(&mut self, bb: BasicBlock, selector: BranchSelector) {
         self.cfg.set_branch_selector(bb, selector);
+    }
+
+    pub fn reverse_child_order(&mut self, bb: BasicBlock) {
+        self.cfg.reverse_branch_targets(bb);
+        self.inverse_graph.entry(bb).or_default().reverse();
     }
 
     pub fn connect(&mut self, edge: Edge) {
@@ -247,10 +275,7 @@ mod tests {
         let bb3 = cfg.add_basic_block(function);
         let exit = cfg.add_basic_block(function);
 
-        let (_, selector) =
-            cfg.add_stmt_op_bool_to_branch_selector(entry, BlockPosition::Append, arg_0.into());
-
-        cfg.set_terminator(entry, Terminator::branch_multiple(selector, [bb0, bb1]));
+        cfg.set_terminator(entry, Terminator::branch_bool(arg_0, bb0, bb1));
         cfg.set_terminator(bb0, Terminator::branch_single(bb2));
         cfg.set_terminator(bb1, Terminator::branch_single(bb3));
         cfg.set_terminator(bb2, Terminator::branch_single(exit));
@@ -308,10 +333,7 @@ mod tests {
         let bb3 = cfg.add_basic_block(function);
         let exit = cfg.add_basic_block(function);
 
-        let (_, selector) =
-            cfg.add_stmt_op_bool_to_branch_selector(entry, BlockPosition::Append, arg_0.into());
-
-        cfg.set_terminator(entry, Terminator::branch_multiple(selector, [bb0, bb1]));
+        cfg.set_terminator(entry, Terminator::branch_bool(arg_0, bb0, bb1));
         cfg.set_terminator(bb0, Terminator::branch_single(bb2));
         cfg.set_terminator(bb1, Terminator::branch_single(bb3));
         cfg.set_terminator(bb2, Terminator::branch_single(exit));

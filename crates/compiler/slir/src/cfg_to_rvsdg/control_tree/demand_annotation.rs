@@ -112,7 +112,7 @@ mod tests {
         Graph, restructure_branches, restructure_loops,
     };
     use crate::cfg_to_rvsdg::control_tree::read_write_annotation::annotate_read_write;
-    use crate::ty::{TY_DUMMY, TY_U32};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
@@ -157,7 +157,7 @@ mod tests {
         let bb4 = cfg.add_basic_block(function);
         let exit = cfg.add_basic_block(function);
 
-        let (_, r) = cfg.add_stmt_uninitialized(enter, BlockPosition::Append, TY_U32);
+        let (_, r) = cfg.add_stmt_uninitialized(enter, BlockPosition::Append, TY_BOOL);
         cfg.set_terminator(enter, Terminator::branch_single(bb0));
 
         let (_, c) = cfg.add_stmt_op_binary(
@@ -167,9 +167,9 @@ mod tests {
             y.into(),
             0u32.into(),
         );
-        cfg.set_terminator(bb0, Terminator::branch_multiple(c, [bb1, bb2]));
+        cfg.set_terminator(bb0, Terminator::branch_bool(c, bb1, bb2));
 
-        cfg.add_stmt_assign(bb1, BlockPosition::Append, r, 0u32.into());
+        cfg.add_stmt_assign(bb1, BlockPosition::Append, r, true.into());
         cfg.set_terminator(bb1, Terminator::branch_single(bb4));
 
         let (_, t) = cfg.add_stmt_bind(bb2, BlockPosition::Append, y.into());
@@ -184,10 +184,10 @@ mod tests {
         cfg.add_stmt_assign(bb2, BlockPosition::Append, x, t.into());
         cfg.set_terminator(bb2, Terminator::branch_single(bb3));
 
-        cfg.add_stmt_assign(bb3, BlockPosition::Append, r, 1u32.into());
+        cfg.add_stmt_assign(bb3, BlockPosition::Append, r, false.into());
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
 
-        cfg.set_terminator(bb4, Terminator::branch_multiple(r, [exit, bb0]));
+        cfg.set_terminator(bb4, Terminator::branch_bool(r, bb0, exit));
 
         cfg.set_terminator(exit, Terminator::Return(Some(x.into())));
 

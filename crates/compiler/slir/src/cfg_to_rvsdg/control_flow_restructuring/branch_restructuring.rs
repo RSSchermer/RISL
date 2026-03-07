@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::cfg::{BasicBlock, BlockPosition};
 use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
-use crate::ty::TY_PREDICATE;
+use crate::ty::TY_U32;
 
 pub struct Reachable {
     kind: ReachableKind,
@@ -239,8 +239,8 @@ fn restructure_branches_internal(
 
         continuation_node
     } else {
-        let predicate = graph.add_value(TY_PREDICATE);
-        let continuation_node = graph.append_block_branch_multiple(predicate);
+        let selector_value = graph.add_value(TY_U32);
+        let continuation_node = graph.append_block_branch_u32(selector_value);
 
         let mut indices = FxHashMap::default();
 
@@ -290,7 +290,7 @@ fn restructure_branches_internal(
                 graph.add_stmt_assign(
                     intermediate,
                     BlockPosition::Append,
-                    predicate,
+                    selector_value,
                     (index as u32).into(),
                 );
                 graph.reconnect_dest(*edge, intermediate);
@@ -361,11 +361,11 @@ mod tests {
                 ty: TY_DUMMY,
                 args: vec![
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                 ],
@@ -407,8 +407,8 @@ mod tests {
         let bb4 = cfg.add_basic_block(function);
         let bb5 = cfg.add_basic_block(function);
 
-        cfg.set_terminator(bb0, Terminator::branch_multiple(a0, [bb1, bb4]));
-        cfg.set_terminator(bb1, Terminator::branch_multiple(a1, [bb2, bb3]));
+        cfg.set_terminator(bb0, Terminator::branch_u32(a0, [bb1, bb4]));
+        cfg.set_terminator(bb1, Terminator::branch_u32(a1, [bb2, bb3]));
         cfg.set_terminator(bb2, Terminator::branch_single(bb5));
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
         cfg.set_terminator(bb4, Terminator::branch_single(bb5));
@@ -445,11 +445,11 @@ mod tests {
                 ty: TY_DUMMY,
                 args: vec![
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                 ],
@@ -491,8 +491,8 @@ mod tests {
         let bb4 = cfg.add_basic_block(function);
         let bb5 = cfg.add_basic_block(function);
 
-        cfg.set_terminator(bb0, Terminator::branch_multiple(a0, [bb1, bb4]));
-        cfg.set_terminator(bb1, Terminator::branch_multiple(a1, [bb2, bb3]));
+        cfg.set_terminator(bb0, Terminator::branch_u32(a0, [bb1, bb4]));
+        cfg.set_terminator(bb1, Terminator::branch_u32(a1, [bb2, bb3]));
         cfg.set_terminator(bb2, Terminator::branch_single(bb5));
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
         cfg.set_terminator(bb4, Terminator::branch_single(bb5));
@@ -565,11 +565,11 @@ mod tests {
                 ty: TY_DUMMY,
                 args: vec![
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                 ],
@@ -611,8 +611,8 @@ mod tests {
         let bb4 = cfg.add_basic_block(function);
         let bb5 = cfg.add_basic_block(function);
 
-        cfg.set_terminator(bb0, Terminator::branch_multiple(a0, [bb1, bb4]));
-        cfg.set_terminator(bb1, Terminator::branch_multiple(a1, [bb2, bb3]));
+        cfg.set_terminator(bb0, Terminator::branch_u32(a0, [bb1, bb4]));
+        cfg.set_terminator(bb1, Terminator::branch_u32(a1, [bb2, bb3]));
         cfg.set_terminator(bb2, Terminator::branch_single(bb5));
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
         cfg.set_terminator(bb4, Terminator::branch_single(bb5));

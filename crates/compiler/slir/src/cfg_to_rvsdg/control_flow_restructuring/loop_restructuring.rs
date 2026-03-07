@@ -1,12 +1,13 @@
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::cfg::{BasicBlock, BlockPosition, LocalBinding};
+use crate::cfg::{BasicBlock, BlockPosition, BranchSelector, LocalBinding};
 use crate::cfg_to_rvsdg::control_flow_restructuring::strongly_connected_components::{
     SccStructure, strongly_connected_components,
 };
 use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
-use crate::ty::TY_PREDICATE;
+use crate::ty::{TY_BOOL, TY_U32};
+use crate::{BinaryOperator, UnaryOperator};
 
 /// Restructures the loops in the graph.
 ///
@@ -40,11 +41,15 @@ fn restructure_loop(
     let scc_structure = SccStructure::analyse(graph, scc);
 
     let reentry_edge = if scc_structure.is_tail_controlled_loop() {
-        // Already in the desired structure
+        // The control-flow graph is already in the desired structure.
 
-        scc_structure.repetition_edges[0]
+        let reentry_edge = scc_structure.repetition_edges[0];
+
+        normalize_terminator(graph, reentry_edge);
+
+        reentry_edge
     } else {
-        let branch_selector = graph.add_value(TY_PREDICATE);
+        let branch_selector = graph.add_value(TY_U32);
 
         let (entry, branch_mapping) =
             restructure_loop_entry(graph, &scc_structure, branch_selector);
@@ -61,12 +66,104 @@ fn restructure_loop(
     reentry_edges.insert(reentry_edge);
 }
 
+/// Normalize the terminator of the tail block of a loop that is already in the desired structure.
+///
+/// Though the graph structure is already in the desired form, we may still need to normalize the
+/// tail block's terminator. We want the branch-selector to be a boolean value, we want the first
+/// target to be the loop's entry block, and we want the second target to be the continuation block.
+fn normalize_terminator(graph: &mut Graph, reentry_edge: Edge) {
+    let entry = reentry_edge.dest;
+    let tail = reentry_edge.source;
+
+    let needs_reversal = graph.children(tail)[0] != entry;
+
+    match graph.selector(tail) {
+        BranchSelector::Bool(condition) => {
+            let condition = *condition;
+
+            if needs_reversal {
+                // We need to invert both the condition and the branch target order.
+
+                let (_, new_condition) = graph.add_stmt_op_unary(
+                    tail,
+                    BlockPosition::Append,
+                    UnaryOperator::Not,
+                    condition.into(),
+                );
+
+                graph.set_selector(tail, BranchSelector::Bool(new_condition));
+                graph.reverse_child_order(tail);
+            }
+        }
+        BranchSelector::Case { value, cases } => {
+            // We'll need to convert the `value` to a boolean value. We'll do this by comparing
+            // it to the first case. If we need to invert the branch target order, we'll also
+            // need to invert the new boolean value. We can combine this into a single operation
+            // by simply selecting the inverse comparison operator.
+
+            let cmp = if needs_reversal {
+                BinaryOperator::NotEq
+            } else {
+                BinaryOperator::Eq
+            };
+
+            let value = *value;
+            let case = cases[0];
+
+            let (_, condition) = graph.add_stmt_op_binary(
+                tail,
+                BlockPosition::Append,
+                cmp,
+                value.into(),
+                case.into(),
+            );
+
+            graph.set_selector(tail, BranchSelector::Bool(condition));
+
+            if needs_reversal {
+                graph.reverse_child_order(tail);
+            }
+        }
+        BranchSelector::U32(value) => {
+            // We'll need to convert the `value` to a boolean value. We'll do this by comparing
+            // it to `0`. If we need to invert the branch target order, we'll also need to
+            // invert the new boolean value. We can combine this into a single operation by
+            // simply selecting the inverse comparison operator.
+
+            let cmp = if needs_reversal {
+                BinaryOperator::NotEq
+            } else {
+                BinaryOperator::Eq
+            };
+
+            let value = *value;
+
+            let (_, condition) = graph.add_stmt_op_binary(
+                tail,
+                BlockPosition::Append,
+                cmp,
+                value.into(),
+                0u32.into(),
+            );
+
+            graph.set_selector(tail, BranchSelector::Bool(condition));
+
+            if needs_reversal {
+                graph.reverse_child_order(tail);
+            }
+        }
+        BranchSelector::Single => {
+            unreachable!("a tail-controlled loop has exactly two targets")
+        }
+    }
+}
+
 fn restructure_loop_entry(
     graph: &mut Graph,
     structure: &SccStructure,
     branch_selector: LocalBinding,
 ) -> (BasicBlock, FxHashMap<BasicBlock, u32>) {
-    let entry = graph.append_block_branch_multiple(branch_selector);
+    let entry = graph.append_block_branch_u32(branch_selector);
     let mut branch_mapping = FxHashMap::default();
 
     for (i, edge) in structure.entry_edges.iter().enumerate() {
@@ -98,19 +195,10 @@ fn restructure_loop_tail(
     entry: BasicBlock,
     entry_branch_mapping: FxHashMap<BasicBlock, u32>,
 ) -> Edge {
-    let reentry_selector = graph.add_value(TY_PREDICATE);
+    let reentry_condition = graph.add_value(TY_BOOL);
 
-    let tail = graph.append_block_branch_multiple(reentry_selector);
-    let exit = graph.append_block_branch_multiple(branch_selector);
-
-    graph.connect(Edge {
-        source: tail,
-        dest: exit,
-    });
-    graph.connect(Edge {
-        source: tail,
-        dest: entry,
-    });
+    let exit = graph.append_block_branch_u32(branch_selector);
+    let tail = graph.append_block_branch_bool(reentry_condition, entry, exit);
 
     for edge in &structure.repetition_edges {
         let intermediate = graph.append_block_branch_single(tail);
@@ -125,13 +213,12 @@ fn restructure_loop_tail(
             branch_index.into(),
         );
 
-        // Set the `reentry_selector` selector to `1` to indicate that we will be repeating the
-        // loop.
+        // Set the `reentry_condition` to `true` to indicate that we will be repeating the loop.
         graph.add_stmt_assign(
             intermediate,
             BlockPosition::Append,
-            reentry_selector,
-            1u32.into(),
+            reentry_condition,
+            true.into(),
         );
 
         graph.reconnect_dest(*edge, intermediate);
@@ -147,13 +234,12 @@ fn restructure_loop_tail(
             (i as u32).into(),
         );
 
-        // Set the `reentry_selector` selector to `0` to indicate that we will be exiting the
-        // loop.
+        // Set the `reentry_selector` to `false` to indicate that we will be exiting the loop.
         graph.add_stmt_assign(
             intermediate,
             BlockPosition::Append,
-            reentry_selector,
-            0u32.into(),
+            reentry_condition,
+            false.into(),
         );
 
         graph.reconnect_dest(*edge, intermediate);
@@ -191,15 +277,15 @@ mod tests {
                 ty: TY_DUMMY,
                 args: vec![
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                 ],
@@ -244,11 +330,11 @@ mod tests {
         let bb6 = cfg.add_basic_block(function);
         let bb7 = cfg.add_basic_block(function);
 
-        cfg.set_terminator(bb0, Terminator::branch_multiple(a0, [bb1, bb2]));
+        cfg.set_terminator(bb0, Terminator::branch_u32(a0, [bb1, bb2]));
         cfg.set_terminator(bb1, Terminator::branch_single(bb3));
         cfg.set_terminator(bb2, Terminator::branch_single(bb4));
-        cfg.set_terminator(bb3, Terminator::branch_multiple(a1, [bb5, bb2]));
-        cfg.set_terminator(bb4, Terminator::branch_multiple(a2, [bb6, bb1]));
+        cfg.set_terminator(bb3, Terminator::branch_u32(a1, [bb5, bb2]));
+        cfg.set_terminator(bb4, Terminator::branch_u32(a2, [bb6, bb1]));
         cfg.set_terminator(bb5, Terminator::branch_single(bb7));
         cfg.set_terminator(bb6, Terminator::branch_single(bb7));
 
@@ -326,10 +412,12 @@ mod tests {
         assert_eq!(graph.children(bb16), &[bb11]);
 
         assert_eq!(graph.children(bb11).len(), 2);
-        assert_eq!(graph.children(bb11)[1], bb8);
+        assert_eq!(graph.children(bb11)[0], bb8);
 
-        let bb12 = graph.children(bb11)[0];
+        let bb12 = graph.children(bb11)[1];
 
         assert_eq!(graph.children(bb12), &[bb6, bb5]);
     }
+
+    // TODO: add tests for normalize_terminator
 }

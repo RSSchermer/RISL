@@ -139,8 +139,6 @@ impl_collect_dependencies_statement! {
     OpUnary,
     OpBinary,
     OpCall,
-    OpCaseToBranchSelector,
-    OpBoolToBranchSelector,
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,

@@ -6,8 +6,8 @@ use smallvec::SmallVec;
 
 use crate::cfg::analyze::item_dependencies::{Item, ItemDependencies, item_dependencies};
 use crate::cfg::{
-    Assign, BasicBlock, Bind, Cfg, InlineConst, IntrinsicOp, LocalBinding, OpCall, RootIdentifier,
-    StatementData, Terminator, Uninitialized, Value,
+    Assign, BasicBlock, Bind, BranchSelector, Cfg, InlineConst, IntrinsicOp, LocalBinding, OpCall,
+    RootIdentifier, StatementData, Terminator, Uninitialized, Value,
 };
 use crate::cfg_to_rvsdg::control_flow_restructuring::{
     Graph, restructure_branches, restructure_loops,
@@ -19,7 +19,7 @@ use crate::cfg_to_rvsdg::control_tree::{
 };
 use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type};
+use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
 use crate::{Function, Module, rvsdg};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -159,9 +159,32 @@ impl<'a> RegionBuilder<'a> {
         let demand = self.demand.get(node);
         let uses_state = self.state_use[node];
 
+        let selector = self.cfg[data.selector_bb]
+            .terminator()
+            .expect_branch()
+            .selector();
+
+        let selector_node = match selector {
+            BranchSelector::Bool(value) => self
+                .rvsdg
+                .add_op_bool_to_branch_selector(self.region, self.input_state_tracker[*value]),
+            BranchSelector::Case { value, cases } => self.rvsdg.add_op_case_to_branch_selector(
+                self.region,
+                self.input_state_tracker[*value],
+                cases.iter().copied(),
+            ),
+            BranchSelector::U32(value) => self
+                .rvsdg
+                .add_op_u32_to_branch_selector(self.region, self.input_state_tracker[*value]),
+            BranchSelector::Single => unreachable!(
+                "a basic-block with a single branch terminator should not lead into a branching \
+                node"
+            ),
+        };
+
         let mut value_inputs = Vec::with_capacity(item_deps.len() + demand.len() + 1);
 
-        value_inputs.push(self.input_state_tracker[data.selector]);
+        value_inputs.push(ValueInput::output(TY_PREDICATE, selector_node, 0));
 
         // We need to construct the input state for the branch regions, based on the inputs to the
         // switch node. Each region builder for a branch's sub-region will start with a copy of this
@@ -235,6 +258,14 @@ impl<'a> RegionBuilder<'a> {
     }
 
     fn visit_loop_node(&mut self, (node, data): (ControlTreeNode, &LoopNode)) {
+        let &BranchSelector::Bool(reentry_condition) = self.cfg[data.tail_bb]
+            .terminator()
+            .expect_branch()
+            .selector()
+        else {
+            panic!("expected the selector of a loop tail to be a boolean after loop restructuring");
+        };
+
         let item_deps = self.item_dependencies.get(node);
         let demand = self.demand.get(node);
         let uses_state = self.state_use[node];
@@ -261,7 +292,7 @@ impl<'a> RegionBuilder<'a> {
         inner_builder.visit_node_expect_linear(data.inner);
 
         // Connect the re-entry predicate result
-        inner_builder.connect_result(0, data.reentry_predicate.into());
+        inner_builder.connect_result(0, reentry_condition.into());
 
         // Connect the other results based on the demand.
         for (i, value) in demand.iter().enumerate() {
@@ -319,8 +350,6 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpOffsetSlice(op) => self.visit_intrinsic_op(op),
             StatementData::OpUnary(op) => self.visit_intrinsic_op(op),
             StatementData::OpBinary(op) => self.visit_intrinsic_op(op),
-            StatementData::OpCaseToBranchSelector(op) => self.visit_intrinsic_op(op),
-            StatementData::OpBoolToBranchSelector(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToU32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToI32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToF32(op) => self.visit_intrinsic_op(op),
@@ -734,9 +763,7 @@ mod tests {
 
         // BB0
         let (_, res) = cfg.add_stmt_uninitialized(bb0, BlockPosition::Append, TY_U32);
-        let (_, predicate) =
-            cfg.add_stmt_op_case_to_branch_selector(bb0, BlockPosition::Append, a0.into(), [0, 1]);
-        cfg.set_terminator(bb0, Terminator::branch_multiple(predicate, [bb1, bb2]));
+        cfg.set_terminator(bb0, Terminator::branch_u32(a0, [bb1, bb2]));
 
         // BB1
         let (_, add_res) = cfg.add_stmt_op_binary(
@@ -762,11 +789,8 @@ mod tests {
 
         let (_, region) = expected.register_function(&module, function, iter::empty());
 
-        let predicate_node = expected.add_op_case_to_branch_selector(
-            region,
-            ValueInput::argument(TY_U32, 0),
-            [0, 1],
-        );
+        let predicate_node =
+            expected.add_op_u32_to_branch_selector(region, ValueInput::argument(TY_U32, 0));
         let switch_node = expected.add_switch(
             region,
             vec![
@@ -870,9 +894,7 @@ mod tests {
             a0.into(),
             10u32.into(),
         );
-        let (_, predicate) =
-            cfg.add_stmt_op_bool_to_branch_selector(bb0, BlockPosition::Append, cmp.into());
-        cfg.set_terminator(bb0, Terminator::branch_multiple(predicate, [bb1, bb0]));
+        cfg.set_terminator(bb0, Terminator::branch_bool(cmp, bb0, bb1));
 
         // BB1
         cfg.set_terminator(bb1, Terminator::return_value(a0.into()));

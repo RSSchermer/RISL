@@ -2,8 +2,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::cfg::{
-    BasicBlock, BlockPosition, Cfg, ConstPtr, InlineConst, IntrinsicOp, LocalBinding,
-    RootIdentifier, Statement, StatementData, Terminator, Value,
+    BasicBlock, BlockPosition, BranchSelector, Cfg, ConstPtr, InlineConst, IntrinsicOp,
+    LocalBinding, RootIdentifier, Statement, StatementData, Terminator, Value,
 };
 use crate::intrinsic::Intrinsic;
 use crate::ty::TypeKind;
@@ -109,16 +109,23 @@ impl FunctionImporter {
         }
 
         let terminator = match src_cfg[src_bb].terminator() {
-            Terminator::Branch(t) => {
-                if let Some(selector) = t.selector() {
-                    Terminator::branch_multiple(
-                        self.dst_local_value(selector),
-                        t.targets().iter().map(|&bb| self.dst_bb(bb)),
-                    )
-                } else {
-                    Terminator::branch_single(self.dst_bb(t.targets()[0]))
-                }
-            }
+            Terminator::Branch(t) => match t.selector() {
+                BranchSelector::Single => Terminator::branch_single(self.dst_bb(t.targets()[0])),
+                BranchSelector::Bool(value) => Terminator::branch_bool(
+                    self.dst_local_value(*value),
+                    self.dst_bb(t.targets()[0]),
+                    self.dst_bb(t.targets()[1]),
+                ),
+                BranchSelector::Case { value, cases } => Terminator::branch_case(
+                    self.dst_local_value(*value),
+                    cases.clone(),
+                    t.targets().iter().map(|&bb| self.dst_bb(bb)),
+                ),
+                BranchSelector::U32(value) => Terminator::branch_u32(
+                    self.dst_local_value(*value),
+                    t.targets().iter().map(|&bb| self.dst_bb(bb)),
+                ),
+            },
             Terminator::Return(Some(value)) => {
                 Terminator::return_value(self.dst_value(src_mod, (dst_mod, dst_cfg), *value))
             }
@@ -191,12 +198,6 @@ impl FunctionImporter {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
             StatementData::OpBinary(op) => {
-                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
-            }
-            StatementData::OpCaseToBranchSelector(op) => {
-                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
-            }
-            StatementData::OpBoolToBranchSelector(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
             StatementData::OpConvertToU32(op) => {

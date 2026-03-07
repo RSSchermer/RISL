@@ -286,15 +286,19 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     ) {
         let mut cfg = self.cfg.borrow_mut();
 
-        let (_, predicate) = cfg.add_stmt_op_bool_to_branch_selector(
-            self.basic_block,
-            BlockPosition::Append,
-            cond.expect_value(),
-        );
+        let cond = cond.expect_value();
+
+        let cond = if let slir::cfg::Value::Local(local) = cond {
+            local
+        } else {
+            let (_, local) = cfg.add_stmt_bind(self.basic_block, BlockPosition::Append, cond);
+
+            local
+        };
 
         cfg.set_terminator(
             self.basic_block,
-            slir::cfg::Terminator::branch_multiple(predicate, [then_llbb, else_llbb]),
+            slir::cfg::Terminator::branch_bool(cond, then_llbb, else_llbb),
         );
     }
 
@@ -326,16 +330,19 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
 
         let mut cfg = self.cfg.borrow_mut();
 
-        let (_, predicate) = cfg.add_stmt_op_case_to_branch_selector(
-            self.basic_block,
-            BlockPosition::Append,
-            v.expect_value(),
-            predicate_cases,
-        );
+        let value = v.expect_value();
+
+        let value = if let slir::cfg::Value::Local(local) = value {
+            local
+        } else {
+            let (_, local) = cfg.add_stmt_bind(self.basic_block, BlockPosition::Append, value);
+
+            local
+        };
 
         cfg.set_terminator(
             self.basic_block,
-            slir::cfg::Terminator::branch_multiple(predicate, branches),
+            slir::cfg::Terminator::branch_case(value, predicate_cases, branches),
         );
     }
 

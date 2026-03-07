@@ -1423,6 +1423,6 @@ mod tests {
         );
 
         // Shouldn't panic
-        RegionLayout::generate(&Config::default(), &module, &rvsdg, region);
+        RegionLayout::generate(&Config::default(), &rvsdg, region);
     }
 }

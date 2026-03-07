@@ -246,7 +246,7 @@ impl SccStructure {
 mod tests {
     use super::*;
     use crate::cfg::{Cfg, Terminator};
-    use crate::ty::{TY_DUMMY, TY_PREDICATE};
+    use crate::ty::{TY_DUMMY, TY_U32};
     use crate::{FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
@@ -264,15 +264,15 @@ mod tests {
                 ty: TY_DUMMY,
                 args: vec![
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                 ],
@@ -308,9 +308,9 @@ mod tests {
 
         cfg.set_terminator(bb0, Terminator::branch_single(bb1));
         cfg.set_terminator(bb1, Terminator::branch_single(bb2));
-        cfg.set_terminator(bb2, Terminator::branch_multiple(a0, [bb0, bb3]));
-        cfg.set_terminator(bb3, Terminator::branch_multiple(a1, [bb0, bb4]));
-        cfg.set_terminator(bb4, Terminator::branch_multiple(a2, [bb5, bb6]));
+        cfg.set_terminator(bb2, Terminator::branch_u32(a0, [bb0, bb3]));
+        cfg.set_terminator(bb3, Terminator::branch_u32(a1, [bb0, bb4]));
+        cfg.set_terminator(bb4, Terminator::branch_u32(a2, [bb5, bb6]));
         cfg.set_terminator(bb5, Terminator::branch_single(bb6));
         cfg.set_terminator(bb6, Terminator::branch_single(bb7));
         cfg.set_terminator(bb7, Terminator::branch_single(bb5));
@@ -340,15 +340,15 @@ mod tests {
                 ty: TY_DUMMY,
                 args: vec![
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                     FnArg {
-                        ty: TY_PREDICATE,
+                        ty: TY_U32,
                         shader_io_binding: None,
                     },
                 ],
@@ -393,11 +393,11 @@ mod tests {
         let bb6 = cfg.add_basic_block(function);
         let exit = cfg.add_basic_block(function);
 
-        cfg.set_terminator(bb0, Terminator::branch_multiple(a0, [bb1, bb2]));
+        cfg.set_terminator(bb0, Terminator::branch_u32(a0, [bb1, bb2]));
         cfg.set_terminator(bb1, Terminator::branch_single(bb3));
         cfg.set_terminator(bb2, Terminator::branch_single(bb4));
-        cfg.set_terminator(bb3, Terminator::branch_multiple(a1, [bb5, bb2]));
-        cfg.set_terminator(bb4, Terminator::branch_multiple(a2, [bb6, bb1]));
+        cfg.set_terminator(bb3, Terminator::branch_u32(a1, [bb5, bb2]));
+        cfg.set_terminator(bb4, Terminator::branch_u32(a2, [bb6, bb1]));
         cfg.set_terminator(bb5, Terminator::branch_single(exit));
         cfg.set_terminator(bb6, Terminator::branch_single(exit));
 

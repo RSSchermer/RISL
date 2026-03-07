@@ -51,7 +51,7 @@
 //! to a [RegionData] reference:
 //!
 //! ```
-//! # fn f(region: Region) {
+//! # fn f(rvsdg: &slir::rvsdg::Rvsdg, region: slir::rvsdg::Region) {
 //! let region_data = &rvsdg[region];
 //! # }
 //! ```
@@ -77,7 +77,7 @@
 //! reference:
 //!
 //! ```
-//! # fn f(node: Node) {
+//! # fn f(rvsdg: &slir::rvsdg::Rvsdg, node: slir::rvsdg::Node) {
 //! let node_data = &rvsdg[node];
 //! # }
 //! ```
@@ -143,7 +143,7 @@
 //!   needs to be linked into the state chain, the state edge into which the node is being added
 //!   must be in the same region as the region to which the node is being added.
 //! - The type of the [ValueOutput] to which a [ValueInput]s origin resolves, must be compatible
-//!   (as defined by [TypeRegistry::can_coerce]) with the type declared for the [ValueInput].
+//!   (as defined by [TypeRegistry::can_coerce][1]) with the type declared for the [ValueInput].
 //!
 //! Specific operations may enforce additional invariants. For example, [Rvsdg::add_op_load] will
 //! verify that the value provided as its `ptr_input` (which represents the pointer to load from)
@@ -168,6 +168,7 @@
 //! Refer to the README documents for these crates for more details on their use.
 //!
 //! [0]: https://arxiv.org/abs/1912.05036
+//! [1]: crate::ty::TypeRegistry::can_coerce
 
 pub mod analyse;
 pub mod transform;
@@ -176,4 +177,3 @@ pub mod visit;
 mod rvsdg;
 
 pub use self::rvsdg::*;
-use crate::ty::TypeRegistry;

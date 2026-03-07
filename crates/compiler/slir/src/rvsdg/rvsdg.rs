@@ -56,7 +56,7 @@ slotmap::new_key_type! {
     /// with which it is associated:
     ///
     /// ```
-    /// # fn f(node: Node) {
+    /// # fn f(rvsdg: &slir::rvsdg::Rvsdg, node: slir::rvsdg::Node) {
     /// let node_data = &rvsdg[node];
     /// # }
     /// ```
@@ -68,7 +68,7 @@ slotmap::new_key_type! {
     /// [Rvsdg] with which it is associated:
     ///
     /// ```
-    /// # fn f(region: Region) {
+    /// # fn f(rvsdg: &slir::rvsdg::Rvsdg, region: slir::rvsdg::Region) {
     /// let node_data = &rvsdg[region];
     /// # }
     /// ```
@@ -1416,10 +1416,6 @@ impl OpBoolToBranchSelector {
 pub type OpU32ToBranchSelector = IntrinsicNode<intrinsic::OpU32ToBranchSelector>;
 
 impl OpU32ToBranchSelector {
-    pub fn branch_count(&self) -> u32 {
-        self.intrinsic.branch_count
-    }
-
     gen_intrinsic_value_input!(value_input, 0);
     gen_intrinsic_value_output!();
 }
@@ -3214,18 +3210,8 @@ impl Rvsdg {
         self.add_intrinsic_op(region, intrinsic::OpBoolToBranchSelector, [input], None)
     }
 
-    pub fn add_op_u32_to_branch_selector(
-        &mut self,
-        region: Region,
-        branch_count: u32,
-        input: ValueInput,
-    ) -> Node {
-        self.add_intrinsic_op(
-            region,
-            intrinsic::OpU32ToBranchSelector { branch_count },
-            [input],
-            None,
-        )
+    pub fn add_op_u32_to_branch_selector(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpU32ToBranchSelector, [input], None)
     }
 
     pub fn add_op_branch_selector_to_case(

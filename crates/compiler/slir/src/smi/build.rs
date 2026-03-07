@@ -637,16 +637,14 @@ mod tests {
             None,
             [],
         );
-        let (_, entry_point_0_bb0_predicate) = cfg.add_stmt_op_bool_to_branch_selector(
-            entry_point_0_bb0,
-            BlockPosition::Append,
-            false.into(),
-        );
+        let (_, entry_point_0_bb0_predicate) =
+            cfg.add_stmt_bind(entry_point_0_bb0, BlockPosition::Append, false.into());
         cfg.set_terminator(
             entry_point_0_bb0,
-            Terminator::branch_multiple(
+            Terminator::branch_bool(
                 entry_point_0_bb0_predicate,
-                [entry_point_0_bb1, entry_point_0_bb2],
+                entry_point_0_bb1,
+                entry_point_0_bb2,
             ),
         );
 

@@ -640,11 +640,8 @@ mod tests {
             ValueInput::output(enum_ptr_ty, alloca_node, 0),
             StateOrigin::Node(switch_0_node),
         );
-        let switch_1_predicate = rvsdg.add_op_u32_to_branch_selector(
-            region,
-            2,
-            ValueInput::output(TY_U32, get_discr_node, 0),
-        );
+        let switch_1_predicate = rvsdg
+            .add_op_u32_to_branch_selector(region, ValueInput::output(TY_U32, get_discr_node, 0));
         let switch_1_node = rvsdg.add_switch(
             region,
             vec![

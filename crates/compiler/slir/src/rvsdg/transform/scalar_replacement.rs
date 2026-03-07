@@ -564,10 +564,8 @@ impl Replacer<'_, '_> {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
-                let branch_count = split_input.len() as u32;
                 let to_predicate = self.rvsdg.add_op_u32_to_branch_selector(
                     region,
-                    branch_count,
                     ValueInput {
                         ty: TY_U32,
                         origin: selector,
@@ -652,10 +650,8 @@ impl Replacer<'_, '_> {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
-                let branch_count = split_input.len() as u32;
                 let to_predicate = self.rvsdg.add_op_u32_to_branch_selector(
                     region,
-                    branch_count,
                     ValueInput {
                         ty: TY_U32,
                         origin: selector,
@@ -1951,7 +1947,6 @@ mod tests {
 
         let to_predicate_data = rvsdg[to_predicate].expect_op_u32_to_branch_selector();
 
-        assert_eq!(to_predicate_data.branch_count(), 2);
         assert_eq!(
             to_predicate_data.value_input().origin,
             ValueOrigin::Argument(0)

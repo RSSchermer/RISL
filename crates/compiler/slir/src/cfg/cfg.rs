@@ -575,8 +575,6 @@ gen_statement_data! {
     OpUnary is_op_unary expect_op_unary "unary",
     OpBinary is_op_binary expect_op_binary "binary",
     OpCall is_op_call expect_op_call "call",
-    OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "case-to-branch-selector",
-    OpBoolToBranchSelector is_op_bool_to_branch_selector expect_op_bool_to_branch_selector "bool-to-branch-selector",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
     OpConvertToF32 is_op_convert_to_f32 expect_op_convert_to_f32 "convert-to-f32",
@@ -584,23 +582,91 @@ gen_statement_data! {
     OpArrayLength is_op_array_length expect_op_array_length "array-length",
 }
 
+/// Describes the ways in which a [Terminator] of kind [Branch] can select a branch.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default, Debug)]
+pub enum BranchSelector {
+    /// Selects the terminator's only branch.
+    ///
+    /// The terminator must have exactly one branch, otherwise the terminator should be considered
+    /// "invalid".
+    #[default]
+    Single,
+
+    /// If the value is `true`, then the first branch is selected, otherwise the second branch is
+    /// selected.
+    ///
+    /// The terminator must have exactly two branches, otherwise the terminator should be considered
+    /// "invalid".
+    Bool(LocalBinding),
+
+    /// Selects the branch corresponding to the case value.
+    ///
+    /// The `value` is matched against the `cases` list. Given a cases list with `N` cases, if the
+    /// value matches the `i`th case for `i` in `0..N`, selects the `i`th branch. If the `value`
+    /// matches no case, selects the `N`th branch.
+    ///
+    /// For a `cases` list with `N` cases, the terminator must have at least `N+1` branches,
+    /// otherwise the terminator should be considered "invalid".
+    Case {
+        value: LocalBinding,
+        cases: Vec<u32>,
+    },
+
+    /// Selects the branch corresponding to the value.
+    ///
+    /// For a given value `i` and a [Branch] terminator with `N` branches, if `i` is in the
+    /// range `0..N`, selects the `i`th branch; otherwise selects branch `N-1`.
+    U32(LocalBinding),
+}
+
+/// Represents a branching [Terminator] kind.
+///
+/// This terminator kind represents a [BasicBlock] ending by directing control-flow to the start
+/// of a [BasicBlock] in the same function (which may be the same basic-block as the current
+/// basic-block; a basic-block may direct control-flow back to its own beginning, forming a
+/// single-basic-block loop).
+///
+/// The [Branch::targets] define the set of basic-blocks that can be "branched" to. The
+/// [Branch::selector] describes the mechanism by which a target is selected, see [BranchSelector]
+/// for details.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default, Debug)]
 pub struct Branch {
-    selector: Option<LocalBinding>,
+    selector: BranchSelector,
     targets: SmallVec<[BasicBlock; 2]>,
 }
 
 impl Branch {
     pub fn single(dest: BasicBlock) -> Self {
         Branch {
-            selector: None,
+            selector: BranchSelector::Single,
             targets: smallvec![dest],
         }
     }
 
-    pub fn multiple(selector: LocalBinding, targets: impl IntoIterator<Item = BasicBlock>) -> Self {
+    pub fn bool(value: LocalBinding, true_branch: BasicBlock, false_branch: BasicBlock) -> Self {
         Branch {
-            selector: Some(selector),
+            selector: BranchSelector::Bool(value),
+            targets: smallvec![true_branch, false_branch],
+        }
+    }
+
+    pub fn u32(value: LocalBinding, targets: impl IntoIterator<Item = BasicBlock>) -> Self {
+        Branch {
+            selector: BranchSelector::U32(value),
+            targets: targets.into_iter().collect(),
+        }
+    }
+
+    pub fn case(
+        value: LocalBinding,
+        cases: impl IntoIterator<Item = u32>,
+        targets: impl IntoIterator<Item = BasicBlock>,
+    ) -> Self {
+        Branch {
+            selector: BranchSelector::Case {
+                value,
+                cases: cases.into_iter().collect(),
+            },
             targets: targets.into_iter().collect(),
         }
     }
@@ -608,8 +674,8 @@ impl Branch {
     /// A local value that selects the branch.
     ///
     /// If `None` then the first branch is selected.
-    pub fn selector(&self) -> Option<LocalBinding> {
-        self.selector
+    pub fn selector(&self) -> &BranchSelector {
+        &self.selector
     }
 
     pub fn targets(&self) -> &[BasicBlock] {
@@ -628,11 +694,24 @@ impl Terminator {
         Terminator::Branch(Branch::single(dest))
     }
 
-    pub fn branch_multiple(
-        selector: LocalBinding,
-        branches: impl IntoIterator<Item = BasicBlock>,
+    pub fn branch_bool(
+        value: LocalBinding,
+        true_branch: BasicBlock,
+        false_branch: BasicBlock,
     ) -> Self {
-        Terminator::Branch(Branch::multiple(selector, branches))
+        Terminator::Branch(Branch::bool(value, true_branch, false_branch))
+    }
+
+    pub fn branch_u32(value: LocalBinding, targets: impl IntoIterator<Item = BasicBlock>) -> Self {
+        Terminator::Branch(Branch::u32(value, targets))
+    }
+
+    pub fn branch_case(
+        value: LocalBinding,
+        cases: impl IntoIterator<Item = u32>,
+        targets: impl IntoIterator<Item = BasicBlock>,
+    ) -> Self {
+        Terminator::Branch(Branch::case(value, cases, targets))
     }
 
     pub fn return_value(value: Value) -> Self {
@@ -936,18 +1015,24 @@ impl Cfg {
 
         match &terminator {
             Terminator::Branch(branch) => {
-                if let Some(selector) = branch.selector {
-                    assert_eq!(
-                        self.local_bindings[selector].owner, owner,
-                        "branch selector must belong to the basic-block's owner function"
-                    );
-
-                    for branch in &branch.targets {
+                match branch.selector() {
+                    BranchSelector::Bool(value)
+                    | BranchSelector::Case { value, .. }
+                    | BranchSelector::U32(value) => {
                         assert_eq!(
-                            self.basic_blocks[*branch].owner, owner,
-                            "branch destination must belong to the basic-block's owner function"
+                            self.local_bindings[*value].owner, owner,
+                            "branch selector value must belong to the basic-block's owner \
+                            function"
                         );
                     }
+                    _ => {}
+                }
+
+                for branch in &branch.targets {
+                    assert_eq!(
+                        self.basic_blocks[*branch].owner, owner,
+                        "branch targets must belong to the basic-block's owner function"
+                    );
                 }
             }
             Terminator::Return(value) => {
@@ -980,11 +1065,11 @@ impl Cfg {
         self.basic_blocks[bb].terminator = terminator;
     }
 
-    pub fn set_branch_selector(&mut self, bb: BasicBlock, selector: LocalBinding) {
+    pub fn set_branch_selector(&mut self, bb: BasicBlock, selector: BranchSelector) {
         self.basic_blocks[bb]
             .terminator
             .get_or_make_branch()
-            .selector = Some(selector);
+            .selector = selector;
     }
 
     pub fn add_branch_target(&mut self, bb: BasicBlock, target: BasicBlock) {
@@ -1011,6 +1096,12 @@ impl Cfg {
         }
 
         old_target_found
+    }
+
+    pub fn reverse_branch_targets(&mut self, bb: BasicBlock) {
+        if let Terminator::Branch(branch) = &mut self.basic_blocks[bb].terminator {
+            branch.targets.reverse();
+        }
     }
 
     pub fn add_stmt_bind(
@@ -1411,41 +1502,6 @@ impl Cfg {
             position,
             intrinsic::OpBinary { operator },
             [(lhs, "lhs"), (rhs, "rhs")],
-        );
-
-        (stmt, result.unwrap())
-    }
-
-    pub fn add_stmt_op_case_to_branch_selector(
-        &mut self,
-        bb: BasicBlock,
-        position: BlockPosition,
-        case: Value,
-        cases: impl IntoIterator<Item = u32>,
-    ) -> (Statement, LocalBinding) {
-        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
-            bb,
-            position,
-            intrinsic::OpCaseToBranchSelector {
-                cases: cases.into_iter().collect(),
-            },
-            [(case, "case")],
-        );
-
-        (stmt, result.unwrap())
-    }
-
-    pub fn add_stmt_op_bool_to_branch_selector(
-        &mut self,
-        bb: BasicBlock,
-        position: BlockPosition,
-        value: Value,
-    ) -> (Statement, LocalBinding) {
-        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
-            bb,
-            position,
-            intrinsic::OpBoolToBranchSelector,
-            [(value, "value")],
         );
 
         (stmt, result.unwrap())

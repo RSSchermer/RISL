@@ -38,12 +38,6 @@ pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
         slir::cfg::StatementData::OpUnary(_) => view! { <OpUnary statement/> }.into_any(),
         slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall statement/> }.into_any(),
-        slir::cfg::StatementData::OpCaseToBranchSelector(_) => {
-            view! { <OpCaseToBranchSelector statement/> }.into_any()
-        }
-        slir::cfg::StatementData::OpBoolToBranchSelector(_) => {
-            view! { <OpBoolToBranchSelector statement/> }.into_any()
-        }
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 statement/> }.into_any()
         }
@@ -316,38 +310,6 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
             {callee.name.to_string()}
         </a>
         "("{arg_views}")"
-    }
-}
-
-#[component]
-pub fn OpCaseToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_case_to_branch_selector();
-    let value = stmt.value();
-    let cases = stmt
-        .cases()
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let binding = stmt.result();
-
-    view! {
-        <Value value=binding.into()/>" = predicate-from-case "<Value value/>" ["{cases}"]"
-    }
-}
-
-#[component]
-pub fn OpBoolToBranchSelector(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_bool_to_branch_selector();
-    let value = stmt.value();
-    let binding = stmt.result();
-
-    view! {
-        <Value value=binding.into()/>" = predicate-from-bool "<Value value/>
     }
 }
 

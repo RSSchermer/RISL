@@ -396,7 +396,7 @@ impl<'a> Renderer<'a> {
                 self.write_node_common(writer, node, "OpBoolToBranchSelector")
             }
             SimpleNode::OpU32ToBranchSelector(n) => {
-                self.write_op_u32_to_branch_selector(writer, node, n)
+                self.write_node_common(writer, node, "OpU32ToBranchSelector")
             }
             SimpleNode::OpBranchSelectorToCase(n) => {
                 self.write_op_branch_selector_to_case(writer, node, n)
@@ -619,22 +619,6 @@ impl<'a> Renderer<'a> {
         write!(writer, "[")?;
         self.write_node_id(writer, node)?;
         write!(writer, "] OpCaseToBranchSelector{{cases: {:?}}}", n.cases())?;
-        self.write_node_io_signature(writer, node)
-    }
-
-    fn write_op_u32_to_branch_selector<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-        node: Node,
-        n: &slir::rvsdg::OpU32ToBranchSelector,
-    ) -> std::io::Result<()> {
-        write!(writer, "[")?;
-        self.write_node_id(writer, node)?;
-        write!(
-            writer,
-            "] OpU32ToBranchSelector{{branch_count: {}}}",
-            n.branch_count()
-        )?;
         self.write_node_io_signature(writer, node)
     }
 
