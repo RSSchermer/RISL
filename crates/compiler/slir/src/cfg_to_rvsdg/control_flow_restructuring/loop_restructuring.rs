@@ -419,5 +419,440 @@ mod tests {
         assert_eq!(graph.children(bb12), &[bb6, bb5]);
     }
 
-    // TODO: add tests for normalize_terminator
+    #[test]
+    fn test_normalize_terminator_already_normalized() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let body = cfg.register_function(&module, function);
+
+        let cond = body.argument_values()[0];
+
+        //   entry <---|
+        //     |       |
+        //     v       |
+        //    tail ----|
+        //     |
+        //     v
+        //   exit
+
+        let entry = body.entry_block();
+        let tail = cfg.add_basic_block(function);
+        let exit = cfg.add_basic_block(function);
+
+        cfg.set_terminator(entry, Terminator::branch_single(tail));
+        cfg.set_terminator(tail, Terminator::branch_bool(cond, entry, exit));
+
+        let mut graph = Graph::init(&mut cfg, function);
+
+        let reentry_edge = Edge {
+            source: tail,
+            dest: entry,
+        };
+
+        normalize_terminator(&mut graph, reentry_edge);
+
+        assert_eq!(graph.children(tail), &[entry, exit]);
+        let BranchSelector::Bool(c) = graph.selector(tail) else {
+            panic!("Expected Bool selector")
+        };
+        assert_eq!(*c, cond);
+    }
+
+    #[test]
+    fn test_normalize_terminator_bool_selector_reversed() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let body = cfg.register_function(&module, function);
+
+        let cond = body.argument_values()[0];
+
+        //   entry <---|
+        //     |       |
+        //     v       |
+        //    tail ----|
+        //     |
+        //     v
+        //   exit
+        //
+        // Reversed: tail -> [exit, entry]
+
+        let entry = body.entry_block();
+        let tail = cfg.add_basic_block(function);
+        let exit = cfg.add_basic_block(function);
+
+        cfg.set_terminator(entry, Terminator::branch_single(tail));
+        // We set the targets in reversed order: [exit, entry]
+        cfg.set_terminator(tail, Terminator::branch_bool(cond, exit, entry));
+
+        let mut graph = Graph::init(&mut cfg, function);
+
+        let reentry_edge = Edge {
+            source: tail,
+            dest: entry,
+        };
+
+        normalize_terminator(&mut graph, reentry_edge);
+
+        // Verify that the targets are now correctly ordered: [entry, exit]
+        assert_eq!(graph.children(tail), &[entry, exit]);
+
+        // Verify that the selector is a Bool and is the inverse of the original condition.
+        let BranchSelector::Bool(new_cond) = graph.selector(tail) else {
+            panic!("Expected Bool selector")
+        };
+
+        let statements = graph.statements(tail);
+        assert_eq!(statements.len(), 1);
+
+        let stmt = statements[0];
+        let op_unary = graph[stmt].expect_op_unary();
+        assert_eq!(op_unary.operator(), UnaryOperator::Not);
+        assert_eq!(op_unary.value(), cond.into());
+        assert_eq!(op_unary.result(), *new_cond);
+
+        assert_ne!(*new_cond, cond);
+    }
+
+    #[test]
+    fn test_normalize_terminator_case_selector() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let body = cfg.register_function(&module, function);
+
+        let value = body.argument_values()[0];
+
+        //   entry <---|
+        //     |       |
+        //     v       |
+        //    tail ----|
+        //     |
+        //     v
+        //   exit
+        //
+        // Case: tail -> [entry, exit] (entry is case 42, exit is default)
+
+        let entry = body.entry_block();
+        let tail = cfg.add_basic_block(function);
+        let exit = cfg.add_basic_block(function);
+
+        cfg.set_terminator(entry, Terminator::branch_single(tail));
+        cfg.set_terminator(
+            tail,
+            Terminator::branch_case(value, vec![42], vec![entry, exit]),
+        );
+
+        let mut graph = Graph::init(&mut cfg, function);
+
+        let reentry_edge = Edge {
+            source: tail,
+            dest: entry,
+        };
+
+        normalize_terminator(&mut graph, reentry_edge);
+
+        // Verify that the targets are correctly ordered: [entry, exit]
+        assert_eq!(graph.children(tail), &[entry, exit]);
+
+        // Verify that the selector is now a Bool.
+        let BranchSelector::Bool(condition) = graph.selector(tail) else {
+            panic!("Expected Bool selector")
+        };
+
+        // Verify that the comparison operation was added to the tail block.
+        let statements = graph.statements(tail);
+        assert_eq!(statements.len(), 1);
+
+        let stmt = statements[0];
+        let op_binary = graph[stmt].expect_op_binary();
+        assert_eq!(op_binary.operator(), BinaryOperator::Eq);
+        assert_eq!(op_binary.lhs(), value.into());
+        assert_eq!(op_binary.rhs(), 42u32.into());
+        assert_eq!(op_binary.result(), *condition);
+    }
+
+    #[test]
+    fn test_normalize_terminator_case_selector_reversed() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let body = cfg.register_function(&module, function);
+
+        let value = body.argument_values()[0];
+
+        //   entry <---|
+        //     |       |
+        //     v       |
+        //    tail ----|
+        //     |
+        //     v
+        //   exit
+        //
+        // Case: tail -> [exit, entry] (exit is case 42, entry is default)
+        // Reversed: entry is NOT at index 0.
+
+        let entry = body.entry_block();
+        let tail = cfg.add_basic_block(function);
+        let exit = cfg.add_basic_block(function);
+
+        cfg.set_terminator(entry, Terminator::branch_single(tail));
+        // We set the targets in reversed order: [exit, entry]
+        // Entry is at index 1, so needs_reversal will be true.
+        cfg.set_terminator(
+            tail,
+            Terminator::branch_case(value, vec![42], vec![exit, entry]),
+        );
+
+        let mut graph = Graph::init(&mut cfg, function);
+
+        let reentry_edge = Edge {
+            source: tail,
+            dest: entry,
+        };
+
+        normalize_terminator(&mut graph, reentry_edge);
+
+        // Verify that the targets are correctly ordered: [entry, exit]
+        assert_eq!(graph.children(tail), &[entry, exit]);
+
+        // Verify that the selector is now a Bool.
+        let BranchSelector::Bool(condition) = graph.selector(tail) else {
+            panic!("Expected Bool selector")
+        };
+
+        // Verify that the comparison operation was added to the tail block.
+        // Since it needed reversal, it should be NotEq.
+        let statements = graph.statements(tail);
+        assert_eq!(statements.len(), 1);
+
+        let stmt = statements[0];
+        let op_binary = graph[stmt].expect_op_binary();
+        assert_eq!(op_binary.operator(), BinaryOperator::NotEq);
+        assert_eq!(op_binary.lhs(), value.into());
+        assert_eq!(op_binary.rhs(), 42u32.into());
+        assert_eq!(op_binary.result(), *condition);
+    }
+
+    #[test]
+    fn test_normalize_terminator_u32_selector() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let body = cfg.register_function(&module, function);
+
+        let value = body.argument_values()[0];
+
+        //   entry <---|
+        //     |       |
+        //     v       |
+        //    tail ----|
+        //     |
+        //     v
+        //   exit
+        //
+        // U32: tail -> [entry, exit] (entry is index 0, exit is index 1)
+
+        let entry = body.entry_block();
+        let tail = cfg.add_basic_block(function);
+        let exit = cfg.add_basic_block(function);
+
+        cfg.set_terminator(entry, Terminator::branch_single(tail));
+        cfg.set_terminator(tail, Terminator::branch_u32(value, [entry, exit]));
+
+        let mut graph = Graph::init(&mut cfg, function);
+
+        let reentry_edge = Edge {
+            source: tail,
+            dest: entry,
+        };
+
+        normalize_terminator(&mut graph, reentry_edge);
+
+        // Verify that the targets are correctly ordered: [entry, exit]
+        assert_eq!(graph.children(tail), &[entry, exit]);
+
+        // Verify that the selector is now a Bool.
+        let BranchSelector::Bool(condition) = graph.selector(tail) else {
+            panic!("Expected Bool selector")
+        };
+
+        // Verify that the comparison operation was added to the tail block.
+        let statements = graph.statements(tail);
+        assert_eq!(statements.len(), 1);
+
+        let stmt = statements[0];
+        let op_binary = graph[stmt].expect_op_binary();
+        assert_eq!(op_binary.operator(), BinaryOperator::Eq);
+        assert_eq!(op_binary.lhs(), value.into());
+        assert_eq!(op_binary.rhs(), 0u32.into());
+        assert_eq!(op_binary.result(), *condition);
+    }
+
+    #[test]
+    fn test_normalize_terminator_u32_selector_reversed() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let body = cfg.register_function(&module, function);
+
+        let value = body.argument_values()[0];
+
+        //   entry <---|
+        //     |       |
+        //     v       |
+        //    tail ----|
+        //     |
+        //     v
+        //   exit
+        //
+        // U32: tail -> [exit, entry] (exit is index 0, entry is index 1)
+        // Reversed: entry is NOT at index 0.
+
+        let entry = body.entry_block();
+        let tail = cfg.add_basic_block(function);
+        let exit = cfg.add_basic_block(function);
+
+        cfg.set_terminator(entry, Terminator::branch_single(tail));
+        // We set the targets in reversed order: [exit, entry]
+        cfg.set_terminator(tail, Terminator::branch_u32(value, [exit, entry]));
+
+        let mut graph = Graph::init(&mut cfg, function);
+
+        let reentry_edge = Edge {
+            source: tail,
+            dest: entry,
+        };
+
+        normalize_terminator(&mut graph, reentry_edge);
+
+        // Verify that the targets are correctly ordered: [entry, exit]
+        assert_eq!(graph.children(tail), &[entry, exit]);
+
+        // Verify that the selector is now a Bool.
+        let BranchSelector::Bool(condition) = graph.selector(tail) else {
+            panic!("Expected Bool selector")
+        };
+
+        // Verify that the comparison operation was added to the tail block.
+        // Since it needed reversal, it should be NotEq.
+        let statements = graph.statements(tail);
+        assert_eq!(statements.len(), 1);
+
+        let stmt = statements[0];
+        let op_binary = graph[stmt].expect_op_binary();
+        assert_eq!(op_binary.operator(), BinaryOperator::NotEq);
+        assert_eq!(op_binary.lhs(), value.into());
+        assert_eq!(op_binary.rhs(), 0u32.into());
+        assert_eq!(op_binary.result(), *condition);
+    }
 }
