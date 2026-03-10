@@ -5,12 +5,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::cfg::analyze::item_dependencies::{Item, ItemDependencies, item_dependencies};
+use crate::cfg::transform::branch_restructuring::restructure_branches;
+use crate::cfg::transform::exit_restructuring::restructure_exit;
+use crate::cfg::transform::loop_restructuring::restructure_loops;
 use crate::cfg::{
     Assign, BasicBlock, Bind, BranchSelector, Cfg, InlineConst, IntrinsicOp, LocalBinding, OpCall,
     RootIdentifier, StatementData, Terminator, Uninitialized, Value,
-};
-use crate::cfg_to_rvsdg::control_flow_restructuring::{
-    Graph, restructure_branches, restructure_loops,
 };
 use crate::cfg_to_rvsdg::control_tree::{
     BranchingNode, ControlTree, ControlTreeNode, ControlTreeNodeKind, LinearNode, LoopNode,
@@ -519,12 +519,12 @@ fn build_body(
     rvsdg: &mut Rvsdg,
     input_state_tracker: InputStateTracker,
 ) {
-    let mut graph = Graph::init(cfg, function);
+    restructure_exit(cfg, function);
 
-    let reentry_edges = restructure_loops(&mut graph);
-    let branch_info = restructure_branches(&mut graph, &reentry_edges);
+    let reentry_edges = restructure_loops(cfg, function);
+    let branch_info = restructure_branches(cfg, function, &reentry_edges);
 
-    let control_tree = ControlTree::generate(&graph, &reentry_edges, &branch_info);
+    let control_tree = ControlTree::generate(&cfg, function, &reentry_edges, &branch_info);
 
     let item_dependencies = annotate_item_dependencies(&control_tree, &cfg);
     let (read, write) = annotate_read_write(&control_tree, &cfg);

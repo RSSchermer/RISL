@@ -1,8 +1,9 @@
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::cfg::BasicBlock;
-use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
+use crate::Function;
+use crate::cfg::analyze::predecessors::predecessors;
+use crate::cfg::{BasicBlock, Cfg, Edge, FunctionBody};
 
 struct Vertex {
     bb: BasicBlock,
@@ -17,11 +18,11 @@ impl Vertex {
     }
 }
 
-fn init_vertices(graph: &Graph) -> (Vec<Vertex>, FxHashMap<BasicBlock, usize>) {
+fn init_vertices(body: &FunctionBody) -> (Vec<Vertex>, FxHashMap<BasicBlock, usize>) {
     let mut vertices = Vec::new();
     let mut bb_vertex_map = FxHashMap::default();
 
-    for (i, bb) in graph.nodes().enumerate() {
+    for (i, bb) in body.basic_blocks().iter().copied().enumerate() {
         vertices.push(Vertex {
             bb,
             visit_index: None,
@@ -32,6 +33,15 @@ fn init_vertices(graph: &Graph) -> (Vec<Vertex>, FxHashMap<BasicBlock, usize>) {
     }
 
     (vertices, bb_vertex_map)
+}
+
+/// Represents a single strongly connected component (SCC) in a function body's basic-block graph.
+pub struct StronglyConnectedComponent {
+    /// The function the [basic_blocks] belongs to.
+    pub function: Function,
+
+    /// The set of basic-blocks that form the SCC.
+    pub basic_blocks: IndexSet<BasicBlock>,
 }
 
 /// Finds the strongly-connected components in the basic-block graph.
@@ -48,10 +58,11 @@ fn init_vertices(graph: &Graph) -> (Vec<Vertex>, FxHashMap<BasicBlock, usize>) {
 ///   connectedness of the restructured loop, so that any nested SCCs may then be discovered as
 ///   further candidates for loop restructuring.
 pub fn strongly_connected_components(
-    graph: &Graph,
+    cfg: &Cfg,
+    function: Function,
     edge_blacklist: &FxHashSet<Edge>,
-) -> Vec<IndexSet<BasicBlock>> {
-    let (mut vertices, bb_vertex_map) = init_vertices(graph);
+) -> Vec<StronglyConnectedComponent> {
+    let (mut vertices, bb_vertex_map) = init_vertices(&cfg[function]);
     let mut scc = Vec::new();
 
     let mut visit_index = 0;
@@ -61,7 +72,7 @@ pub fn strongly_connected_components(
         if vertices[index].visit_index.is_none() {
             search_vertex(
                 index,
-                graph,
+                cfg,
                 edge_blacklist,
                 &mut vertices,
                 &bb_vertex_map,
@@ -72,12 +83,27 @@ pub fn strongly_connected_components(
         }
     }
 
-    scc
+    scc.into_iter()
+        .map(|basic_blocks| StronglyConnectedComponent {
+            function,
+            basic_blocks,
+        })
+        .collect()
+}
+
+fn branches_to_self(cfg: &Cfg, bb: BasicBlock, edge_blacklist: &FxHashSet<Edge>) -> bool {
+    cfg.successors(bb).iter().any(|child| {
+        *child == bb
+            && !edge_blacklist.contains(&Edge {
+                source: bb,
+                dest: bb,
+            })
+    })
 }
 
 fn search_vertex(
     index: usize,
-    graph: &Graph,
+    cfg: &Cfg,
     edge_blacklist: &FxHashSet<Edge>,
     vertices: &mut [Vertex],
     bb_vertex_map: &FxHashMap<BasicBlock, usize>,
@@ -98,24 +124,24 @@ fn search_vertex(
     stack.push(index);
     vertex.on_stack = true;
 
-    for child in graph.children(bb) {
+    for successor in cfg.successors(bb) {
         let edge = Edge {
             source: bb,
-            dest: *child,
+            dest: *successor,
         };
 
         if edge_blacklist.contains(&edge) {
             continue;
         }
 
-        let child_index = *bb_vertex_map
-            .get(child)
+        let successor_index = *bb_vertex_map
+            .get(successor)
             .expect("invalid basic-block handle");
 
-        if vertices[child_index].visit_index.is_none() {
+        if vertices[successor_index].visit_index.is_none() {
             search_vertex(
-                child_index,
-                graph,
+                successor_index,
+                cfg,
                 edge_blacklist,
                 vertices,
                 bb_vertex_map,
@@ -124,9 +150,9 @@ fn search_vertex(
                 scc,
             );
 
-            vertices[index].update_low_link(vertices[child_index].low_link);
-        } else if vertices[child_index].on_stack {
-            vertices[index].update_low_link(vertices[child_index].low_link);
+            vertices[index].update_low_link(vertices[successor_index].low_link);
+        } else if vertices[successor_index].on_stack {
+            vertices[index].update_low_link(vertices[successor_index].low_link);
         }
     }
 
@@ -147,7 +173,7 @@ fn search_vertex(
         // is its own SCC. For our purposes, we're only interested in single node SCCs if the node
         // actually branches to itself.
         if component.len() > 1
-            || (component.len() == 1 && graph.branches_to_self(component[0], edge_blacklist))
+            || (component.len() == 1 && branches_to_self(cfg, component[0], edge_blacklist))
         {
             scc.push(component);
         }
@@ -157,55 +183,64 @@ fn search_vertex(
 /// Summarizes the connectivity of a strongly connected component (SCC) as a whole.
 #[derive(Debug)]
 pub struct SccStructure {
+    /// The function that owns the basic-blocks in the SCC.
+    pub function: Function,
+
     /// Edges from source nodes outside the strongly connected component, to a destination node
     /// inside the strongly connected component.
     pub entry_edges: Vec<Edge>,
+
     /// Nodes inside the strongly connected component that are the destination for one or more
     /// [entry_edges].
     pub entry_nodes: IndexSet<BasicBlock>,
+
     /// Edges from source nodes inside the strongly connected component, to a destination node
     /// outside the strongly connected component.
     pub exit_edges: Vec<Edge>,
+
     /// Nodes outside the strongly connected component that are the destination for one or more
     /// [exit_edges].
-    #[allow(unused)]
     pub exit_nodes: IndexSet<BasicBlock>,
+
     /// Edges from source nodes inside the strongly connected component, for which the destination
     /// is one of the [entry_nodes].
     pub repetition_edges: Vec<Edge>,
 }
 
 impl SccStructure {
-    pub fn analyse(graph: &Graph, scc: &IndexSet<BasicBlock>) -> Self {
+    pub fn analyse(cfg: &Cfg, scc: &StronglyConnectedComponent) -> Self {
+        let body = &cfg[scc.function];
+        let predecessors = predecessors(cfg, scc.function);
+
         let mut entry_nodes = IndexSet::new();
         let mut entry_edges = Vec::new();
         let mut exit_nodes = IndexSet::new();
         let mut exit_edges = Vec::new();
 
-        for bb in scc {
+        for bb in &scc.basic_blocks {
             // If the node is the graph's entry node, then it is trivially also an entry node for
             // the SCC
-            if *bb == graph.entry() {
+            if *bb == body.entry_block() {
                 entry_nodes.insert(*bb);
             }
 
-            for parent in graph.parents(*bb) {
-                if !scc.contains(parent) {
+            for predecessor in &predecessors[*bb] {
+                if !scc.basic_blocks.contains(predecessor) {
                     entry_edges.push(Edge {
-                        source: *parent,
+                        source: *predecessor,
                         dest: *bb,
                     });
                     entry_nodes.insert(*bb);
                 }
             }
 
-            for child in graph.children(*bb) {
-                if !scc.contains(child) {
+            for successor in cfg.successors(*bb) {
+                if !scc.basic_blocks.contains(successor) {
                     exit_edges.push(Edge {
                         source: *bb,
-                        dest: *child,
+                        dest: *successor,
                     });
-                    exit_nodes.insert(*child);
+                    exit_nodes.insert(*successor);
                 }
             }
         }
@@ -214,18 +249,19 @@ impl SccStructure {
         // edges from nodes in the SCC back to an entry node
         let mut repetition_edges = Vec::new();
 
-        for bb in scc {
-            for child in graph.children(*bb) {
-                if entry_nodes.contains(child) {
+        for bb in &scc.basic_blocks {
+            for successor in cfg.successors(*bb) {
+                if entry_nodes.contains(successor) {
                     repetition_edges.push(Edge {
                         source: *bb,
-                        dest: *child,
+                        dest: *successor,
                     })
                 }
             }
         }
 
         SccStructure {
+            function: scc.function,
             entry_nodes,
             entry_edges,
             exit_nodes,
@@ -315,14 +351,12 @@ mod tests {
         cfg.set_terminator(bb6, Terminator::branch_single(bb7));
         cfg.set_terminator(bb7, Terminator::branch_single(bb5));
 
-        let graph = Graph::init(&mut cfg, function);
-
-        let scc = strongly_connected_components(&graph, &FxHashSet::default());
+        let scc = strongly_connected_components(&cfg, function, &FxHashSet::default());
 
         assert_eq!(scc.len(), 2);
 
-        assert_eq!(&scc[0], &IndexSet::from([bb5, bb6, bb7]));
-        assert_eq!(&scc[1], &IndexSet::from([bb0, bb1, bb2, bb3]));
+        assert_eq!(&scc[0].basic_blocks, &IndexSet::from([bb5, bb6, bb7]));
+        assert_eq!(&scc[1].basic_blocks, &IndexSet::from([bb0, bb1, bb2, bb3]));
     }
 
     #[test]
@@ -401,15 +435,13 @@ mod tests {
         cfg.set_terminator(bb5, Terminator::branch_single(exit));
         cfg.set_terminator(bb6, Terminator::branch_single(exit));
 
-        let graph = Graph::init(&mut cfg, function);
-
-        let scc = strongly_connected_components(&graph, &FxHashSet::default());
+        let scc = strongly_connected_components(&cfg, function, &FxHashSet::default());
 
         assert_eq!(scc.len(), 1);
 
-        assert_eq!(&scc[0], &IndexSet::from([bb1, bb2, bb3, bb4]));
+        assert_eq!(&scc[0].basic_blocks, &IndexSet::from([bb1, bb2, bb3, bb4]));
 
-        let structure = SccStructure::analyse(&graph, &scc[0]);
+        let structure = SccStructure::analyse(&cfg, &scc[0]);
 
         assert_eq!(
             FxHashSet::from_iter(structure.entry_edges),

@@ -3,8 +3,8 @@ use std::ops::Index;
 use index_vec::IndexVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::cfg::BasicBlock;
-use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
+use crate::Function;
+use crate::cfg::{BasicBlock, Cfg, Edge};
 
 index_vec::define_index_type! {
     pub struct ControlTreeNode = u32;
@@ -98,7 +98,7 @@ fn reentry_edges_to_loop_info(
 }
 
 struct ControlTreeGenerator<'a> {
-    graph: &'a Graph<'a>,
+    cfg: &'a Cfg,
     branch_info: &'a FxHashMap<BasicBlock, BasicBlock>,
     loop_info: FxHashMap<BasicBlock, BasicBlock>,
     nodes: IndexVec<ControlTreeNode, ControlTreeNodeKind>,
@@ -107,7 +107,7 @@ struct ControlTreeGenerator<'a> {
 
 impl<'a> ControlTreeGenerator<'a> {
     fn new(
-        graph: &'a Graph<'a>,
+        cfg: &'a Cfg,
         branch_info: &'a FxHashMap<BasicBlock, BasicBlock>,
         reentry_edges: &FxHashSet<Edge>,
     ) -> Self {
@@ -116,7 +116,7 @@ impl<'a> ControlTreeGenerator<'a> {
         let root = nodes.push(ControlTreeNodeKind::Linear(Default::default()));
 
         ControlTreeGenerator {
-            graph,
+            cfg,
             branch_info,
             loop_info,
             nodes,
@@ -163,20 +163,20 @@ impl<'a> ControlTreeGenerator<'a> {
 
             // After loop restructuring the tail block's first target will be the loop's entry block
             // and the second target will be the loop's continuation block.
-            let continuation = self.graph.children(loop_tail)[1];
+            let continuation = self.cfg.successors(loop_tail)[1];
 
             self.visit(continuation, Some(parent), end);
         } else if let Some(branch_exit) = self.branch_info.get(&bb).copied() {
-            let mut branches = Vec::with_capacity(self.graph.children(bb).len());
+            let mut branches = Vec::with_capacity(self.cfg.successors(bb).len());
 
-            for child in self.graph.children(bb) {
+            for successor in self.cfg.successors(bb) {
                 let branch_node = self
                     .nodes
                     .push(ControlTreeNodeKind::Linear(Default::default()));
 
                 branches.push(branch_node);
 
-                self.visit(*child, Some(branch_node), Some(branch_exit));
+                self.visit(*successor, Some(branch_node), Some(branch_exit));
             }
 
             // We insert 2 nodes for every branching block: a basic-block node that contains the
@@ -203,12 +203,12 @@ impl<'a> ControlTreeGenerator<'a> {
 
             self.nodes[parent].expect_linear_mut().children.push(node);
 
-            let children = self.graph.children(bb);
+            let successors = self.cfg.successors(bb);
 
-            assert!(children.len() <= 1);
+            assert!(successors.len() <= 1);
 
-            for child in children {
-                self.visit(*child, Some(parent), end);
+            for successor in successors {
+                self.visit(*successor, Some(parent), end);
             }
         }
     }
@@ -229,13 +229,15 @@ pub struct ControlTree {
 
 impl ControlTree {
     pub fn generate(
-        graph: &Graph,
+        cfg: &Cfg,
+        function: Function,
         reentry_edges: &FxHashSet<Edge>,
         branch_info: &FxHashMap<BasicBlock, BasicBlock>,
     ) -> Self {
-        let mut generator = ControlTreeGenerator::new(graph, branch_info, reentry_edges);
+        let mut generator = ControlTreeGenerator::new(cfg, branch_info, reentry_edges);
+        let entry = cfg[function].entry_block();
 
-        generator.visit(graph.entry(), None, None);
+        generator.visit(entry, None, None);
         generator.into_control_tree()
     }
 
@@ -259,10 +261,9 @@ impl Index<ControlTreeNode> for ControlTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::transform::branch_restructuring::restructure_branches;
+    use crate::cfg::transform::loop_restructuring::restructure_loops;
     use crate::cfg::{BlockPosition, Cfg, Terminator};
-    use crate::cfg_to_rvsdg::control_flow_restructuring::{
-        restructure_branches, restructure_loops,
-    };
     use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
@@ -342,11 +343,10 @@ mod tests {
 
         cfg.set_terminator(exit, Terminator::Return(Some(x.into())));
 
-        let mut graph = Graph::init(&mut cfg, function);
-        let reentry_edges = restructure_loops(&mut graph);
-        let branch_info = restructure_branches(&mut graph, &reentry_edges);
+        let reentry_edges = restructure_loops(&mut cfg, function);
+        let branch_info = restructure_branches(&mut cfg, function, &reentry_edges);
 
-        let control_tree = ControlTree::generate(&graph, &reentry_edges, &branch_info);
+        let control_tree = ControlTree::generate(&cfg, function, &reentry_edges, &branch_info);
 
         // Expected control-tree layout:
         //
@@ -461,11 +461,10 @@ mod tests {
 
         cfg.set_terminator(bb1, Terminator::return_value(add_result.into()));
 
-        let mut graph = Graph::init(&mut cfg, function);
-        let reentry_edges = restructure_loops(&mut graph);
-        let branch_info = restructure_branches(&mut graph, &reentry_edges);
+        let reentry_edges = restructure_loops(&mut cfg, function);
+        let branch_info = restructure_branches(&mut cfg, function, &reentry_edges);
 
-        let control_tree = ControlTree::generate(&graph, &reentry_edges, &branch_info);
+        let control_tree = ControlTree::generate(&cfg, function, &reentry_edges, &branch_info);
 
         // Expected control-tree layout:
         //

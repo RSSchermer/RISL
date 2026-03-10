@@ -870,6 +870,16 @@ impl FunctionBody {
     }
 }
 
+/// Represents a control-flow edge between two basic-blocks.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Edge {
+    /// The basic-block that is the source of the edge.
+    pub source: BasicBlock,
+
+    /// The basic-block that is the target of the edge.
+    pub dest: BasicBlock,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CfgData {
     function_body_map: FxHashMap<Function, FunctionBody>,
@@ -1101,6 +1111,21 @@ impl Cfg {
     pub fn reverse_branch_targets(&mut self, bb: BasicBlock) {
         if let Terminator::Branch(branch) = &mut self.basic_blocks[bb].terminator {
             branch.targets.reverse();
+        }
+    }
+
+    /// List the basic-blocks that can directly succeed the given basic-block in its function's
+    /// control-flow.
+    ///
+    /// For a basic-block with a [Branch] terminator, these are the [Branch::targets]. For all
+    /// other terminators, this is an empty list.
+    pub fn successors(&self, bb: BasicBlock) -> &[BasicBlock] {
+        let bb = &self[bb];
+
+        if let Terminator::Branch(branch) = &bb.terminator {
+            &branch.targets
+        } else {
+            &[]
         }
     }
 

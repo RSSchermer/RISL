@@ -1,4 +1,3 @@
-pub mod control_flow_restructuring;
 pub mod control_tree;
 mod rvsdg_gen;
 

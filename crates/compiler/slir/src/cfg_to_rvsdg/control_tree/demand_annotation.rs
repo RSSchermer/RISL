@@ -107,10 +107,9 @@ pub fn annotate_demand(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::transform::branch_restructuring::restructure_branches;
+    use crate::cfg::transform::loop_restructuring::restructure_loops;
     use crate::cfg::{BlockPosition, Cfg, Terminator};
-    use crate::cfg_to_rvsdg::control_flow_restructuring::{
-        Graph, restructure_branches, restructure_loops,
-    };
     use crate::cfg_to_rvsdg::control_tree::read_write_annotation::annotate_read_write;
     use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
@@ -191,12 +190,10 @@ mod tests {
 
         cfg.set_terminator(exit, Terminator::Return(Some(x.into())));
 
-        let mut graph = Graph::init(&mut cfg, function);
+        let reentry_edges = restructure_loops(&mut cfg, function);
+        let branch_info = restructure_branches(&mut cfg, function, &reentry_edges);
 
-        let reentry_edges = restructure_loops(&mut graph);
-        let branch_info = restructure_branches(&mut graph, &reentry_edges);
-
-        let control_tree = ControlTree::generate(&graph, &reentry_edges, &branch_info);
+        let control_tree = ControlTree::generate(&cfg, function, &reentry_edges, &branch_info);
 
         // Control-tree layout:
         //

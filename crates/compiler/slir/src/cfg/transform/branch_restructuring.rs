@@ -1,8 +1,8 @@
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::cfg::{BasicBlock, BlockPosition};
-use crate::cfg_to_rvsdg::control_flow_restructuring::{Edge, Graph};
+use crate::Function;
+use crate::cfg::{BasicBlock, BlockPosition, Cfg, Edge, Terminator};
 use crate::ty::TY_U32;
 
 pub struct Reachable {
@@ -51,7 +51,7 @@ impl Reachability {
 }
 
 fn dominated_sets(
-    graph: &Graph,
+    cfg: &Cfg,
     reentry_edges: &FxHashSet<Edge>,
     head_end: BasicBlock,
     end: BasicBlock,
@@ -62,15 +62,15 @@ fn dominated_sets(
 
     let mut reachability = Reachability::new();
 
-    for child in graph.children(head_end) {
+    for successor in cfg.successors(head_end) {
         let edge = Edge {
             source: head_end,
-            dest: *child,
+            dest: *successor,
         };
 
         // We ignore loop re-entry edges during branch restructuring
         if !reentry_edges.contains(&edge) {
-            reachability_search(graph, reentry_edges, edge, *child, end, &mut reachability);
+            reachability_search(cfg, reentry_edges, edge, *successor, end, &mut reachability);
         }
     }
 
@@ -89,7 +89,7 @@ fn dominated_sets(
 }
 
 fn reachability_search(
-    graph: &Graph,
+    cfg: &Cfg,
     reentry_edges: &FxHashSet<Edge>,
     edge: Edge,
     current: BasicBlock,
@@ -99,13 +99,13 @@ fn reachability_search(
     let keep_going = reachability.update(current, edge);
 
     if current != end && keep_going {
-        for child in graph.children(current) {
+        for successor in cfg.successors(current) {
             // We ignore loop re-entry edges during branch restructuring
             if !reentry_edges.contains(&Edge {
                 source: current,
-                dest: *child,
+                dest: *successor,
             }) {
-                reachability_search(graph, reentry_edges, edge, *child, end, reachability);
+                reachability_search(cfg, reentry_edges, edge, *successor, end, reachability);
             }
         }
     }
@@ -119,17 +119,17 @@ struct TailStructure {
 
 impl TailStructure {
     fn analyse(
-        graph: &Graph,
+        cfg: &Cfg,
         reentry_edges: &FxHashSet<Edge>,
         head_end: BasicBlock,
         end: BasicBlock,
     ) -> Self {
-        let dominated_sets = dominated_sets(graph, reentry_edges, head_end, end);
+        let dominated_sets = dominated_sets(cfg, reentry_edges, head_end, end);
 
         let mut continuation_nodes = IndexSet::new();
         let mut branch_continuation_edges = FxHashMap::default();
 
-        for branch_head in graph.children(head_end) {
+        for branch_head in cfg.successors(head_end) {
             let branch_edge = Edge {
                 source: head_end,
                 dest: *branch_head,
@@ -138,18 +138,19 @@ impl TailStructure {
 
             if let Some(dominated) = dominated_sets.get(&branch_edge) {
                 for bb in dominated {
-                    for child in graph.children(*bb) {
-                        if !dominated.contains(child) {
-                            // Note that we now know not just that the `child` is not dominated by the
-                            // current branch edge, but also that it cannot be dominated by any of the
-                            // other branch edges that originate from the `branch_head` node: any node
-                            // reachable via more than 1 branch edge is by definition not dominated by
-                            // any of those branch edges. Therefor, the `child` must be part of the tail.
+                    for successor in cfg.successors(*bb) {
+                        if !dominated.contains(successor) {
+                            // Note that we now know not just that the `successor` is not dominated
+                            // by the current branch edge, but also that it cannot be dominated by
+                            // any of the other branch edges that originate from the `branch_head`
+                            // node: any node reachable via more than 1 branch edge is by definition
+                            // not dominated by any of those branch edges. Therefore, the
+                            // `successor` must be part of the tail.
 
-                            continuation_nodes.insert(*child);
+                            continuation_nodes.insert(*successor);
                             continuation_edges.push(Edge {
                                 source: *bb,
-                                dest: *child,
+                                dest: *successor,
                             })
                         }
                     }
@@ -170,7 +171,7 @@ impl TailStructure {
 }
 
 fn find_head_end(
-    graph: &Graph,
+    cfg: &Cfg,
     reentry_edges: &FxHashSet<Edge>,
     root: BasicBlock,
     end: BasicBlock,
@@ -181,10 +182,10 @@ fn find_head_end(
         let mut non_reentry_branch_count = 0;
         let mut non_reentry_edge_index = 0;
 
-        for (index, child) in graph.children(current).iter().enumerate() {
+        for (index, successor) in cfg.successors(current).iter().enumerate() {
             if !reentry_edges.contains(&Edge {
                 source: current,
-                dest: *child,
+                dest: *successor,
             }) {
                 non_reentry_branch_count += 1;
                 non_reentry_edge_index = index;
@@ -195,39 +196,41 @@ fn find_head_end(
             break;
         }
 
-        current = graph.children(current)[non_reentry_edge_index];
+        current = cfg.successors(current)[non_reentry_edge_index];
     }
 
     current
 }
 
 fn restructure_branches_internal(
-    graph: &mut Graph,
+    cfg: &mut Cfg,
+    function: Function,
     reentry_edges: &FxHashSet<Edge>,
     branch_info: &mut FxHashMap<BasicBlock, BasicBlock>,
     root: BasicBlock,
     end: BasicBlock,
 ) {
-    let head_end = find_head_end(graph, reentry_edges, root, end);
+    let head_end = find_head_end(cfg, reentry_edges, root, end);
 
     if head_end == end {
         // Nothing to restructure
         return;
     }
 
-    let tail_structure = TailStructure::analyse(graph, reentry_edges, head_end, end);
+    let tail_structure = TailStructure::analyse(cfg, reentry_edges, head_end, end);
 
     let tail_start = if tail_structure.continuation_nodes.len() == 1 {
         // Continuation to tail already has required structure, but we may still need to restructure
-        // the branch sub-graphs and the tail sub-structure
+        // the branch sub-graphs and the tail substructure
 
         let continuation_node = *tail_structure.continuation_nodes.iter().next().unwrap();
 
-        for i in 0..graph.children(head_end).len() {
-            let branch = graph.children(head_end)[i];
+        for i in 0..cfg.successors(head_end).len() {
+            let branch = cfg.successors(head_end)[i];
 
             restructure_branches_internal(
-                graph,
+                cfg,
+                function,
                 reentry_edges,
                 branch_info,
                 branch,
@@ -235,25 +238,37 @@ fn restructure_branches_internal(
             );
         }
 
-        restructure_branches_internal(graph, reentry_edges, branch_info, continuation_node, end);
+        restructure_branches_internal(
+            cfg,
+            function,
+            reentry_edges,
+            branch_info,
+            continuation_node,
+            end,
+        );
 
         continuation_node
     } else {
-        let selector_value = graph.add_value(TY_U32);
-        let continuation_node = graph.append_block_branch_u32(selector_value);
+        let (_, selector_value) =
+            cfg.add_stmt_uninitialized(head_end, BlockPosition::Append, TY_U32);
 
-        let mut indices = FxHashMap::default();
+        // Add a new "continuation" node to act as the unified reconvergence point for all branches.
+        // Give it an initially empty branching terminator that we'll populate below.
+        let continuation_node = cfg.add_basic_block(function);
+        cfg.set_terminator(
+            continuation_node,
+            Terminator::branch_u32(selector_value, []),
+        );
 
-        for (index, node) in tail_structure.continuation_nodes.iter().enumerate() {
-            graph.connect(Edge {
-                source: continuation_node,
-                dest: *node,
-            });
-            indices.insert(*node, index);
+        let mut indices: IndexSet<BasicBlock> = IndexSet::default();
+
+        for node in tail_structure.continuation_nodes.iter() {
+            cfg.add_branch_target(continuation_node, *node);
+            indices.insert(*node);
         }
 
-        for i in 0..graph.children(head_end).len() {
-            let branch = graph.children(head_end)[i];
+        for i in 0..cfg.successors(head_end).len() {
+            let branch = cfg.successors(head_end)[i];
             let continuation_edges = tail_structure
                 .branch_continuation_edges
                 .get(&Edge {
@@ -276,28 +291,32 @@ fn restructure_branches_internal(
                 (branch_start, continuation_node)
             } else {
                 // Consolidate all continuation edges from this branch via a single node.
-                let new_end = graph.append_block_branch_single(continuation_node);
+                let new_end = cfg.add_basic_block(function);
+                cfg.set_terminator(new_end, Terminator::branch_single(continuation_node));
 
                 (branch, new_end)
             };
 
             for edge in continuation_edges {
-                let intermediate = graph.append_block_branch_single(branch_end);
-                let index = *indices
-                    .get(&edge.dest)
+                let intermediate = cfg.add_basic_block(function);
+                let index = indices
+                    .get_index_of(&edge.dest)
                     .expect("no continuation node for continuation edge");
 
-                graph.add_stmt_assign(
+                cfg.add_stmt_assign(
                     intermediate,
                     BlockPosition::Append,
                     selector_value,
                     (index as u32).into(),
                 );
-                graph.reconnect_dest(*edge, intermediate);
+                cfg.set_terminator(intermediate, Terminator::branch_single(branch_end));
+
+                cfg.replace_branch_target(edge.source, edge.dest, intermediate);
             }
 
             restructure_branches_internal(
-                graph,
+                cfg,
+                function,
                 reentry_edges,
                 branch_info,
                 branch_start,
@@ -308,7 +327,7 @@ fn restructure_branches_internal(
         continuation_node
     };
 
-    restructure_branches_internal(graph, reentry_edges, branch_info, tail_start, end);
+    restructure_branches_internal(cfg, function, reentry_edges, branch_info, tail_start, end);
     branch_info.insert(head_end, tail_start);
 }
 
@@ -321,18 +340,37 @@ fn restructure_branches_internal(
 /// entry in this map where the value is the consolidation block (the basic-block into which the
 /// branches reconsolidate).
 pub fn restructure_branches(
-    graph: &mut Graph,
+    cfg: &mut Cfg,
+    function: Function,
     reentry_edges: &FxHashSet<Edge>,
 ) -> FxHashMap<BasicBlock, BasicBlock> {
     let mut branch_info = FxHashMap::default();
+    let body = &cfg[function];
+    let root = body.entry_block();
 
-    restructure_branches_internal(
-        graph,
-        reentry_edges,
-        &mut branch_info,
-        graph.entry(),
-        graph.exit(),
-    );
+    let mut end = None;
+
+    for bb in body.basic_blocks() {
+        if cfg[*bb].terminator().is_return() {
+            if end.is_some() {
+                panic!(
+                    "branch restructuring expect the function's control-flow graph to have exactly \
+                    one exit block; use the `exit_restructuring` transform to ensure this form"
+                );
+            } else {
+                end = Some(*bb);
+            }
+        }
+    }
+
+    let Some(exit) = end else {
+        panic!(
+            "branch restructuring expect the function's control-flow graph to have exactly one \
+            exit block; use the `exit_restructuring` transform to ensure this form"
+        );
+    };
+
+    restructure_branches_internal(cfg, function, reentry_edges, &mut branch_info, root, exit);
 
     branch_info
 }
@@ -413,10 +451,7 @@ mod tests {
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
         cfg.set_terminator(bb4, Terminator::branch_single(bb5));
 
-        let graph = Graph::init(&mut cfg, function);
-
-        let dominated_sets =
-            dominated_sets(&graph, &FxHashSet::default(), graph.entry(), graph.exit());
+        let dominated_sets = dominated_sets(&cfg, &FxHashSet::default(), bb0, bb5);
 
         assert_eq!(dominated_sets.len(), 1);
         assert_eq!(
@@ -497,11 +532,8 @@ mod tests {
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
         cfg.set_terminator(bb4, Terminator::branch_single(bb5));
 
-        let graph = Graph::init(&mut cfg, function);
-
-        let head_end = find_head_end(&graph, &FxHashSet::default(), graph.entry(), graph.exit());
-        let tail_structure =
-            TailStructure::analyse(&graph, &FxHashSet::default(), head_end, graph.exit());
+        let head_end = find_head_end(&cfg, &FxHashSet::default(), bb0, bb5);
+        let tail_structure = TailStructure::analyse(&cfg, &FxHashSet::default(), head_end, bb5);
 
         assert_eq!(
             &tail_structure.continuation_nodes,
@@ -617,9 +649,7 @@ mod tests {
         cfg.set_terminator(bb3, Terminator::branch_single(bb4));
         cfg.set_terminator(bb4, Terminator::branch_single(bb5));
 
-        let mut graph = Graph::init(&mut cfg, function);
-
-        let branch_info = restructure_branches(&mut graph, &FxHashSet::default());
+        let branch_info = restructure_branches(&mut cfg, function, &FxHashSet::default());
 
         // Restructured:
         //
@@ -651,38 +681,38 @@ mod tests {
         //              bb5
         //
 
-        assert_eq!(graph.children(bb0).len(), 2);
-        assert_eq!(graph.children(bb0)[0], bb1);
+        assert_eq!(cfg.successors(bb0).len(), 2);
+        assert_eq!(cfg.successors(bb0)[0], bb1);
 
-        let bb10 = graph.children(bb0)[1];
+        let bb10 = cfg.successors(bb0)[1];
 
-        assert_eq!(graph.children(bb1), &[bb2, bb3]);
+        assert_eq!(cfg.successors(bb1), &[bb2, bb3]);
 
-        assert_eq!(graph.children(bb2).len(), 1);
+        assert_eq!(cfg.successors(bb2).len(), 1);
 
-        let bb9 = graph.children(bb2)[0];
+        let bb9 = cfg.successors(bb2)[0];
 
-        assert_eq!(graph.children(bb3).len(), 1);
+        assert_eq!(cfg.successors(bb3).len(), 1);
 
-        let bb8 = graph.children(bb3)[0];
+        let bb8 = cfg.successors(bb3)[0];
 
-        assert_eq!(graph.children(bb4), &[bb5]);
+        assert_eq!(cfg.successors(bb4), &[bb5]);
 
-        assert!(graph.children(bb5).is_empty());
+        assert!(cfg.successors(bb5).is_empty());
 
-        assert_eq!(graph.children(bb8).len(), 1);
+        assert_eq!(cfg.successors(bb8).len(), 1);
 
-        let bb7 = graph.children(bb8)[0];
+        let bb7 = cfg.successors(bb8)[0];
 
-        assert_eq!(graph.children(bb7).len(), 1);
+        assert_eq!(cfg.successors(bb7).len(), 1);
 
-        let bb6 = graph.children(bb7)[0];
+        let bb6 = cfg.successors(bb7)[0];
 
-        assert_eq!(graph.children(bb6), &[bb4, bb5]);
+        assert_eq!(cfg.successors(bb6), &[bb4, bb5]);
 
-        assert_eq!(graph.children(bb9), &[bb7]);
+        assert_eq!(cfg.successors(bb9), &[bb7]);
 
-        assert_eq!(graph.children(bb10), &[bb6]);
+        assert_eq!(cfg.successors(bb10), &[bb6]);
 
         assert_eq!(branch_info.len(), 3);
         assert_eq!(branch_info.get(&bb0), Some(&bb6));
