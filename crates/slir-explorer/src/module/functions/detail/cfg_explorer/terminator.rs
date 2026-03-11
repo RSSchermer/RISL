@@ -64,5 +64,9 @@ pub fn Terminator(terminator: slir::cfg::Terminator) -> impl IntoView {
             "return "<Value value/>
         }
         .into_any(),
+        slir::cfg::Terminator::Unreachable => view! {
+            "unreachable"
+        }
+        .into_any(),
     }
 }

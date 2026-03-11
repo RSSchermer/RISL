@@ -687,6 +687,7 @@ impl Branch {
 pub enum Terminator {
     Branch(Branch),
     Return(Option<Value>),
+    Unreachable,
 }
 
 impl Terminator {
@@ -757,7 +758,7 @@ impl Terminator {
     fn get_or_make_branch(&mut self) -> &mut Branch {
         match self {
             Terminator::Branch(b) => b,
-            terminator @ Terminator::Return(_) => {
+            terminator @ _ => {
                 *terminator = Terminator::Branch(Branch::default());
 
                 terminator.expect_branch_mut()
@@ -1070,6 +1071,7 @@ impl Cfg {
                     (None, None) => {}
                 }
             }
+            Terminator::Unreachable => {}
         }
 
         self.basic_blocks[bb].terminator = terminator;

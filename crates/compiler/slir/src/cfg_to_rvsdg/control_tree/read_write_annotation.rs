@@ -239,6 +239,7 @@ impl<'a> ReadWriteAnnotationVisitor<'a> {
                     self.read_accum.insert(*value);
                 }
             }
+            Terminator::Unreachable => {}
         }
 
         for statement in self.cfg[bb].statements().iter().rev() {

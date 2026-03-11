@@ -130,6 +130,7 @@ impl FunctionImporter {
                 Terminator::return_value(self.dst_value(src_mod, (dst_mod, dst_cfg), *value))
             }
             Terminator::Return(None) => Terminator::return_void(),
+            Terminator::Unreachable => Terminator::Unreachable,
         };
 
         dst_cfg.set_terminator(dst_bb, terminator);

@@ -23,7 +23,7 @@ pub fn visit_basic_block<V: Visitor>(visitor: &mut V, cfg: &Cfg, bb: BasicBlock)
                     visitor.visit_basic_block(cfg, *target);
                 }
             }
-            Terminator::Return(_) => {}
+            Terminator::Return(_) | Terminator::Unreachable => {}
         }
     }
 }

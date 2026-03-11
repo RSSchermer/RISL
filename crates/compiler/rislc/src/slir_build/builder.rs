@@ -326,7 +326,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         // TODO: in our current examples the else block is always an "unreachable" block, which the
         // RVSDG construction algorithm doesn't like. Figure our if we can just always omit the else
         // block or if we need to handle unreachable blocks.
-        // branches.push(else_llbb);
+        branches.push(else_llbb);
 
         let mut cfg = self.cfg.borrow_mut();
 
@@ -346,7 +346,11 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         );
     }
 
-    fn unreachable(&mut self) {}
+    fn unreachable(&mut self) {
+        let mut cfg = self.cfg.borrow_mut();
+
+        cfg.set_terminator(self.basic_block, slir::cfg::Terminator::Unreachable);
+    }
 
     fn get_discriminant(&mut self, ptr: Self::Value) -> Self::Value {
         let ptr = ptr.expect_value();
