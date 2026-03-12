@@ -21,6 +21,7 @@ use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
 use crate::{Function, Module, rvsdg};
+use crate::cfg::transform::unreachable_terminator_elimination::eliminate_unreachable_terminators;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum InputState {
@@ -519,6 +520,7 @@ fn build_body(
     rvsdg: &mut Rvsdg,
     input_state_tracker: InputStateTracker,
 ) {
+    eliminate_unreachable_terminators(cfg, function);
     restructure_exit(cfg, function);
 
     let reentry_edges = restructure_loops(cfg, function);
