@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Write;
 use std::ops::Index;
 use std::path::Path;
-use std::slice;
+use std::{mem, slice};
 
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -622,11 +622,11 @@ impl NodeData {
         Reaggregation is_reaggregation expect_reaggregation "a reaggregation node",
     }
 
-    fn expect_op_case_to_branch_selector_mut(&mut self) -> &mut OpCaseToBranchSelector {
-        if let NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(op)) = &mut self.kind {
+    fn expect_op_branch_selector_to_case_mut(&mut self) -> &mut OpBranchSelectorToCase {
+        if let NodeKind::Simple(SimpleNode::OpBranchSelectorToCase(op)) = &mut self.kind {
             op
         } else {
-            panic!("expected node to be a `OpCaseToBranchSelector` node")
+            panic!("expected node to be a `OpBranchSelectorToCase` node")
         }
     }
 }
@@ -2422,6 +2422,9 @@ impl Rvsdg {
     /// order being `A -> B -> C`, the permutation `[2, 0, 1]` would result in the branches being
     /// reordered to the order `C -> A -> B`.
     ///
+    /// Note that it is allowed for the `permutation` to contain fewer indices than here are branch
+    /// targets; this will result in the unused branches being removed.
+    ///
     /// # Panics
     ///
     /// Panics if the `permutations` list contains duplicate indices. Panics if one of the indices
@@ -2445,7 +2448,14 @@ impl Rvsdg {
             branches_new.push(data.branches[*index]);
         }
 
-        data.branches = branches_new;
+        let branches_old = mem::replace(&mut data.branches, branches_new);
+
+        // Remove any branches that were not referenced in the permutation.
+        for (i, branch) in branches_old.iter().enumerate() {
+            if !uniques.contains(&i) {
+                self.remove_region_with_nodes(*branch);
+            }
+        }
     }
 
     /// Adds a new "entry" [ValueInput] to a [SwitchNode].
@@ -3193,10 +3203,10 @@ impl Rvsdg {
         )
     }
 
-    pub fn permute_op_case_to_branch_selector_cases(&mut self, node: Node, permutation: &[usize]) {
+    pub fn permute_op_branch_selector_to_case_cases(&mut self, node: Node, permutation: &[usize]) {
         let mut new_cases = Vec::with_capacity(permutation.len());
 
-        let data = self.nodes[node].expect_op_case_to_branch_selector_mut();
+        let data = self.nodes[node].expect_op_branch_selector_to_case_mut();
         let cases = data.cases();
 
         for index in permutation {

@@ -25,7 +25,6 @@ impl RegionNodesVisitor for NodeCollector<'_> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CasesMatch<'a> {
-    Exact,
     Permutation(&'a [usize]),
     NoMatch,
 }
@@ -41,34 +40,29 @@ impl CasesMatcher {
         }
     }
 
-    fn match_cases(&mut self, cases_0: &[u32], cases_1: &[u32]) -> CasesMatch<'_> {
-        // Note: this assumes that the cases in `cases_0` are all unique (no duplicates).
-
-        if cases_0.len() != cases_1.len() {
-            return CasesMatch::NoMatch;
-        }
-
+    fn match_cases(&mut self, pred_to_case: &[u32], case_to_pred: &[u32]) -> CasesMatch<'_> {
         self.permutation.clear();
 
-        let mut is_exact_match = true;
+        for i in 0..pred_to_case.len() {
+            // Resolve the index of the branch target the `i`th case in `pred_to_case` will map to.
+            // If we find it in the `case_to_pred` list, then the index of the branch target will be
+            // the entry's index. Otherwise, the index of the branch will be the index of the
+            // "default" branch, which is `case_to_pred.len()`.
+            let j = case_to_pred
+                .iter()
+                .position(|&x| x == pred_to_case[i])
+                .unwrap_or(case_to_pred.len());
 
-        for i in 0..cases_0.len() {
-            if let Some(j) = cases_1.iter().position(|&x| x == cases_0[i]) {
-                self.permutation.push(j);
-
-                if j != i {
-                    is_exact_match = false;
-                }
-            } else {
+            // The same branch target cannot be mapped to multiple cases: the resulting branch
+            // permutation would imply a branch duplication, which we don't wish to do.
+            if self.permutation.contains(&j) {
                 return CasesMatch::NoMatch;
             }
+
+            self.permutation.push(j);
         }
 
-        if is_exact_match {
-            CasesMatch::Exact
-        } else {
-            CasesMatch::Permutation(&self.permutation)
-        }
+        CasesMatch::Permutation(&self.permutation)
     }
 }
 
@@ -105,9 +99,13 @@ impl ValueFlowVisitor for DependentFinder {
         use SimpleNode::*;
 
         match rvsdg[node].kind() {
-            Simple(OpCaseToBranchSelector(_)) => self.dependents.push(node),
+            Simple(OpBranchSelectorToCase(_)) => self.dependents.push(node),
             Switch(_) if input == 0 => self.dependents.push(node),
-            Switch(_) | Loop(_) => visit::value_flow::visit_value_input(self, rvsdg, node, input),
+            Switch(_) | Loop(_) => {
+                // We don't currently trace into nested regions; the goal of pred-to-case-to-pred
+                // merging is to identify switch nodes that can be merged, and we can only merge
+                // switch nodes that are in the same region.
+            }
             _ => unreachable!("node kind cannot take a predicate type value as input"),
         }
     }
@@ -162,8 +160,8 @@ impl Merger {
                     {
                         match rvsdg[dependent].kind() {
                             Switch(_) => rvsdg.permute_switch_branches(dependent, permutation),
-                            Simple(OpCaseToBranchSelector(_)) => rvsdg
-                                .permute_op_case_to_branch_selector_cases(dependent, permutation),
+                            Simple(OpBranchSelectorToCase(_)) => rvsdg
+                                .permute_op_branch_selector_to_case_cases(dependent, permutation),
                             _ => unreachable!(
                                 "find_dependents should not have found other node kinds"
                             ),
@@ -245,7 +243,10 @@ mod tests {
         let cases_0 = [1, 2, 3];
         let cases_1 = [1, 2, 3];
 
-        assert_eq!(matcher.match_cases(&cases_0, &cases_1), CasesMatch::Exact);
+        assert_eq!(
+            matcher.match_cases(&cases_0, &cases_1),
+            CasesMatch::Permutation(&[0, 1, 2])
+        );
 
         let cases_0 = [1, 2, 3];
         let cases_1 = [3, 1, 2];
@@ -258,14 +259,28 @@ mod tests {
         let cases_0 = [1, 2, 3];
         let cases_1 = [1, 2, 4];
 
-        assert_eq!(matcher.match_cases(&cases_0, &cases_1), CasesMatch::NoMatch);
+        assert_eq!(
+            matcher.match_cases(&cases_0, &cases_1),
+            CasesMatch::Permutation(&[0, 1, 3])
+        );
 
         let cases_0 = [1, 2, 3];
         let cases_1 = [1, 2];
 
-        assert_eq!(matcher.match_cases(&cases_0, &cases_1), CasesMatch::NoMatch);
+        assert_eq!(
+            matcher.match_cases(&cases_0, &cases_1),
+            CasesMatch::Permutation(&[0, 1, 2])
+        );
 
         let cases_0 = [1, 2];
+        let cases_1 = [1, 2, 3];
+
+        assert_eq!(
+            matcher.match_cases(&cases_0, &cases_1),
+            CasesMatch::Permutation(&[0, 1])
+        );
+
+        let cases_0 = [1, 2, 1];
         let cases_1 = [1, 2, 3];
 
         assert_eq!(matcher.match_cases(&cases_0, &cases_1), CasesMatch::NoMatch);
