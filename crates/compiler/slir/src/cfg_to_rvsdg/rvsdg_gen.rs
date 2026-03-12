@@ -8,6 +8,7 @@ use crate::cfg::analyze::item_dependencies::{Item, ItemDependencies, item_depend
 use crate::cfg::transform::branch_restructuring::restructure_branches;
 use crate::cfg::transform::exit_restructuring::restructure_exit;
 use crate::cfg::transform::loop_restructuring::restructure_loops;
+use crate::cfg::transform::unreachable_terminator_elimination::eliminate_unreachable_terminators;
 use crate::cfg::{
     Assign, BasicBlock, Bind, BranchSelector, Cfg, InlineConst, IntrinsicOp, LocalBinding, OpCall,
     RootIdentifier, StatementData, Terminator, Uninitialized, Value,
@@ -21,7 +22,6 @@ use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
 use crate::{Function, Module, rvsdg};
-use crate::cfg::transform::unreachable_terminator_elimination::eliminate_unreachable_terminators;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum InputState {
