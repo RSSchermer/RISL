@@ -1108,14 +1108,15 @@ impl Connectivity for SwitchNode {
 /// the loop region's result will flow to the loop node's output-values.
 ///
 /// A set of loop values may be declared when first creating the loop node with
-/// [Rvsdg::add_loop_node]. This method takes as an argument a set of value-inputs for the loop
-/// node, and because of the strong coupling described above, this then also completely defines
-/// the loop node's value-outputs, and its loop region's arguments and results. Loop values may
-/// also be added to existing loop nodes with [Rvsdg::add_loop_input] or removed from existing
-/// loop nodes with [Rvsdg::remove_loop_input].
+/// [Rvsdg::add_loop]. This method takes as an argument a set of value-inputs for the loop node, and
+/// because of the strong coupling described above, this then also completely defines the loop
+/// node's value-outputs, and its loop region's arguments and results. Loop values may also be added
+/// to existing loop nodes with [Rvsdg::add_loop_input] or removed from existing loop nodes with
+/// [Rvsdg::remove_loop_input].
 ///
 /// When a loop-value with value-input index `I` is first created/added, the loop region result
-/// `I+1` for that loop-value will be connected to the loop region argument `I` for that loop-value.
+/// `I+1` for that loop-value will initially use a [ValueOrigin::placeholder] origin. The result
+/// will need to be reconnected to a valid origin later (see [Rvsdg::reconnect_region_result]).
 ///
 /// # State
 ///
@@ -2750,10 +2751,10 @@ impl Rvsdg {
     /// initially have an empty user-set (see [ValueOutput::users]). A new argument will be appended
     /// to the loop region's arguments with index `N`. A new result will be appended to the loop
     /// region's result with index `N+1` (the first loop region argument is the reentry-condition,
-    /// so all loop-value result indices are offset by `1`). The new loop region result will use
-    /// the new loop region argument as its [ValueOrigin]; the new loop region argument will have
-    /// the new loop region result as its only [ValueUser]. The loop region result may be
-    /// reconnected to another value-output later with [Rvsdg::reconnect_region_result].
+    /// so all loop-value result indices are offset by `1`). The new loop region result will
+    /// initially use a [ValueOrigin::placeholder] origin; the new loop region argument will
+    /// initially not have any users. The loop region result may be reconnected to another
+    /// value-output later with [Rvsdg::reconnect_region_result].
     pub fn add_loop_input(&mut self, loop_node: Node, input: ValueInput) -> u32 {
         let region = self.nodes[loop_node].region();
 
@@ -2792,6 +2793,14 @@ impl Rvsdg {
     /// reduced by `1`. This needs to be taken into account when holding onto indices to identify
     /// loop-values. Internal to the [Rvsdg], this method will automatically adjust connections to
     /// value-inputs/value-outputs/arguments/results at greater indices.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the corresponding value-output still has users.
+    ///
+    /// Panics if the corresponding loop-region argument still has users. If the corresponding
+    /// loop-region result may be a user of the argument, then it is recommended to first
+    /// disconnect the result with [Rvsdg::disconnect_region_result].
     pub fn remove_loop_input(&mut self, loop_node: Node, input: u32) {
         let index = input as usize;
 
@@ -2822,15 +2831,16 @@ impl Rvsdg {
         self.correct_value_input_connections(loop_node, index, -1);
         self.correct_value_output_connections(loop_node, index);
 
-        // Remove the corresponding argument and correct its connections. Its important that we
-        // correct the argument's connections before we remove the result, because the argument may
-        // connect directly to results that succeed the result we're removing.
-        self.regions[loop_region].value_arguments.remove(index);
-        self.correct_region_argument_connections(loop_region, index);
-
-        // Remove the corresponding result and correct its connections
+        // Remove the corresponding result first. Disconnect it from its origin (if any),
+        // then remove and correct result connections. Doing this first ensures that
+        // argument shifting won't need to update a soon-to-be-removed result.
+        self.disconnect_region_result(loop_region, result_index as u32);
         self.regions[loop_region].value_results.remove(result_index);
         self.correct_region_result_connections(loop_region, result_index, -1);
+
+        // Now remove the corresponding argument and correct its connections.
+        self.regions[loop_region].value_arguments.remove(index);
+        self.correct_region_argument_connections(loop_region, index);
 
         // Remove the input as a user from its origin
         self.remove_user(
@@ -4132,6 +4142,10 @@ impl Rvsdg {
         for i in start..end {
             let origin = self.regions[region].value_results[i].origin;
 
+            if origin.is_placeholder() {
+                continue;
+            }
+
             // Resolve what the result's index was before the adjustment by undoing (subtracting)
             // the adjustment.
             let old_index = (i as i32 - adjustment) as u32;
@@ -5210,6 +5224,132 @@ mod tests {
         assert_eq!(
             rvsdg[dependent_region].value_results()[0].origin,
             ValueOrigin::Argument(1)
+        );
+    }
+
+    #[test]
+    fn test_rvsdg_remove_loop_input() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_U32,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_U32,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::argument(TY_U32, 0),
+                ValueInput::argument(TY_U32, 1),
+            ],
+            None,
+        );
+
+        let reentry_condition = rvsdg.add_const_bool(loop_region, false);
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: reentry_condition,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(1));
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: loop_node,
+                output: 1,
+            },
+        );
+
+        // Disconnect result 1 before removal as the argument 0 should be userless
+        rvsdg.disconnect_region_result(loop_region, 1);
+
+        // Remove the first input (index 0)
+        rvsdg.remove_loop_input(loop_node, 0);
+
+        // Check loop inputs
+        assert_eq!(rvsdg[loop_node].value_inputs().len(), 1);
+        assert_eq!(
+            rvsdg[loop_node].value_inputs()[0],
+            ValueInput::argument(TY_U32, 1)
+        );
+
+        // Check loop outputs
+        assert_eq!(rvsdg[loop_node].value_outputs().len(), 1);
+        assert_eq!(rvsdg[loop_node].value_outputs()[0].users.len(), 1);
+        assert_eq!(
+            rvsdg[loop_node].value_outputs()[0].users[0],
+            ValueUser::Result(0)
+        );
+
+        // Check loop-region arguments
+        assert_eq!(rvsdg[loop_region].value_arguments().len(), 1);
+        assert_eq!(rvsdg[loop_region].value_arguments()[0].users.len(), 1);
+        assert_eq!(
+            rvsdg[loop_region].value_arguments()[0].users[0],
+            ValueUser::Result(1)
+        );
+
+        // Check loop-region results
+        assert_eq!(rvsdg[loop_region].value_results().len(), 2);
+        assert_eq!(
+            rvsdg[loop_region].value_results()[0].origin,
+            ValueOrigin::Output {
+                producer: reentry_condition,
+                output: 0,
+            }
+        );
+        assert_eq!(
+            rvsdg[loop_region].value_results()[1].origin,
+            ValueOrigin::Argument(0)
+        );
+
+        // Check function arguments
+        assert!(rvsdg[region].value_arguments()[0].users.is_empty());
+        assert_eq!(rvsdg[region].value_arguments()[1].users.len(), 1);
+        assert_eq!(
+            rvsdg[region].value_arguments()[1].users[0],
+            ValueUser::Input {
+                consumer: loop_node,
+                input: 0
+            }
+        );
+
+        // Check function result
+        assert_eq!(
+            rvsdg[region].value_results()[0].origin,
+            ValueOrigin::Output {
+                producer: loop_node,
+                output: 0
+            }
         );
     }
 }

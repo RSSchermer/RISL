@@ -339,6 +339,7 @@ impl<'a> EnumAllocaReplacer<'a> {
 
         // Now neither the argument nor the output should have any remaining users, so we can remove
         // the original input/output/argument/result and disconnect the input from its origin.
+        self.rvsdg.disconnect_region_result(loop_region, input + 1);
         self.rvsdg.remove_loop_input(node, input);
     }
 
