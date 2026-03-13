@@ -8,6 +8,16 @@ publish = false
 [lib]
 doctest = false
 
+[features]
+test_enum_result = []
+test_variable_pointer_if_else = []
+test_slice_is_empty = []
+test_slice_len = []
+test_slice_index_usize_get = []
+test_slice_index_usize_get_mut = []
+test_slice_index_usize_get_unchecked = []
+test_slice_index_usize_get_unchecked_mut = []
+
 [dependencies]
 behavioral-tests-macros = { path = "../behavioral-tests-macros" }
 empa = { workspace = true, features = ["risl", "dx12", "metal"] }

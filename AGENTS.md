@@ -42,6 +42,28 @@ and using this fresh compiler build to run the test-suite:
 cargo xtask run-behavioral-tests
 ```
 
+#### Running Specific Tests
+
+Each behavioral test (or group of tests) is behind a Cargo feature. Using features allows you to
+run specific tests and ensures that only the relevant shader modules are compiled. This is
+particularly useful when debugging, as it limits the output (like RVSDG dumps) to the specific
+module you are interested in.
+
+To run a specific test, use the `--features` (or `-f`) flag with the xtask command:
+
+```bash
+cargo xtask run-behavioral-tests --features <feature_name>
+```
+
+For example:
+
+```bash
+cargo xtask run-behavioral-tests --features test_enum_result
+```
+
+Refer to the `[features]` section in `tests/behavioral-tests/Cargo.toml` for a list of available
+features.
+
 ### RVSDG Analysis
 
 When debugging compiler transformations or structural issues in the RVSDG you may wish to inspect

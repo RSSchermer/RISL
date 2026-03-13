@@ -1,3 +1,5 @@
+#![cfg(feature = "test_slice_len")]
+
 use std::error::Error;
 
 use behavioral_tests_macros::test_runner;

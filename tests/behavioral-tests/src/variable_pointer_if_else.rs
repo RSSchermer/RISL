@@ -1,3 +1,5 @@
+#![cfg(feature = "test_variable_pointer_if_else")]
+
 use std::error::Error;
 
 use behavioral_tests_macros::test_runner;
