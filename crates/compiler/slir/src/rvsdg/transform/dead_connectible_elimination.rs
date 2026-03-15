@@ -3,7 +3,9 @@ use std::mem;
 use rustc_hash::FxHashSet;
 
 use crate::Module;
-use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, StateUser, ValueOrigin};
+use crate::rvsdg::{
+    Connectivity, Node, NodeKind, Region, Rvsdg, StateUser, ValueOrigin, ValueUser,
+};
 
 pub struct DeadConnectibleEliminator {
     current_candidates: FxHashSet<Node>,
@@ -242,7 +244,8 @@ fn try_remove_loop_value(
 
     // TODO: more advanced analyses for arguments. Arguments that cannot reach outputs that have
     // users (including the state output), cannot affect program output and are therefore dead.
-    let arg_is_dead = arg_users.is_empty();
+    let arg_is_dead = arg_users.is_empty()
+        || (arg_users.len() == 1 && arg_users[0] == ValueUser::Result(result_index as u32));
     let output_is_dead = output_is_dead(rvsdg, node, value);
 
     if arg_is_dead && output_is_dead {
@@ -256,6 +259,7 @@ fn try_remove_loop_value(
             candidates.insert(candidate_from_origin(rvsdg, loop_region, result_origin));
         }
 
+        rvsdg.disconnect_region_result(loop_region, result_index as u32);
         rvsdg.remove_loop_input(node, value);
     }
 }

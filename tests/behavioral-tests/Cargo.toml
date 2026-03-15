@@ -17,6 +17,7 @@ test_slice_index_usize_get = []
 test_slice_index_usize_get_mut = []
 test_slice_index_usize_get_unchecked = []
 test_slice_index_usize_get_unchecked_mut = []
+test_while_loop = []
 
 [dependencies]
 behavioral-tests-macros = { path = "../behavioral-tests-macros" }

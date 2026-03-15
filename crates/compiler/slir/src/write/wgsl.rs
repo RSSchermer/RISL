@@ -793,8 +793,10 @@ impl WgslModuleWriter {
                 self.write_block_start();
                 self.write_block_content(cx, loop_stmt.block());
 
+                // Exit with a `break` statement. Note that we have to invert the condition as the
+                // condition wants to re-enter on `true`, so we exit on `false`.
                 self.write_newline();
-                self.w.push_str("if ");
+                self.w.push_str("if !");
                 self.write_local_value(cx, condition, InlineContext::None);
                 self.write_optional_space();
                 self.w.push_str("{");

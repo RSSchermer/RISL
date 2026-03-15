@@ -236,7 +236,7 @@ impl<'a> RegionBuilder<'a> {
                 let next_sibling_demand = branch_builder.demand.get(next_sibling);
 
                 for (i, value) in next_sibling_demand.iter().enumerate() {
-                    branch_builder.connect_result(i as u32, value.into());
+                    branch_builder.connect_value_result(i as u32, value.into());
                 }
             }
         }
@@ -293,18 +293,25 @@ impl<'a> RegionBuilder<'a> {
         inner_builder.visit_node_expect_linear(data.inner);
 
         // Connect the re-entry predicate result
-        inner_builder.connect_result(0, reentry_condition.into());
+        inner_builder.connect_value_result(0, reentry_condition.into());
 
-        // Connect the other results based on the demand.
+        // Connect the results based on the demand.
         for (i, value) in demand.iter().enumerate() {
             // The first result is the re-entry predicate, the demand-based results follow, so shift
             // the index by 1.
             let result_index = i as u32 + 1;
 
-            inner_builder.connect_result(result_index, value.into());
+            inner_builder.connect_value_result(result_index, value.into());
         }
 
-        // Now that we have a node handle, update the input state tracker with the switch node's
+        // Connect the item-dependency results.
+        for (i, dep) in item_deps.iter().enumerate() {
+            let result_index = demand.len() + i + 1;
+
+            inner_builder.connect_item_result(result_index as u32, *dep);
+        }
+
+        // Now that we have a node handle, update the input state tracker with the loop node's
         // outputs
         for (i, value) in demand.iter().enumerate() {
             self.input_state_tracker
@@ -327,9 +334,9 @@ impl<'a> RegionBuilder<'a> {
         if let Terminator::Return(Some(value)) = data.terminator() {
             // Restructuring should have left only a single return terminator (if any), and it
             // should belong to the last child of the control tree's root linear node, so we know we
-            // should currently be in a function's top-level region. We can therefor simply connect
+            // should currently be in a function's top-level region. We can therefore simply connect
             // the return value to result `0` of the current region.
-            self.connect_result(0, *value);
+            self.connect_value_result(0, *value);
         }
     }
 
@@ -440,8 +447,15 @@ impl<'a> RegionBuilder<'a> {
         self.state_origin = StateOrigin::Node(node);
     }
 
-    fn connect_result(&mut self, result: u32, value: Value) {
+    fn connect_value_result(&mut self, result: u32, value: Value) {
         let input = self.resolve_value(value);
+
+        self.rvsdg
+            .reconnect_region_result(self.region, result, input.origin);
+    }
+
+    fn connect_item_result(&mut self, result: u32, item: Item) {
+        let input = self.input_state_tracker[item];
 
         self.rvsdg
             .reconnect_region_result(self.region, result, input.origin);
