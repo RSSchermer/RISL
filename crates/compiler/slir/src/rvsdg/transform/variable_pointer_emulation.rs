@@ -575,7 +575,7 @@ impl EmulationContext {
 
         let input = argument;
         let outer_region = rvsdg[loop_node].region();
-        let loop_data = rvsdg[loop_node].expect_switch();
+        let loop_data = rvsdg[loop_node].expect_loop();
         let origin = loop_data.value_inputs()[input as usize].origin;
         let mut info = self
             .resolve_pointer_emulation_info(rvsdg, outer_region, origin)
