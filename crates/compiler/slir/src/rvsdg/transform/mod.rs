@@ -1,3 +1,4 @@
+pub mod const_ptr_pull;
 pub mod const_switch_inlining;
 pub mod dead_connectible_elimination;
 pub mod enum_replacement;
@@ -23,6 +24,7 @@ use crate::rvsdg::Rvsdg;
 
 pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
+    const_ptr_pull::transform_entry_points(module, rvsdg);
     switch_passthrough_elimination::transform_entry_points(module, rvsdg);
     offset_slice_elaboration::transform_entry_points(module, rvsdg);
     memory_transform::transform_entry_points(module, rvsdg);
