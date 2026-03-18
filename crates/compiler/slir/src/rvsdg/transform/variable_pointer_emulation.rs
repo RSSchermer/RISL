@@ -318,7 +318,6 @@ impl EmulationContext {
     pub fn emulate_op_load(&mut self, rvsdg: &mut Rvsdg, op_load: Node) {
         let region = rvsdg[op_load].region();
         let data = rvsdg[op_load].expect_op_load();
-        let pointer_ty = data.ptr_input().ty;
         let output_ty = data.value_output().ty;
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
@@ -336,7 +335,6 @@ impl EmulationContext {
             rvsdg,
             outer_region: region,
             state_origin,
-            pointer_ty,
             output_ty: Some(output_ty),
             op_gen: gen_op_load,
             additional_values: &[],
@@ -368,7 +366,6 @@ impl EmulationContext {
     pub fn emulate_op_store(&mut self, rvsdg: &mut Rvsdg, op_store: Node) {
         let outer_region = rvsdg[op_store].region();
         let data = rvsdg[op_store].expect_op_store();
-        let pointer_ty = data.ptr_input().ty;
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
         let value_input = *data.value_input();
@@ -386,7 +383,6 @@ impl EmulationContext {
             rvsdg,
             outer_region,
             state_origin,
-            pointer_ty,
             output_ty: None,
             op_gen: gen_op_store,
             additional_values: &[value_input],
@@ -408,16 +404,19 @@ impl EmulationContext {
         region: Region,
         pointer_origin: ValueOrigin,
     ) -> &PointerEmulationInfo {
-        if self
+        if !self
             .pointer_emulation_info
             .contains_key(&(region, pointer_origin))
         {
+            let info = self.create_pointer_emulation_info(rvsdg, region, pointer_origin);
+
             self.pointer_emulation_info
-                .get(&(region, pointer_origin))
-                .unwrap()
-        } else {
-            self.create_pointer_emulation_info(rvsdg, region, pointer_origin)
+                .insert((region, pointer_origin), info);
         }
+
+        self.pointer_emulation_info
+            .get(&(region, pointer_origin))
+            .unwrap()
     }
 
     fn create_pointer_emulation_info(
@@ -425,11 +424,11 @@ impl EmulationContext {
         rvsdg: &mut Rvsdg,
         region: Region,
         pointer_origin: ValueOrigin,
-    ) -> &PointerEmulationInfo {
+    ) -> PointerEmulationInfo {
         use NodeKind::*;
         use SimpleNode::*;
 
-        let info = match pointer_origin {
+        match pointer_origin {
             ValueOrigin::Argument(arg) => self.create_argument_info(rvsdg, region, arg),
             ValueOrigin::Output { producer, output } => match rvsdg[producer].kind() {
                 Switch(_) => self.create_switch_output_info(rvsdg, producer, output),
@@ -446,13 +445,7 @@ impl EmulationContext {
                 ),
                 _ => unreachable!("node kind cannot output a value of a pointer type"),
             },
-        };
-
-        self.pointer_emulation_info
-            .insert((region, pointer_origin), info);
-        self.pointer_emulation_info
-            .get(&(region, pointer_origin))
-            .unwrap()
+        }
     }
 
     fn create_argument_info(
@@ -818,6 +811,7 @@ impl EmulationContext {
         info.emulation_root.visit_leaves_mut(&mut |leaf| {
             leaf.access_chain.push(access);
         });
+        info.emulation_root.assign_child_inputs();
         info.pointer_ty = pointer_ty;
 
         info
@@ -842,6 +836,7 @@ impl EmulationContext {
         info.emulation_root.visit_leaves_mut(&mut |leaf| {
             leaf.access_chain.push(access);
         });
+        info.emulation_root.assign_child_inputs();
         info.pointer_ty = pointer_ty;
 
         info
@@ -918,9 +913,6 @@ struct Emulator<'a, F> {
 
     /// The state origin of the "load" or "store" node that we're emulating.
     state_origin: StateOrigin,
-
-    /// The type of the pointer input of the "load" or "store" node that we're emulating.
-    pointer_ty: Type,
 
     /// If we're emulating a "load" node, the output type of the load operation.
     output_ty: Option<Type>,
@@ -1088,7 +1080,6 @@ where
             ptr_input
         } else {
             let mut ptr_input = ptr_input;
-            let mut last = None;
 
             for access in &leaf_node.access_chain {
                 let (node, ty) = match access {
@@ -1119,12 +1110,9 @@ where
                 };
 
                 ptr_input = ValueInput::output(ty, node, 0);
-                last = Some(node);
             }
 
-            let last = last.expect("verified that leaf node access chain is non-empty");
-
-            ValueInput::output(self.pointer_ty, last, 0)
+            ptr_input
         };
 
         if let Some(input_mapping) = input_mapping {
