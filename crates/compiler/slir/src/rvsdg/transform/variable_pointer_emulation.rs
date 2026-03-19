@@ -1,3 +1,132 @@
+//! Transforms (atomic) load and store nodes that read from variable pointers into "emulation
+//! programs".
+//!
+//! WGSL does not support "variable pointers". For example, the following WGSL code would not
+//! compile:
+//!
+//! ```wgsl
+//! var data: array<u32, 2> = array(10, 20);
+//! var p: ptr<function, u32> = &data[0];
+//!
+//! if condition {
+//!     p = &data[1];
+//! }
+//!
+//! *p = 0;
+//! ```
+//!
+//! However, one might rewrite this pattern as follows to avoid the variable pointer:
+//!
+//! ```wgsl
+//! var array: array<u32, 2> = array(10, 20);
+//! var index: u32 = 0;
+//!
+//! if condition {
+//!     index = 1;
+//! }
+//!
+//! array[index] = 0;
+//! ```
+//!
+//! While the rewrite in this example is fairly trivial, this transform extends this idea to any
+//! arbitrary use of a variable pointer. To achieve this, we replace any user of a variable pointer
+//! (e.g., a "load" operation) with a "pointer-emulation program".
+//!
+//! In the context of an RVSDG, there are three origins that may produce a variable pointer:
+//!
+//! 1. A value-output of a [Switch](crate::rvsdg::Switch) which is of a pointer type.
+//! 2. A value-output of a [Loop](crate::rvsdg::Loop) node which is of a pointer type, if the
+//!    associated loop-value is not a loop-constant (the loop-result connects directly to the
+//!    corresponding loop-argument).
+//! 3. A region argument of a [Loop](crate::rvsdg::Loop) node which is of a pointer type, if the
+//!    associated loop-value is not a loop-constant (the corresponding loop-result connects directly
+//!    to this loop-argument).
+//!
+//! In addition, any further refinements of variable pointers (e.g., with an
+//! [OpElementPtr](crate::rvsdg::OpElementPtr) node) are also considered variable pointers. If a
+//! variable pointer is passed into a nested region, then the region argument that represents the
+//! pointer-value inside the region is also considered a variable pointer.
+//!
+//! Any downstream load-like or store-like operations that use a variable pointer will need to be
+//! replaced with a pointer-emulation program. The variable-pointer emulation transform is part of
+//! the larger [memory_promotion_and_legalization][0] transform; the identification of such
+//! load-like or store-like nodes is done by as part of [memory_promotion_and_legalization][0]
+//! transform.
+//!
+//! In order for this transform to be able to build a pointer-emulation program, it has to be able
+//! to trace each variable pointer to its "root" pointers, that is, the output of an
+//! [OpAlloca](crate::rvsdg::OpAlloca) node or the output of a [ConstPtr](crate::rvsdg::ConstPtr)
+//! node. We cannot, in general, trace variable pointers through loads and stores from/to global
+//! memory (uniform/storage/workgroup bindings): since other threads could also interact with a
+//! pointer-value stored in global memory, we cannot statically determine the root of a
+//! pointer-value stored in global memory. However, since our targets already disallow us from
+//! storing pointer-type values in global memory, we only have to concern ourselves with pointers
+//! stored into allocations in the function address-space ("on the stack"), as represented by
+//! [OpAlloca] nodes in our [Rvsdg] representation; since only a single thread can load and store
+//! into such allocations, a static analysis can determine the total ordering of all loads and
+//! stores. However, we do not perform such an analysis here; we instead rely on the
+//! [memory_promotion_and_legalization][0] pass to replace all loads and stores from/into [OpAlloca]
+//! allocations with plain value-flow (a.k.a. "memory-to-value-flow promotion"). The
+//! [memory_promotion_and_legalization][0] pass will ensure that all loads and stores in the reverse
+//! value-flow graph of a variable pointer will have been promoted to plain value-flow before
+//! invoking variable-pointer emulation for any of its users. As such, this transform never has to
+//! concern itself with tracing such pointers through loads and stores; simple reverse value-flow
+//! traces will always succeed at finding the root pointers.
+//!
+//! # Pointer Emulation Programs
+//!
+//! Before we replace the load or store operation with a pointer emulation program, we first
+//! construct [PointerEmulationInfo] for value-origin of the operation's pointer input.
+//! [PointerEmulationInfo] represents a pointer emulation program without being specific to the
+//! particular operation we'll be emulating. Constructing the [PointerEmulationInfo] involves
+//! tracing back the pointer-value through reverse value-flow, recursively constructing
+//! [PointerEmulationInfo] for all values we encounter, until we reach the root-pointer origins.
+//! It effectively represents a description of a pointer value's complete provenance. Since the
+//! [PointerEmulationInfo] remains constant throughout the [memory_promotion_and_legalization][0]
+//! pass, and since a pointer-value is regularly used by more than one operation that needs
+//! emulating, we cache the [PointerEmulationInfo] for each value-origin in a hashmap.
+//!
+//! We store the [PointerEmulationInfo] as a tree. The [LeafNode]s of this tree each store a
+//! [ValueOrigin] for a root pointer, along with a complete access chain that will construct the
+//! pointer the emulated operation will operate on. When the access chain involves dynamic indexing,
+//! then it stores the [ValueOrigin] for the dynamic index value(s).
+//!
+//! [BranchingNode]s in this tree represent variability over different reverse value-flow paths
+//! through different branches of [Switch] nodes. They store the [ValueOrigin] for the
+//! branch-selector of the [Switch] node that caused the path to split.
+//!
+//! All root pointer values, dynamic index values, and branch-selector values we collectively refer
+//! to as the "emulation values". Note that all emulation values need to be available in the region
+//! of the pointer-value we intend to emulate, as these values will be the inputs to our pointer
+//! emulation program, and connecting values across region boundaries is not allowed in an RVSDG.
+//! Therefore, while collecting the [PointerEmulationInfo] for a given pointer-value, we also make
+//! sure that all its emulation values are made available in this pointer-value's region.
+//! Specifically, whenever the pointer-value is the output of a [Switch] or [Loop] node, we add
+//! additional value-outputs for all emulation values (that are not already available as a
+//! value-output of the [Switch] or [Loop] node); whenever the pointer-value is a region argument
+//! for a [Switch] branch or [Loop] region, we add additional value-inputs for all emulation values
+//! (that are not already available as a value-input of the [Switch] branch or [Loop] region).
+//!
+//! When we're constructing the pointer emulation program from the [PointerEmulationInfo], the
+//! [BranchNode]s become [Switch] nodes; each [LeafNode] becomes a chain of [OpElementPtr] and
+//! [OpFieldPtr] nodes that reconstruct the access chain, followed by a copy of the operation we're
+//! emulating. This copy of the operation now uses the [LeafNode]'s pointer construction instead of
+//! the original variable pointer. Some operations also take additional inputs (e.g., an [OpStore]
+//! node also takes the value to be stored as an input); we make sure that the [Switch] nodes we
+//! construct to represent [BranchingNode]s make all emulation values and all such additional inputs
+//! available to each of their branches.
+//!
+//! Note that all emulation values need to "live" until the end of the emulation program. This
+//! represents the main cost of variable pointer emulation. With a compilation target that supports
+//! true physical pointers, all the information that describes the pointer can be condensed into
+//! a single physical address value, no matter the complexity of the access and control-flow that
+//! produced the pointer. With variable pointer emulation, emulation values may need to be kept
+//! alive for longer than they otherwise would. Variable pointer emulation may therefore result in
+//! increased register use relative to true physical pointers. Certain later optimizations, such as
+//! switch-merging, may be able to reduce this cost a little.
+//!
+//! [0]: super::memory_promotion_and_legalization
+
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -438,7 +567,7 @@ impl EmulationContext {
                 Simple(OpAlloca(_)) => self.create_alloca_info(rvsdg, producer),
                 Simple(ConstPtr(_)) => self.create_const_ptr_info(rvsdg, producer),
                 Simple(ConstFallback(_)) => self.create_fallback_info(rvsdg, producer),
-                Simple(OpOffsetSlice(_)) => self.create_add_offset_slice_info(rvsdg, producer),
+                Simple(OpOffsetSlice(_)) => self.create_offset_slice_info(rvsdg, producer),
                 Simple(OpLoad(_)) => panic!(
                     "cannot emulate a pointer for which the access chain information cannot be \
                     tracked through value-flow"
@@ -891,11 +1020,19 @@ impl EmulationContext {
         }
     }
 
-    fn create_add_offset_slice_info(
+    fn create_offset_slice_info(
         &mut self,
         rvsdg: &mut Rvsdg,
         op_offset_slice: Node,
     ) -> PointerEmulationInfo {
+        // We run the offset-slice-elaboration pass before we run any variable pointer emulation
+        // transforms. After offset-slice-elaboration, the refinement of the pointer itself is no
+        // longer done by the OpOffsetSlice node anymore; instead, it happens at the next
+        // OpElementPtr node, which now already incorporates the additional offset in its
+        // `index_input`. We therefore don't need to record the OpOffsetSlice into the
+        // PointerEmulationInfo here, we simply pass forward the PointerEmulationInfo for the
+        // OpOffsetSlice's `ptr_input`.
+
         let region = rvsdg[op_offset_slice].region();
         let offset_slice = rvsdg[op_offset_slice].expect_op_offset_slice();
         let ptr_origin = offset_slice.ptr_input().origin;
