@@ -1,6 +1,7 @@
 pub mod const_ptr_pull;
 pub mod const_switch_inlining;
 pub mod dead_connectible_elimination;
+pub mod duplicate_switch_input_elimination;
 pub mod enum_replacement;
 pub mod function_inlining;
 pub mod memory_promotion_and_legalization;
