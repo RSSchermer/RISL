@@ -47,8 +47,8 @@ impl RegionNodesVisitor for JobCollector {
             NodeKind::Loop(loop_node) => {
                 self.visit_region(rvsdg, loop_node.loop_region());
             }
-            NodeKind::Function(func) => {
-                self.visit_region(rvsdg, func.body_region());
+            NodeKind::Function(function) => {
+                self.visit_region(rvsdg, function.body_region());
             }
             _ => (),
         }
@@ -148,9 +148,8 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
 
 #[cfg(test)]
 mod tests {
-    use internment::Intern;
-
     use super::*;
+    use crate::Symbol;
     use crate::rvsdg::{Rvsdg, ValueInput};
     use crate::ty::{TY_U32, TypeRegistry};
 
@@ -158,18 +157,18 @@ mod tests {
     fn test_eliminate_passthrough() {
         let ty_registry = TypeRegistry::default();
         let mut rvsdg = Rvsdg::new(ty_registry.clone());
-        let mut module = Module::new(Intern::new("test".to_string()));
+        let mut module = Module::new(Symbol::from_ref("test"));
 
-        let func = Function {
-            name: Intern::new("main".to_string()),
-            module: Intern::new("test".to_string()),
+        let function = Function {
+            name: Symbol::from_ref("main"),
+            module: Symbol::from_ref("test"),
         };
 
-        let fn_ty = ty_registry.register(crate::ty::TypeKind::Function(func));
+        let fn_ty = ty_registry.register(crate::ty::TypeKind::Function(function));
         module.fn_sigs.register(
-            func,
+            function,
             crate::FnSig {
-                name: func.name,
+                name: function.name,
                 ty: fn_ty,
                 args: vec![crate::FnArg {
                     ty: TY_U32,
@@ -179,7 +178,7 @@ mod tests {
             },
         );
 
-        let (_, region) = rvsdg.register_function(&module, func, vec![]);
+        let (_, region) = rvsdg.register_function(&module, function, vec![]);
 
         // Add a switch with one passthrough output
         let pred_input = rvsdg.add_const_predicate(region, 0);
@@ -200,7 +199,7 @@ mod tests {
 
         let mut eliminator = SwitchPassthroughEliminator::new();
 
-        eliminator.eliminate_in_fn(&mut rvsdg, func);
+        eliminator.eliminate_in_fn(&mut rvsdg, function);
 
         // Check if user_node now points to input_val's origin
         let user_input = &rvsdg[user_node].value_inputs()[0];
