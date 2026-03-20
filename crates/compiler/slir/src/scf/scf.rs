@@ -1684,7 +1684,7 @@ impl Scf {
         &mut self,
         loop_statement: Statement,
         initial_value: LocalBinding,
-    ) -> LocalBinding {
+    ) -> (usize, LocalBinding) {
         let stmt = self.statements[loop_statement].kind.expect_loop_mut();
         let ty = self.local_bindings[initial_value].ty();
         let index = stmt.loop_vars.len();
@@ -1706,7 +1706,7 @@ impl Scf {
 
         self.blocks[loop_block].add_control_flow_var(binding, LocalBinding::null());
 
-        binding
+        (index, binding)
     }
 
     pub fn remove_loop_var(&mut self, loop_statement: Statement, binding: LocalBinding) -> bool {

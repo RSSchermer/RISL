@@ -266,16 +266,30 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
     fn visit_loop_node(&mut self, node: rvsdg::Node) {
         let data = self.rvsdg[node].expect_loop();
         let loop_region = data.loop_region();
+        let loop_region_data = &self.rvsdg[loop_region];
+
+        let is_loop_constant = |i: usize| {
+            loop_region_data.value_results()[i + 1].origin == ValueOrigin::Argument(i as u32)
+        };
+
         let (loop_stmt, loop_block) = self.scf.add_loop(self.dst_block, BlockPosition::Append);
+
+        // Maps non-constant loop value-input indices to their associated loop-variables.
+        let mut loop_var_mapping = FxHashMap::default();
+
+        // Maps all RVSDG region argument for the loop's region to SCF values.
         let mut argument_mapping = ValueMapping::new();
 
         for (i, input) in data.value_inputs().iter().enumerate() {
             let value = self.value_mapping.mapping(input.origin);
 
-            let value = if let Value::Local(initializer) = value {
-                let loop_var = self.scf.add_loop_var(loop_stmt, initializer);
+            let value = if !is_loop_constant(i) {
+                let initializer = value.expect_local();
+                let (index, value) = self.scf.add_loop_var(loop_stmt, initializer);
 
-                Value::Local(loop_var)
+                loop_var_mapping.insert(i, index);
+
+                Value::Local(value)
             } else {
                 value
             };
@@ -288,23 +302,26 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         }
 
         // Process the subregion and use the value mapping it produces to set the loop block's
-        // control expression and control-flow variables.
+        // reentry condition and control-flow variables.
         let sub_region_mapping = self.visit_sub_region(loop_region, loop_block, argument_mapping);
 
-        let control_origin = self.rvsdg[loop_region].value_results()[0].origin;
-        let control_expr = sub_region_mapping.mapping(control_origin).expect_local();
-
+        let reentry_condition_origin = self.rvsdg[loop_region].value_results()[0].origin;
+        let reentry_condition_expr = sub_region_mapping
+            .mapping(reentry_condition_origin)
+            .expect_local();
         self.scf
-            .set_loop_control(loop_stmt, LoopControl::Tail(control_expr));
+            .set_loop_control(loop_stmt, LoopControl::Tail(reentry_condition_expr));
 
         // Set the loop block's control-flow variables to the loop values produced by the subregion.
-        let mut loop_var_index = 0;
-        for result in &self.rvsdg[loop_region].value_results()[1..] {
-            if let Value::Local(binding) = sub_region_mapping.mapping(result.origin) {
+        for (i, result) in self.rvsdg[loop_region].value_results()[1..]
+            .iter()
+            .enumerate()
+        {
+            if let Some(&loop_var_index) = loop_var_mapping.get(&i) {
+                let binding = sub_region_mapping.mapping(result.origin).expect_local();
+
                 self.scf
                     .set_control_flow_var(loop_block, loop_var_index, binding);
-
-                loop_var_index += 1;
             }
         }
     }
