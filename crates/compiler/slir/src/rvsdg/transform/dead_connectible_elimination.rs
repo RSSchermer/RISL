@@ -266,7 +266,7 @@ fn try_remove_loop_value(
 
 fn process_simple_node(rvsdg: &mut Rvsdg, node: Node, candidates: &mut FxHashSet<Node>) {
     // We generally consider simple nodes to be alive if they are part of the state chain. The
-    // exception is OpLoad, which we do consider dead if it value output has no users.
+    // exception is OpLoad, which we do consider dead if its value output has no users.
     //
     // TODO: make exception for OpAtomicLoad as well once we add that node type.
     if rvsdg[node].state().is_some() && !rvsdg[node].is_op_load() {
