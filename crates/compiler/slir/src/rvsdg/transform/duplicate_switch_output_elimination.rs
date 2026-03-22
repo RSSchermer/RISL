@@ -1,9 +1,9 @@
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueOrigin, visit};
 
-/// Collects the nodes in such a way that repeated calling `pop` will visit the loop nodes from the 
+/// Collects the nodes in such a way that repeated calling `pop` will visit the loop nodes from the
 /// inside out.
-/// 
+///
 /// This is important because deduplicating outputs can uncover additional duplicate branch results
 /// in an outer switch branch region.
 struct SwitchNodeCollector<'a> {
