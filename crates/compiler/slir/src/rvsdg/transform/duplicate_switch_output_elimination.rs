@@ -1,32 +1,34 @@
-use std::collections::VecDeque;
-
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueOrigin, visit};
 
+/// Collects the nodes in such a way that repeated calling `pop` will visit the loop nodes from the 
+/// inside out.
+/// 
+/// This is important because deduplicating outputs can uncover additional duplicate branch results
+/// in an outer switch branch region.
 struct SwitchNodeCollector<'a> {
-    queue: &'a mut VecDeque<Node>,
+    queue: &'a mut Vec<Node>,
 }
 
 impl RegionNodesVisitor for SwitchNodeCollector<'_> {
     fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
         if let NodeKind::Switch(_) = rvsdg[node].kind() {
-            // Visit nested regions first to ensure inside-out processing.
-            visit::region_nodes::visit_node(self, rvsdg, node);
-
-            self.queue.push_back(node);
+            self.queue.push(node);
         }
+
+        visit::region_nodes::visit_node(self, rvsdg, node);
     }
 }
 
 pub struct DuplicateSwitchOutputEliminator {
-    switch_node_queue: VecDeque<Node>,
+    switch_node_queue: Vec<Node>,
     did_eliminate_duplicate_outputs: bool,
 }
 
 impl DuplicateSwitchOutputEliminator {
     pub fn new() -> Self {
         Self {
-            switch_node_queue: VecDeque::new(),
+            switch_node_queue: Vec::new(),
             did_eliminate_duplicate_outputs: false,
         }
     }
@@ -40,7 +42,7 @@ impl DuplicateSwitchOutputEliminator {
         }
         .visit_region(rvsdg, region);
 
-        while let Some(switch_node) = self.switch_node_queue.pop_front() {
+        while let Some(switch_node) = self.switch_node_queue.pop() {
             self.process_switch_node(rvsdg, switch_node);
         }
 

@@ -3,6 +3,11 @@ use std::collections::VecDeque;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueOrigin, visit};
 
+/// Collects the nodes in such a way that repeated calling `pop_front` will visit the switch nodes
+/// from the outside in.
+///
+/// This is important because deduplicating region arguments can uncover further duplicate inputs
+/// for nested switch nodes.
 struct SwitchNodeCollector<'a> {
     queue: &'a mut VecDeque<Node>,
 }
@@ -10,14 +15,10 @@ struct SwitchNodeCollector<'a> {
 impl RegionNodesVisitor for SwitchNodeCollector<'_> {
     fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
         if let NodeKind::Switch(_) = rvsdg[node].kind() {
-            // Push the node into the queue first before visiting its nested regions. This ensures
-            // that any potential nested switch nodes are processed from the outside in. This is
-            // important because duplicate input elimination in the outer switch node can uncover
-            // additional duplicate inputs for any inner switch nodes.
             self.queue.push_back(node);
-
-            visit::region_nodes::visit_node(self, rvsdg, node);
         }
+
+        visit::region_nodes::visit_node(self, rvsdg, node);
     }
 }
 
