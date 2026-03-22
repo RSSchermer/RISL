@@ -66,8 +66,6 @@ impl DuplicateSwitchInputEliminator {
             // already been adjusted.
             for j in i + 1..arg_count {
                 if rvsdg[switch_node].value_inputs()[j + 1].origin == origin {
-                    self.did_eliminate_duplicate_inputs = true;
-
                     for b in 0..branch_count {
                         let branch = rvsdg[switch_node].expect_switch().branches()[b];
 

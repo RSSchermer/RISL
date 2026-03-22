@@ -68,8 +68,6 @@ impl DuplicateSwitchOutputEliminator {
                 }
 
                 if is_duplicate {
-                    self.did_eliminate_duplicate_outputs = true;
-
                     let region = rvsdg[switch_node].region();
                     rvsdg.reconnect_value_users(
                         region,
@@ -82,6 +80,8 @@ impl DuplicateSwitchOutputEliminator {
                             output: i as u32,
                         },
                     );
+
+                    self.did_eliminate_duplicate_outputs = true;
                 }
             }
         }
