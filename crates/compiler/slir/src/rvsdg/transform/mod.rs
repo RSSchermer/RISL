@@ -2,6 +2,7 @@ pub mod common_value_elimination;
 pub mod const_ptr_pull;
 pub mod const_switch_inlining;
 pub mod dead_connectible_elimination;
+pub mod duplicate_loop_value_elimination;
 pub mod duplicate_switch_input_elimination;
 pub mod duplicate_switch_output_elimination;
 pub mod enum_replacement;
@@ -35,6 +36,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     pred_to_case_extraction::transform_entry_points(module, rvsdg);
     pred_to_case_to_pred_merging::transform_entry_points(module, rvsdg);
     switchify_pred_to_case::transform_entry_points(module, rvsdg);
+    common_value_elimination::transform_entry_points(module, rvsdg);
     switch_arg_reduction::transform_entry_points(module, rvsdg);
     const_switch_inlining::transform_entry_points(module, rvsdg);
     switch_merging::transform_entry_points(module, rvsdg);
