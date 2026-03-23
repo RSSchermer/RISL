@@ -27,8 +27,8 @@ pub fn Block(block: slir::scf::Block) -> impl IntoView {
                     view! {
                         <LocalBinding binding=var/>
                         " = "<LocalBinding binding=value/>";"
-                    }
-                }).collect_view()
+                    }.into_any()
+                }).intersperse_with(|| view!{<br/>}.into_any()).collect_view()
             }}
         </div>
     }
