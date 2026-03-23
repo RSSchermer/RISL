@@ -1,3 +1,4 @@
+pub mod common_node_elimination;
 pub mod common_value_elimination;
 pub mod const_ptr_pull;
 pub mod const_switch_inlining;

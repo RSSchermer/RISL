@@ -1,4 +1,5 @@
 use crate::Module;
+use crate::rvsdg::transform::common_node_elimination::CommonNodeEliminator;
 use crate::rvsdg::transform::dead_connectible_elimination::DeadConnectibleEliminator;
 use crate::rvsdg::transform::duplicate_loop_value_elimination::DuplicateLoopValueEliminator;
 use crate::rvsdg::transform::duplicate_switch_input_elimination::DuplicateSwitchInputEliminator;
@@ -6,6 +7,7 @@ use crate::rvsdg::transform::duplicate_switch_output_elimination::DuplicateSwitc
 use crate::rvsdg::{Region, Rvsdg};
 
 pub struct CommonValueEliminator {
+    common_node_eliminator: CommonNodeEliminator,
     duplicate_switch_input_eliminator: DuplicateSwitchInputEliminator,
     duplicate_loop_value_eliminator: DuplicateLoopValueEliminator,
     duplicate_switch_output_eliminator: DuplicateSwitchOutputEliminator,
@@ -15,6 +17,7 @@ pub struct CommonValueEliminator {
 impl CommonValueEliminator {
     pub fn new() -> Self {
         CommonValueEliminator {
+            common_node_eliminator: CommonNodeEliminator::new(),
             duplicate_switch_input_eliminator: DuplicateSwitchInputEliminator::new(),
             duplicate_loop_value_eliminator: DuplicateLoopValueEliminator::new(),
             duplicate_switch_output_eliminator: DuplicateSwitchOutputEliminator::new(),
@@ -30,6 +33,8 @@ impl CommonValueEliminator {
 
         while do_iteration {
             do_iteration = false;
+
+            do_iteration |= self.common_node_eliminator.process_region(rvsdg, region);
 
             do_iteration |= self
                 .duplicate_switch_input_eliminator
