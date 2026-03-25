@@ -273,6 +273,27 @@ impl TouchedOuterAllocaStack {
     }
 }
 
+/// A pending loop-result initialization job.
+///
+/// When we route new values into [Loop] nodes to make them available inside the loop-region, we
+/// don't only create a new argument, we also create a new result (because [Loop]
+/// input/argument/result/output values are all tied together). We initially give this new result a
+/// [ValueOrigin::placeholder] origin, because we don't yet know what the actual value should be:
+/// the alloca may be "touched" (stored to) in the loop-region, and we must make sure to use the
+/// latest value.
+///
+/// We therefore attach a list of these pending jobs to each [Loop] node as we add these new
+/// loop-values (see [MemoryPromoterLegalizer::loop_result_init_jobs]). When we're done processing
+/// the loop-region, we retrieve this list and finish connecting all these new results to the
+/// appropriate origins.
+struct LoopResultInitJob {
+    /// The [OpAlloca] node that is being promoted to value-flow.
+    op_alloca: Node,
+
+    /// The identifier for the pending result.
+    result: u32,
+}
+
 /// Promotes and legalizes all pointer-mediated memory operations (loads and stores) in a function
 /// body region.
 ///
@@ -320,6 +341,7 @@ pub struct MemoryPromoterLegalizer {
     value_availability: FxHashMap<(Node, Region), ValueOrigin>,
     owner_stack: Vec<Node>,
     touched_outer_alloca_stack: TouchedOuterAllocaStack,
+    loop_result_init_jobs: FxHashMap<Node, Vec<LoopResultInitJob>>,
 }
 
 impl MemoryPromoterLegalizer {
@@ -331,6 +353,7 @@ impl MemoryPromoterLegalizer {
             value_availability: Default::default(),
             owner_stack: vec![],
             touched_outer_alloca_stack: TouchedOuterAllocaStack::new(),
+            loop_result_init_jobs: Default::default(),
         }
     }
 
@@ -449,6 +472,22 @@ impl MemoryPromoterLegalizer {
         self.state_origin = (loop_region, StateOrigin::Argument);
 
         while self.visit_state_user(rvsdg) {}
+
+        // If we added any new loop-values during the visit, then we need to finish connecting
+        // their results.
+        if let Some(jobs) = self.loop_result_init_jobs.remove(&loop_node) {
+            for job in jobs {
+                // Value should at least be available as a loop-argument, as that creation of the
+                // new loop-value is the whole reason this job was queued. It may have been
+                // "touched" since, so this may resolve to a different value-output.
+                let origin = *self
+                    .value_availability
+                    .get(&(job.op_alloca, loop_region))
+                    .expect("value should be available or this job would not have been queued");
+
+                rvsdg.reconnect_region_result(loop_region, job.result, origin);
+            }
+        }
 
         let touched_allocas = self
             .touched_outer_alloca_stack
@@ -679,13 +718,13 @@ impl MemoryPromoterLegalizer {
                                 let input = rvsdg.add_loop_input(owner, ValueInput { ty, origin });
                                 let result = input + 1;
 
-                                // Connect the new input to its corresponding result to make
-                                // the value available to subsequent loop iterations.
-                                rvsdg.reconnect_region_result(
-                                    loop_region,
-                                    result,
-                                    ValueOrigin::Argument(input),
-                                );
+                                // Leave the result with a placeholder origin for now, but schedule
+                                // a job to connect properly once the loop-region is processed;
+                                // see the documentation for `LoopResultInitJob` for more details.
+                                self.loop_result_init_jobs
+                                    .entry(owner)
+                                    .or_default()
+                                    .push(LoopResultInitJob { op_alloca, result });
 
                                 input
                             });
@@ -2073,36 +2112,38 @@ mod tests {
             ValueInput::argument(TY_U32, 0),
             StateOrigin::Argument,
         );
-        let iteration_count_node = rvsdg.add_const_u32(region, 0);
         let (loop_node, loop_region) = rvsdg.add_loop(
             region,
             vec![
-                ValueInput::output(TY_U32, iteration_count_node, 0),
-                ValueInput::argument(TY_U32, 1),
                 ValueInput::output(ptr_ty, alloca_node, 0),
+                ValueInput::argument(TY_U32, 1),
             ],
             Some(StateOrigin::Node(outer_store_node)),
         );
 
-        let test_node = rvsdg.add_op_binary(
-            loop_region,
-            BinaryOperator::LtEq,
-            ValueInput::argument(TY_U32, 0),
-            ValueInput::argument(TY_U32, 1),
-        );
         let step_value_node = rvsdg.add_const_u32(loop_region, 1);
+        let inner_load_node = rvsdg.add_op_load(
+            loop_region,
+            ValueInput::argument(ptr_ty, 0),
+            StateOrigin::Argument,
+        );
         let increment_node = rvsdg.add_op_binary(
             loop_region,
             BinaryOperator::Add,
-            ValueInput::argument(TY_U32, 0),
+            ValueInput::output(TY_U32, inner_load_node, 0),
             ValueInput::output(TY_U32, step_value_node, 0),
         );
-        let inner_stored_value_node = rvsdg.add_const_u32(loop_region, 1);
         let inner_store_node = rvsdg.add_op_store(
             loop_region,
-            ValueInput::argument(ptr_ty, 2),
-            ValueInput::output(TY_U32, inner_stored_value_node, 0),
-            StateOrigin::Argument,
+            ValueInput::argument(ptr_ty, 0),
+            ValueInput::output(TY_U32, increment_node, 0),
+            StateOrigin::Node(inner_load_node),
+        );
+        let test_node = rvsdg.add_op_binary(
+            loop_region,
+            BinaryOperator::LtEq,
+            ValueInput::output(TY_U32, increment_node, 0),
+            ValueInput::argument(TY_U32, 1),
         );
 
         rvsdg.reconnect_region_result(
@@ -2114,20 +2155,11 @@ mod tests {
             },
         );
 
-        rvsdg.reconnect_region_result(
-            loop_region,
-            1,
-            ValueOrigin::Output {
-                producer: increment_node,
-                output: 0,
-            },
-        );
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
 
         rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(1));
 
-        rvsdg.reconnect_region_result(loop_region, 3, ValueOrigin::Argument(2));
-
-        let load_node = rvsdg.add_op_load(
+        let outer_load_node = rvsdg.add_op_load(
             region,
             ValueInput::output(ptr_ty, alloca_node, 0),
             StateOrigin::Node(loop_node),
@@ -2137,67 +2169,71 @@ mod tests {
             region,
             0,
             ValueOrigin::Output {
-                producer: load_node,
+                producer: outer_load_node,
                 output: 0,
             },
         );
+
+        rvsdg.dump_to_file("before_promote.dump").unwrap();
 
         let mut promoter_legalizer = MemoryPromoterLegalizer::new();
 
         promoter_legalizer.promote_and_legalize(&mut rvsdg, region);
 
+        rvsdg.dump_to_file("after_promote.dump").unwrap();
+
+        let ValueOrigin::Output {
+            producer: loop_node,
+            output: loop_output,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("expected the region result to connect to a node output");
+        };
+
+        let loop_node = rvsdg[loop_node].expect_loop();
+        let loop_region_result = loop_output + 1;
+
+        let ValueOrigin::Output {
+            producer: add_node,
+            output: 0,
+        } = rvsdg[loop_region].value_results()[loop_region_result as usize].origin
+        else {
+            panic!("expected the loop_region_result to connect to a node output");
+        };
+
+        let add_node = rvsdg[add_node].expect_op_binary();
+
+        let ValueOrigin::Argument(loop_region_argument) = add_node.value_inputs()[0].origin else {
+            panic!("expected the add_node to connect to a loop_region argument");
+        };
+
         assert_eq!(
-            &rvsdg[region].value_arguments()[0].users,
-            &thin_set![ValueUser::Input {
-                consumer: loop_node,
-                input: 3,
-            }],
-            "the first function argument should now be used as the fourth input to the loop node"
+            loop_region_argument + 1,
+            loop_region_result,
+            "expected the loop_region_argument and loop_region_result to correspond"
         );
-        assert_eq!(
-            rvsdg[loop_node].value_inputs(),
-            &[
-                ValueInput::output(TY_U32, iteration_count_node, 0),
-                ValueInput::argument(TY_U32, 1),
-                ValueInput::output(ptr_ty, alloca_node, 0),
-                ValueInput::argument(TY_U32, 0),
-            ],
-            "the loop node should now use the first function argument as an additional input"
-        );
-        assert_eq!(
-            &rvsdg[loop_region].value_arguments()[2].users,
-            &thin_set![ValueUser::Result(3)],
-            "the original pointer argument in the loop region should no longer be used by any nodes"
-        );
-        assert!(
-            rvsdg[loop_region].value_arguments()[3].users.is_empty(),
-            "the new argument should not be used by any nodes inside the loop region"
-        );
-        assert_eq!(
-            &rvsdg[inner_stored_value_node]
-                .expect_const_u32()
-                .output()
-                .users,
-            &thin_set![ValueUser::Result(4)],
-            "the inner-store-value node should be used by the new result"
-        );
-        assert_eq!(
-            &rvsdg[loop_node].value_outputs()[3].users,
-            &thin_set![ValueUser::Result(0)],
-            "the new output should be used by the function result"
-        );
+
+        let ValueOrigin::Argument(0) =
+            loop_node.value_inputs()[loop_region_argument as usize].origin
+        else {
+            panic!("expected the loop value to originate from the first function argument");
+        };
 
         assert!(
             !rvsdg.is_live_node(outer_store_node),
             "the outer store node should be removed after promotion"
         );
         assert!(
+            !rvsdg.is_live_node(outer_load_node),
+            "the outer load node should be removed after promotion"
+        );
+        assert!(
             !rvsdg.is_live_node(inner_store_node),
             "the inner store node should be removed after promotion"
         );
         assert!(
-            !rvsdg.is_live_node(load_node),
-            "the load node should be removed after promotion"
+            !rvsdg.is_live_node(inner_load_node),
+            "the inner load node should be removed after promotion"
         );
     }
 
