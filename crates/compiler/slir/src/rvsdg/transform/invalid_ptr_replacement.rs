@@ -1,3 +1,22 @@
+//! Replaces invalid pointer-refinement nodes with [ConstFallback][0] nodes.
+//!
+//! This transformation identifies "invalid" pointer-refinement nodes (e.g., [OpElementPtr][1],
+//! [OpFieldPtr][2]) and replaces them with [ConstFallback][0] nodes of the appropriate pointer
+//! type.
+//!
+//! A pointer-refinement node is considered invalid if:
+//!
+//! 1. Its pointer input traces back to a [ConstFallback][0] node.
+//! 2. It is an [OpElementPtr][1] operation on a zero-length array.
+//!
+//! While we don't consider the creation of invalid pointers to be Undefined Behavior, using such
+//! pointers in memory load or store operations is Undefined Behavior; this is a preparatory pass
+//! that makes it easier for later transforms to identify such load and store operations.
+//!
+//! [0]: crate::rvsdg::ConstFallback
+//! [1]: crate::rvsdg::OpElementPtr
+//! [2]: crate::rvsdg::OpFieldPtr
+
 use rustc_hash::FxHashSet;
 
 use crate::Module;
@@ -5,6 +24,10 @@ use crate::rvsdg::visit::region_nodes::{RegionNodesVisitor, visit_node};
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 use crate::ty::{Type, TypeKind};
 
+/// Replaces invalid pointer-refinement nodes with [ConstFallback][0] nodes.
+///
+/// See the [module-level documentation](crate::rvsdg::transform::invalid_ptr_replacement) for
+/// details.
 pub struct InvalidPtrReplacer {
     finder: PointerOriginFinder,
     jobs: Vec<Job>,
@@ -206,6 +229,11 @@ impl PointerOriginFinder {
     }
 }
 
+/// Replaces invalid pointer-refinement nodes with [ConstFallback][0] nodes in all entry-point
+/// functions.
+///
+/// See the [module-level documentation](crate::rvsdg::transform::invalid_ptr_replacement) for
+/// details.
 pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
     let mut replacer = InvalidPtrReplacer::new();
 
