@@ -1,5 +1,6 @@
 pub mod common_node_elimination;
 pub mod common_value_elimination;
+pub mod conditional_ub_elimination;
 pub mod const_ptr_pull;
 pub mod const_switch_inlining;
 pub mod dead_connectible_elimination;
@@ -40,6 +41,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     switchify_pred_to_case::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
     invalid_ptr_replacement::transform_entry_points(module, rvsdg);
+    conditional_ub_elimination::transform_entry_points(module, rvsdg);
     switch_arg_reduction::transform_entry_points(module, rvsdg);
     const_switch_inlining::transform_entry_points(module, rvsdg);
     switch_merging::transform_entry_points(module, rvsdg);

@@ -186,7 +186,7 @@ impl PointerOriginFinder {
                 }
                 false
             }
-            ValueOrigin::Argument(arg_index) => {
+            ValueOrigin::Argument(arg) => {
                 if region == rvsdg.global_region() {
                     return false;
                 }
@@ -197,30 +197,34 @@ impl PointerOriginFinder {
 
                 match owner_data.kind() {
                     NodeKind::Switch(switch_node) => {
-                        let input_index = arg_index + 1;
+                        let input = arg + 1;
+
                         self.trace_recursive(
                             rvsdg,
                             outer_region,
-                            switch_node.value_inputs()[input_index as usize].origin,
+                            switch_node.value_inputs()[input as usize].origin,
                         )
                     }
                     NodeKind::Loop(loop_node) => {
                         // Argument i is a loop-constant if the loop-region value result i + 1
                         // has an origin that is the same region-argument i.
                         let loop_region = loop_node.loop_region();
-                        let result_origin =
-                            rvsdg[loop_region].value_results()[arg_index as usize + 1].origin;
+                        let res = arg + 1;
+                        let result_origin = rvsdg[loop_region].value_results()[res as usize].origin;
 
-                        if let ValueOrigin::Argument(res_arg_index) = result_origin {
-                            if res_arg_index == arg_index {
-                                return self.trace_recursive(
-                                    rvsdg,
-                                    outer_region,
-                                    loop_node.value_inputs()[arg_index as usize].origin,
-                                );
-                            }
+                        // Only trace out of a loop region if the loop-value is a loop-constant,
+                        // otherwise assume the pointer is valid.
+                        if let ValueOrigin::Argument(res_arg) = result_origin
+                            && res_arg == arg
+                        {
+                            self.trace_recursive(
+                                rvsdg,
+                                outer_region,
+                                loop_node.value_inputs()[arg as usize].origin,
+                            )
+                        } else {
+                            false
                         }
-                        false
                     }
                     _ => false,
                 }
