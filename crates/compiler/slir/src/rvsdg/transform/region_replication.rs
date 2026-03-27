@@ -500,3 +500,46 @@ pub fn replicate_region(
 
     region_replicator.replicate_region()
 }
+
+/// Replaces a [Switch] node by inlining one of its branches.
+///
+/// This transformation is appropriate when it can be proved that a given [Switch] node will always
+/// select the same branch (for example, a switch with a boolean branch-selector that can be proved
+/// to always be `true`).
+///
+/// This removes the [Switch] node from the RVSDG.
+pub fn inline_switch_branch(
+    module: &mut Module,
+    rvsdg: &mut Rvsdg,
+    switch_node: Node,
+    branch: usize,
+) {
+    let data = rvsdg[switch_node].expect_switch();
+    let output_count = data.value_outputs().len();
+    let src_region = data.branches()[branch];
+    let dst_region = rvsdg[switch_node].region();
+    let value_argument_mapping = data.entry_inputs().iter().map(|i| i.origin).collect();
+    let state_argument_mapping = rvsdg[switch_node].state().map(|s| s.origin);
+
+    let result_mapping = replicate_region(
+        module,
+        rvsdg,
+        src_region,
+        dst_region,
+        value_argument_mapping,
+        state_argument_mapping,
+    );
+
+    for i in 0..output_count {
+        rvsdg.reconnect_value_users(
+            dst_region,
+            ValueOrigin::Output {
+                producer: switch_node,
+                output: i as u32,
+            },
+            result_mapping[i],
+        );
+    }
+
+    rvsdg.remove_node(switch_node);
+}

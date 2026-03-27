@@ -1,11 +1,9 @@
 use rustc_hash::FxHashSet;
 
-use crate::rvsdg::transform::region_replication::replicate_region;
+use crate::rvsdg::transform::region_replication::inline_switch_branch;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::visit::reverse_value_flow::ReverseValueFlowVisitor;
-use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueOrigin, visit,
-};
+use crate::rvsdg::{Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, visit};
 use crate::{Function, Module};
 
 struct NodeCollector<'a> {
@@ -127,33 +125,7 @@ impl ConstSwitchInliner {
         let mut finder = ConstPredicateFinder::new(&mut self.visited);
 
         if let Some(predicate) = finder.find(rvsdg, switch_node) {
-            let data = rvsdg[switch_node].expect_switch();
-            let output_count = data.value_outputs().len();
-            let src_region = data.branches()[predicate as usize];
-            let dst_region = rvsdg[switch_node].region();
-            let argument_mapping = data.entry_inputs().iter().map(|i| i.origin).collect();
-
-            let result_mapping = replicate_region(
-                module,
-                rvsdg,
-                src_region,
-                dst_region,
-                argument_mapping,
-                Some(StateOrigin::Argument),
-            );
-
-            for i in 0..output_count {
-                rvsdg.reconnect_value_users(
-                    dst_region,
-                    ValueOrigin::Output {
-                        producer: switch_node,
-                        output: i as u32,
-                    },
-                    result_mapping[i],
-                );
-            }
-
-            rvsdg.remove_node(switch_node);
+            inline_switch_branch(module, rvsdg, switch_node, predicate as usize);
         }
     }
 }

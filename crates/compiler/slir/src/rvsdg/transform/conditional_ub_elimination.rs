@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::Module;
-use crate::rvsdg::transform::region_replication::replicate_region;
+use crate::rvsdg::transform::region_replication::{inline_switch_branch, replicate_region};
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, visit};
 
@@ -209,35 +209,7 @@ fn apply_elimination(
 
     if valid_branches.len() == 1 {
         // There's only a single branch left: inline it.
-
-        let valid_branch_index = valid_branches[0];
-        let output_count = data.value_outputs().len();
-        let src_region = data.branches()[valid_branch_index];
-        let dst_region = rvsdg[switch_node].region();
-        let value_argument_mapping = data.entry_inputs().iter().map(|i| i.origin).collect();
-        let state_argument_mapping = rvsdg[switch_node].state().map(|s| s.origin);
-
-        let result_mapping = replicate_region(
-            module,
-            rvsdg,
-            src_region,
-            dst_region,
-            value_argument_mapping,
-            state_argument_mapping,
-        );
-
-        for i in 0..output_count {
-            rvsdg.reconnect_value_users(
-                dst_region,
-                ValueOrigin::Output {
-                    producer: switch_node,
-                    output: i as u32,
-                },
-                result_mapping[i],
-            );
-        }
-
-        rvsdg.remove_node(switch_node);
+        inline_switch_branch(module, rvsdg, switch_node, valid_branches[0]);
     } else {
         // Multiple branches remain: remove the invalid branches and adjust the branch-selector.
 
@@ -311,7 +283,7 @@ fn apply_elimination(
             );
         };
 
-        // Permute valid branches to the front and remove unused ones
+        // Keep only the valid branches, discard the invalid ones
         rvsdg.permute_switch_branches(switch_node, &valid_branches);
 
         // Remap the selector
