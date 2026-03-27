@@ -212,9 +212,6 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(OpBoolToBranchSelector(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),
-            Simple(OpU32ToBranchSelector(op)) => self
-                .prepare_replicate_intrinsic_node(op)
-                .apply(&mut self.rvsdg),
             Simple(OpBranchSelectorToCase(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),

@@ -33,7 +33,6 @@ enum SimpleNodeMetadata {
     OpMatrix(Matrix),
     OpCaseToBranchSelector(Vec<u32>),
     OpBoolToBranchSelector,
-    OpU32ToBranchSelector,
     OpBranchSelectorToCase(Vec<u32>),
     OpConvertToU32,
     OpConvertToI32,
@@ -74,7 +73,6 @@ impl SimpleNodeMetadata {
                 SimpleNodeMetadata::OpCaseToBranchSelector(n.cases().to_vec())
             }
             SimpleNode::OpBoolToBranchSelector(_) => SimpleNodeMetadata::OpBoolToBranchSelector,
-            SimpleNode::OpU32ToBranchSelector(_) => SimpleNodeMetadata::OpU32ToBranchSelector,
             SimpleNode::OpBranchSelectorToCase(n) => {
                 SimpleNodeMetadata::OpBranchSelectorToCase(n.cases().to_vec())
             }

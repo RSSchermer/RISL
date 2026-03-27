@@ -395,9 +395,6 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpBoolToBranchSelector(_) => {
                 self.write_node_common(writer, node, "OpBoolToBranchSelector")
             }
-            SimpleNode::OpU32ToBranchSelector(n) => {
-                self.write_node_common(writer, node, "OpU32ToBranchSelector")
-            }
             SimpleNode::OpBranchSelectorToCase(n) => {
                 self.write_op_branch_selector_to_case(writer, node, n)
             }

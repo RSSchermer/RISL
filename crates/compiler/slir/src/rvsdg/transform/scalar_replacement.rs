@@ -564,12 +564,13 @@ impl Replacer<'_, '_> {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
-                let to_predicate = self.rvsdg.add_op_u32_to_branch_selector(
+                let to_predicate = self.rvsdg.add_op_case_to_branch_selector(
                     region,
                     ValueInput {
                         ty: TY_U32,
                         origin: selector,
                     },
+                    0..(split_input.len() as u32 - 1),
                 );
                 let mut switch_inputs = Vec::with_capacity(split_input.len() + 1);
 
@@ -650,12 +651,13 @@ impl Replacer<'_, '_> {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
-                let to_predicate = self.rvsdg.add_op_u32_to_branch_selector(
+                let to_predicate = self.rvsdg.add_op_case_to_branch_selector(
                     region,
                     ValueInput {
                         ty: TY_U32,
                         origin: selector,
                     },
+                    0..(split_input.len() as u32 - 1),
                 );
                 let mut switch_inputs = Vec::with_capacity(split_input.len() + 1);
 
@@ -1945,12 +1947,13 @@ mod tests {
             panic!("switch input 0's origin should be the first output of a node")
         };
 
-        let to_predicate_data = rvsdg[to_predicate].expect_op_u32_to_branch_selector();
+        let to_predicate_data = rvsdg[to_predicate].expect_op_case_to_branch_selector();
 
         assert_eq!(
             to_predicate_data.value_input().origin,
             ValueOrigin::Argument(0)
         );
+        assert_eq!(to_predicate_data.cases(), &[0]);
 
         assert_eq!(switch.value_inputs()[1].ty, element_ptr_ty);
 

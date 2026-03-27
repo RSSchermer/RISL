@@ -610,7 +610,6 @@ impl NodeData {
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
         OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
         OpBoolToBranchSelector is_op_bool_to_branch_selector expect_op_bool_to_branch_selector "an `op-bool-to-branch-selector` operation",
-        OpU32ToBranchSelector is_op_u32_to_branch_selector expect_op_u32_to_branch_selector "an `op-u32-to-branch-selector` operation",
         OpBranchSelectorToCase is_op_branch_selector_to_case expect_op_branch_selector_to_case "an `op-branch-selector-to-case` operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "a `convert-to-u32` operation",
         OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "a `convert-to-i32` operation",
@@ -1414,13 +1413,6 @@ impl OpBoolToBranchSelector {
     gen_intrinsic_value_output!();
 }
 
-pub type OpU32ToBranchSelector = IntrinsicNode<intrinsic::OpU32ToBranchSelector>;
-
-impl OpU32ToBranchSelector {
-    gen_intrinsic_value_input!(value_input, 0);
-    gen_intrinsic_value_output!();
-}
-
 pub type OpBranchSelectorToCase = IntrinsicNode<intrinsic::OpBranchSelectorToCase>;
 
 impl OpBranchSelectorToCase {
@@ -1905,7 +1897,6 @@ gen_simple_node! {
     OpMatrix,
     OpCaseToBranchSelector,
     OpBoolToBranchSelector,
-    OpU32ToBranchSelector,
     OpBranchSelectorToCase,
     OpConvertToU32,
     OpConvertToI32,
@@ -3228,10 +3219,6 @@ impl Rvsdg {
 
     pub fn add_op_bool_to_branch_selector(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpBoolToBranchSelector, [input], None)
-    }
-
-    pub fn add_op_u32_to_branch_selector(&mut self, region: Region, input: ValueInput) -> Node {
-        self.add_intrinsic_op(region, intrinsic::OpU32ToBranchSelector, [input], None)
     }
 
     pub fn add_op_branch_selector_to_case(

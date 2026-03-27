@@ -174,9 +174,14 @@ impl<'a> RegionBuilder<'a> {
                 self.input_state_tracker[*value],
                 cases.iter().copied(),
             ),
-            BranchSelector::U32(value) => self
-                .rvsdg
-                .add_op_u32_to_branch_selector(self.region, self.input_state_tracker[*value]),
+            // We represent a `U32` branch-selector as a "case" selector where the cases are
+            // consecutive integers starting from `0`, with one fewer case than the number of
+            // branches.
+            BranchSelector::U32(value) => self.rvsdg.add_op_case_to_branch_selector(
+                self.region,
+                self.input_state_tracker[*value],
+                0..(data.branches.len() as u32 - 1),
+            ),
             BranchSelector::Single => unreachable!(
                 "a basic-block with a single branch terminator should not lead into a branching \
                 node"
@@ -806,7 +811,7 @@ mod tests {
         let (_, region) = expected.register_function(&module, function, iter::empty());
 
         let predicate_node =
-            expected.add_op_u32_to_branch_selector(region, ValueInput::argument(TY_U32, 0));
+            expected.add_op_case_to_branch_selector(region, ValueInput::argument(TY_U32, 0), [0]);
         let switch_node = expected.add_switch(
             region,
             vec![

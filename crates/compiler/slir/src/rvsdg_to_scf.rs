@@ -156,9 +156,6 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
                 Simple(OpBoolToBranchSelector(_)) => {
                     self.generate_if(node, predicate_binding);
                 }
-                Simple(OpU32ToBranchSelector(_)) => {
-                    self.generate_switch(node, predicate_binding, None);
-                }
                 _ => panic!(
                     "a switch node's predicate input must directly connect to a \
                         predicate-generating operation before conversion to SCF"
@@ -361,7 +358,6 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             // treatment here.
             OpCaseToBranchSelector(_) => self.visit_op_case_to_branch_selector(node),
             OpBoolToBranchSelector(_) => self.visit_op_bool_to_branch_selector(node),
-            OpU32ToBranchSelector(_) => self.visit_op_u32_to_branch_selector(node),
             _ => {
                 panic!(
                     "node kind `{:?}` not currently supported by SLIR's structured control-flow \
@@ -504,21 +500,6 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         // `visit_switch_node`. We therefore simply forward the output mapping to the input mapping.
 
         let data = self.rvsdg[node].expect_op_bool_to_branch_selector();
-        let binding = self
-            .value_mapping
-            .mapping(data.value_input().origin)
-            .expect_local();
-
-        self.value_mapping.map_output(node, 0, binding.into());
-    }
-
-    fn visit_op_u32_to_branch_selector(&mut self, node: rvsdg::Node) {
-        // We don't express u32-to-switch-predicate expression in the SCF, instead we translate any
-        // switch node that uses this predicate into a switch statement in the SCF that uses the
-        // appropriate cases; see `visit_switch_node`. We therefore simply forward the output
-        // mapping to the input mapping.
-
-        let data = self.rvsdg[node].expect_op_u32_to_branch_selector();
         let binding = self
             .value_mapping
             .mapping(data.value_input().origin)

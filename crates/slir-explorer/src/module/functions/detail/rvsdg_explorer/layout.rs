@@ -1020,7 +1020,6 @@ impl NodeLayout {
                     NodeContent::PlainText(TextElement::from("pred-case").with_tooltip(tooltip))
                 }
                 SimpleNode::OpBoolToBranchSelector(_) => NodeContent::PlainText("pred-bool".into()),
-                SimpleNode::OpU32ToBranchSelector(_) => NodeContent::PlainText("pred-u32".into()),
                 SimpleNode::OpBranchSelectorToCase(op) => {
                     let tooltip = op
                         .cases()
