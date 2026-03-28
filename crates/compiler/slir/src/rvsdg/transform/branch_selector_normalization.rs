@@ -522,7 +522,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let bool_value = rvsdg.add_const_bool(region, true);
-        let bool_to_pred = rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_value, 0));
+        let bool_to_pred = rvsdg
+            .add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_value, 0));
 
         // Switch_0 that returns the predicate
         let switch_0 = rvsdg.add_switch(
