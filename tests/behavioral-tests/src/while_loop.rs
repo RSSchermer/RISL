@@ -1,4 +1,4 @@
-#![feature(test_while_loop)]
+#![cfg(feature = "test_while_loop")]
 
 use std::error::Error;
 
