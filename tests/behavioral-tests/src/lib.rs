@@ -6,7 +6,6 @@
 )]
 
 mod enum_result;
-// mod slice_get_range;
 mod slice;
 mod slice_index;
 mod variable_pointer_if_else;
