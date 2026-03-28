@@ -2174,13 +2174,9 @@ mod tests {
             },
         );
 
-        rvsdg.dump_to_file("before_promote.dump").unwrap();
-
         let mut promoter_legalizer = MemoryPromoterLegalizer::new();
 
         promoter_legalizer.promote_and_legalize(&mut rvsdg, region);
-
-        rvsdg.dump_to_file("after_promote.dump").unwrap();
 
         let ValueOrigin::Output {
             producer: loop_node,
