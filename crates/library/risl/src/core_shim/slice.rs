@@ -191,9 +191,7 @@ impl<T> SliceIndex<[T]> for ops::RangeFull {
 
     #[cfg_attr(
         rislc,
-        rislc::core_shim(
-            "<core::ops::RangeFull as core::slice::SliceIndex<[T]>>::get_unchecked"
-        )
+        rislc::core_shim("<core::ops::RangeFull as core::slice::SliceIndex<[T]>>::get_unchecked")
     )]
     unsafe fn get_unchecked(self, slice: &[T]) -> &Self::Output {
         slice
@@ -207,5 +205,60 @@ impl<T> SliceIndex<[T]> for ops::RangeFull {
     )]
     unsafe fn get_unchecked_mut(self, slice: &mut [T]) -> &mut Self::Output {
         slice
+    }
+}
+
+#[gpu]
+impl<T> SliceIndex<[T]> for ops::RangeFrom<usize> {
+    type Output = [T];
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim("<core::ops::RangeFrom<usize> as core::slice::SliceIndex<[T]>>::get")
+    )]
+    fn get(self, slice: &[T]) -> Option<&Self::Output> {
+        if self.start <= slice.len() {
+            unsafe { Some(intrinsic::slice_range::<T>(slice, self.start, slice.len())) }
+        } else {
+            None
+        }
+    }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim("<core::ops::RangeFrom<usize> as core::slice::SliceIndex<[T]>>::get_mut")
+    )]
+    fn get_mut(self, slice: &mut [T]) -> Option<&mut Self::Output> {
+        if self.start <= slice.len() {
+            unsafe {
+                Some(intrinsic::slice_range_mut::<T>(
+                    slice,
+                    self.start,
+                    slice.len(),
+                ))
+            }
+        } else {
+            None
+        }
+    }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim(
+            "<core::ops::RangeFrom<usize> as core::slice::SliceIndex<[T]>>::get_unchecked"
+        )
+    )]
+    unsafe fn get_unchecked(self, slice: &[T]) -> &Self::Output {
+        unsafe { intrinsic::slice_range::<T>(slice, self.start, slice.len()) }
+    }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim(
+            "<core::ops::RangeFrom<usize> as core::slice::SliceIndex<[T]>>::get_unchecked_mut"
+        )
+    )]
+    unsafe fn get_unchecked_mut(self, slice: &mut [T]) -> &mut Self::Output {
+        unsafe { intrinsic::slice_range_mut::<T>(slice, self.start, slice.len()) }
     }
 }
