@@ -262,3 +262,52 @@ impl<T> SliceIndex<[T]> for ops::RangeFrom<usize> {
         unsafe { intrinsic::slice_range_mut::<T>(slice, self.start, slice.len()) }
     }
 }
+
+#[gpu]
+impl<T> SliceIndex<[T]> for ops::RangeTo<usize> {
+    type Output = [T];
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim("<core::ops::RangeTo<usize> as core::slice::SliceIndex<[T]>>::get")
+    )]
+    fn get(self, slice: &[T]) -> Option<&Self::Output> {
+        if self.end <= slice.len() {
+            unsafe { Some(intrinsic::slice_range::<T>(slice, 0, self.end)) }
+        } else {
+            None
+        }
+    }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim("<core::ops::RangeTo<usize> as core::slice::SliceIndex<[T]>>::get_mut")
+    )]
+    fn get_mut(self, slice: &mut [T]) -> Option<&mut Self::Output> {
+        if self.end <= slice.len() {
+            unsafe { Some(intrinsic::slice_range_mut::<T>(slice, 0, self.end)) }
+        } else {
+            None
+        }
+    }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim(
+            "<core::ops::RangeTo<usize> as core::slice::SliceIndex<[T]>>::get_unchecked"
+        )
+    )]
+    unsafe fn get_unchecked(self, slice: &[T]) -> &Self::Output {
+        unsafe { intrinsic::slice_range::<T>(slice, 0, self.end) }
+    }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim(
+            "<core::ops::RangeTo<usize> as core::slice::SliceIndex<[T]>>::get_unchecked_mut"
+        )
+    )]
+    unsafe fn get_unchecked_mut(self, slice: &mut [T]) -> &mut Self::Output {
+        unsafe { intrinsic::slice_range_mut::<T>(slice, 0, self.end) }
+    }
+}
