@@ -26,15 +26,53 @@ use crate::rvsdg::{
 use crate::ty::{TY_BOOL, TY_U32};
 
 #[derive(Clone, Debug)]
-struct ResolvedValue {
-    value: ValueInput,
-    kind: ResolvedValueKind,
+enum ResolvedValue {
+    Fallback,
+    Bool(ValueInput),
+    Case { value: ValueInput, cases: Vec<u32> },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum ResolvedValueKind {
-    Bool,
-    Case(Vec<u32>),
+impl ResolvedValue {
+    fn value_input(&self) -> Option<ValueInput> {
+        match self {
+            ResolvedValue::Fallback => None,
+            ResolvedValue::Bool(value) => Some(*value),
+            ResolvedValue::Case { value, .. } => Some(*value),
+        }
+    }
+
+    fn with_input(self, value: ValueInput) -> Self {
+        match self {
+            ResolvedValue::Fallback => ResolvedValue::Fallback,
+            ResolvedValue::Bool(_) => ResolvedValue::Bool(value),
+            ResolvedValue::Case { cases, .. } => ResolvedValue::Case { value, cases },
+        }
+    }
+
+    fn fold(self, other: ResolvedValue) -> ResolvedValue {
+        match (self, other) {
+            (ResolvedValue::Fallback, value) => value,
+            (value, ResolvedValue::Fallback) => value,
+            (ResolvedValue::Bool(a), ResolvedValue::Bool(_)) => ResolvedValue::Bool(a),
+            (
+                ResolvedValue::Case {
+                    value: a,
+                    cases: a_cases,
+                },
+                ResolvedValue::Case { cases: b_cases, .. },
+            ) => {
+                if a_cases == b_cases {
+                    ResolvedValue::Case {
+                        value: a,
+                        cases: a_cases,
+                    }
+                } else {
+                    ResolvedValue::Fallback
+                }
+            }
+            _ => ResolvedValue::Fallback,
+        }
+    }
 }
 
 pub struct BranchSelectorNormalizer {
@@ -103,6 +141,7 @@ impl BranchSelectorNormalizer {
             NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(_)) => {
                 self.route_op_case_to_branch_selector_output(rvsdg, node)
             }
+            NodeKind::Simple(SimpleNode::ConstFallback(_)) => ResolvedValue::Fallback,
             NodeKind::Switch(_) => self.route_switch_output(rvsdg, node, output),
             NodeKind::Loop(_) => self.route_loop_output(rvsdg, node, output),
             kind => panic!(
@@ -118,10 +157,7 @@ impl BranchSelectorNormalizer {
         rvsdg: &mut Rvsdg,
         node: Node,
     ) -> ResolvedValue {
-        ResolvedValue {
-            value: rvsdg[node].value_inputs()[0],
-            kind: ResolvedValueKind::Bool,
-        }
+        ResolvedValue::Bool(rvsdg[node].value_inputs()[0])
     }
 
     fn route_op_case_to_branch_selector_output(
@@ -131,54 +167,60 @@ impl BranchSelectorNormalizer {
     ) -> ResolvedValue {
         let op = rvsdg[node].expect_op_case_to_branch_selector();
 
-        ResolvedValue {
+        ResolvedValue::Case {
             value: rvsdg[node].value_inputs()[0],
-            kind: ResolvedValueKind::Case(op.cases().to_vec()),
+            cases: op.cases().to_vec(),
         }
     }
 
     fn route_switch_output(&mut self, rvsdg: &mut Rvsdg, node: Node, output: u32) -> ResolvedValue {
         let branch_count = rvsdg[node].expect_switch().branches().len();
-        let mut resolved_branches = Vec::with_capacity(branch_count);
+        let mut resolved_origins = Vec::with_capacity(branch_count);
+        let mut folded_value = ResolvedValue::Fallback;
 
         for i in 0..branch_count {
             let branch_region = rvsdg[node].expect_switch().branches()[i];
             let branch_origin = rvsdg[branch_region].value_results()[output as usize].origin;
             let resolved = self.resolve_value(rvsdg, branch_region, branch_origin);
 
-            resolved_branches.push(resolved);
+            resolved_origins.push(resolved.value_input().map(|v| v.origin));
+            folded_value = folded_value.fold(resolved);
         }
 
-        for (i, resolved) in resolved_branches.iter().skip(1).enumerate() {
-            if resolved.kind != resolved_branches[0].kind {
-                panic!(
-                    "incompatible branch selector kinds at switch output: branch 0 is {:?}, \
-                    branch {} is {:?}",
-                    resolved_branches[0].kind, i, resolved.kind
-                );
+        let value_ty = match folded_value {
+            ResolvedValue::Bool(_) => TY_BOOL,
+            ResolvedValue::Case { .. } => TY_U32,
+            ResolvedValue::Fallback => {
+                panic!("folded value must resolve to something other than a fallback value")
             }
-        }
-
-        let value_ty = match resolved_branches[0].kind {
-            ResolvedValueKind::Bool => TY_BOOL,
-            ResolvedValueKind::Case(_) => TY_U32,
         };
 
         let new_output = rvsdg.add_switch_output(node, value_ty);
 
         for i in 0..branch_count {
             let branch_region = rvsdg[node].expect_switch().branches()[i];
-            let origin = resolved_branches[i].value.origin;
+
+            let origin = resolved_origins[i].unwrap_or_else(|| {
+                // Apparently, the original predicate result for this branch connects to a fallback
+                // node. We assume the value will never actually be used and may provide any value
+                // as a valid value.
+
+                let node = if value_ty == TY_BOOL {
+                    rvsdg.add_const_bool(branch_region, false)
+                } else {
+                    rvsdg.add_const_u32(branch_region, 0)
+                };
+
+                ValueOrigin::Output {
+                    producer: node,
+                    output: 0,
+                }
+            });
 
             rvsdg.reconnect_region_result(branch_region, new_output, origin);
         }
 
-        let kind = resolved_branches.pop().unwrap().kind;
-
-        ResolvedValue {
-            value: ValueInput::output(value_ty, node, new_output),
-            kind,
-        }
+        folded_value.with_input(ValueInput::output(value_ty, node, new_output))
     }
 
     fn route_loop_output(&mut self, rvsdg: &mut Rvsdg, node: Node, output: u32) -> ResolvedValue {
@@ -218,17 +260,18 @@ impl BranchSelectorNormalizer {
         let input = arg + 1;
         let input_origin = rvsdg[node].value_inputs()[input as usize].origin;
         let resolved_value = self.resolve_value(rvsdg, outer_region, input_origin);
+        let value_input = resolved_value
+            .value_input()
+            .expect("a switch input should not connect a fallback predicate");
 
-        let new_input = rvsdg.add_switch_input(node, resolved_value.value);
+        let new_input = rvsdg.add_switch_input(node, value_input);
         let new_arg = new_input - 1;
 
         let branch_count = rvsdg[node].expect_switch().branches().len();
 
         let predicate_arg = ValueOrigin::Argument(arg);
-        let branch_resolved_value = ResolvedValue {
-            value: ValueInput::argument(resolved_value.value.ty, new_arg),
-            kind: resolved_value.kind,
-        };
+        let branch_resolved_value =
+            resolved_value.with_input(ValueInput::argument(value_input.ty, new_arg));
 
         for i in 0..branch_count {
             let branch_region = rvsdg[node].expect_switch().branches()[i];
@@ -268,15 +311,17 @@ impl BranchSelectorNormalizer {
         let outer_region = rvsdg[node].region();
         let input_origin = rvsdg[node].value_inputs()[loop_value_index as usize].origin;
         let input_resolved = self.resolve_value(rvsdg, outer_region, input_origin);
+        let value_input = input_resolved
+            .value_input()
+            .expect("a loop input should not connect a fallback predicate");
 
-        let new_index = rvsdg.add_loop_input(node, input_resolved.value);
+        let new_index = rvsdg.add_loop_input(node, value_input);
 
         // Cache a new resolved value for the predicate argument
         let predicate_arg = ValueOrigin::Argument(loop_value_index);
-        let resolved_arg = ResolvedValue {
-            value: ValueInput::argument(input_resolved.value.ty, new_index),
-            kind: input_resolved.kind.clone(),
-        };
+        let resolved_arg = input_resolved
+            .clone()
+            .with_input(ValueInput::argument(value_input.ty, new_index));
         self.cache
             .insert((loop_region, predicate_arg), resolved_arg);
 
@@ -285,10 +330,10 @@ impl BranchSelectorNormalizer {
             producer: node,
             output: loop_value_index,
         };
-        let resolved_output = ResolvedValue {
-            value: ValueInput::output(input_resolved.value.ty, node, new_index),
-            kind: input_resolved.kind.clone(),
-        };
+        let resolved_output =
+            input_resolved
+                .clone()
+                .with_input(ValueInput::output(value_input.ty, node, new_index));
         self.cache
             .insert((outer_region, predicate_output), resolved_output);
 
@@ -297,15 +342,19 @@ impl BranchSelectorNormalizer {
         let result_origin =
             rvsdg[loop_region].value_results()[(loop_value_index + 1) as usize].origin;
         let result_resolved = self.resolve_value(rvsdg, loop_region, result_origin);
+        let result_origin = result_resolved
+            .value_input()
+            .expect("a loop result should not connect a fallback predicate")
+            .origin;
 
-        if result_resolved.kind != input_resolved.kind {
-            panic!(
-                "incompatible branch selector kinds at loop: input is {:?}, result is {:?}",
-                input_resolved.kind, result_resolved.kind
-            );
+        if matches!(
+            input_resolved.fold(result_resolved),
+            ResolvedValue::Fallback
+        ) {
+            panic!("incompatible branch selector kinds at loop");
         }
 
-        rvsdg.reconnect_region_result(loop_region, new_index + 1, result_resolved.value.origin);
+        rvsdg.reconnect_region_result(loop_region, new_index + 1, result_origin);
     }
 
     fn normalize_switch_branch_selector(&mut self, rvsdg: &mut Rvsdg, switch_node: Node) {
@@ -330,13 +379,12 @@ impl BranchSelectorNormalizer {
         if needs_normalization {
             let resolved = self.resolve_value(rvsdg, region, origin);
 
-            let normalization_node = match resolved.kind {
-                ResolvedValueKind::Bool => {
-                    rvsdg.add_op_bool_to_branch_selector(region, resolved.value)
+            let normalization_node = match resolved {
+                ResolvedValue::Bool(value) => rvsdg.add_op_bool_to_branch_selector(region, value),
+                ResolvedValue::Case { value, cases } => {
+                    rvsdg.add_op_case_to_branch_selector(region, value, cases)
                 }
-                ResolvedValueKind::Case(cases) => {
-                    rvsdg.add_op_case_to_branch_selector(region, resolved.value, cases)
-                }
+                ResolvedValue::Fallback => panic!("cannot normalize a fallback value"),
             };
 
             let output_origin = ValueOrigin::Output {

@@ -303,97 +303,6 @@ impl EmulationTreeNode {
     }
 }
 
-/// Stores information about the extra values that have been added to a switch node to make inner
-/// values available outside the node for pointer emulation.
-///
-/// See [SwitchEmulationRegistry] for details.
-struct SwitchEmulationValues {
-    /// The current `end` of the emulation output values for the node as a whole.
-    end: u32,
-    /// The per branch `end` of the emulation results that have been used so far by the branch.
-    branches_end: Vec<u32>,
-}
-
-/// Stores information about the extra values that have been added to switch nodes to make inner
-/// values available outside the node for pointer emulation.
-///
-/// Not every branch of a switch node will want to make the same values available. However, we want
-/// to maximally reuse output values because every extra output value will likely end up costing a
-/// register. So we track the start and end of output values that have been added so far for the
-/// node as a whole, and we'll also track for each branch which results/outputs are actually being
-/// used to pass out values. Note that this reuse of outputs works because all extra emulation
-/// outputs will all be of type `u32`.
-struct SwitchEmulationRegistry {
-    switch_emulation_values: FxHashMap<Node, SwitchEmulationValues>,
-}
-
-impl SwitchEmulationRegistry {
-    fn new() -> Self {
-        SwitchEmulationRegistry {
-            switch_emulation_values: Default::default(),
-        }
-    }
-
-    /// Returns the index of the next available output for the given [branch].
-    ///
-    /// This may add a new output for the [switch_node] if no output is currently available. In that
-    /// case, for each branch other than the requested [branch], the corresponding new region result
-    /// will be connected to a placeholder `0u32` constant value.
-    fn next_output(&mut self, rvsdg: &mut Rvsdg, switch_node: Node, branch: u32) -> u32 {
-        let emulation_values = self
-            .switch_emulation_values
-            .entry(switch_node)
-            .or_insert_with(|| {
-                let branch_count = rvsdg[switch_node].expect_switch().branches().len();
-                let end = rvsdg[switch_node].value_outputs().len() as u32;
-                let branches_end = vec![end; branch_count];
-
-                SwitchEmulationValues { end, branches_end }
-            });
-
-        let branch_end = emulation_values.branches_end[branch as usize];
-
-        if branch_end >= emulation_values.end {
-            rvsdg.add_switch_output(switch_node, TY_U32);
-
-            // Connect a `0` as a fallback value for all branches except for the current branch
-            // (since for the current branch we should expect that the reason an output is
-            // requested is to connect something to it). Other branches that request an output
-            // later and may get an output that already has such a placeholder `0` attached to it
-            // and may reconnect the output to some other input. This should leave the placeholder
-            // `0` node unused and ready to be eliminated by a dead-connectible-elimination pass.
-            let branch_count = rvsdg[switch_node].expect_switch().branches().len();
-
-            for i in 0..branch_count {
-                let current_branch = rvsdg[switch_node].expect_switch().branches()[i];
-
-                if i != branch as usize {
-                    let placeholder = rvsdg.add_const_u32(current_branch, 0);
-
-                    rvsdg.reconnect_region_result(
-                        current_branch,
-                        emulation_values.end,
-                        ValueOrigin::Output {
-                            producer: placeholder,
-                            output: 0,
-                        },
-                    );
-                }
-            }
-
-            emulation_values.end += 1;
-        }
-
-        emulation_values.branches_end[branch as usize] += 1;
-
-        branch_end
-    }
-
-    fn clear(&mut self) {
-        self.switch_emulation_values.clear();
-    }
-}
-
 /// Propagates input requirements for pointer emulation from the bottom up, and for each branching
 /// node it visits, assigns the combined set of inputs to which its children require access.
 ///
@@ -433,14 +342,12 @@ impl ChildInputAssigner {
 
 pub struct EmulationContext {
     pointer_emulation_info: FxHashMap<(Region, ValueOrigin), PointerEmulationInfo>,
-    switch_emulation_registry: SwitchEmulationRegistry,
 }
 
 impl EmulationContext {
     pub fn new() -> Self {
         EmulationContext {
             pointer_emulation_info: FxHashMap::default(),
-            switch_emulation_registry: SwitchEmulationRegistry::new(),
         }
     }
 
@@ -524,7 +431,6 @@ impl EmulationContext {
 
     pub fn clear(&mut self) {
         self.pointer_emulation_info.clear();
-        self.switch_emulation_registry.clear();
     }
 
     fn resolve_pointer_emulation_info(
@@ -722,9 +628,7 @@ impl EmulationContext {
         // represents the same value as the given `inner_origin` inside the switch node
         fn resolve_non_ptr_outer_origin(
             rvsdg: &mut Rvsdg,
-            switch_emulation_registry: &mut SwitchEmulationRegistry,
             switch_node: Node,
-            branch_index: u32,
             branch: Region,
             inner_origin: ValueOrigin,
         ) -> ValueOrigin {
@@ -749,13 +653,59 @@ impl EmulationContext {
                 }
             }
 
-            // The value origin is not yet available outside the switch. To make the value available
-            // outside the switch node, we ask the registry to either provide a currently unused
-            // emulation result for the current branch or to create a new switch output and provide
-            // its corresponding result.
-            let output = switch_emulation_registry.next_output(rvsdg, switch_node, branch_index);
+            let inner_origin_ty = rvsdg.value_origin_ty(branch, inner_origin);
 
-            rvsdg.reconnect_region_result(branch, output, inner_origin);
+            // Next, try to find a result of the correct type that is currently connected to a
+            // ConstFallback node. A fallback node indicates that any value of the correct type is
+            // valid, we'll claim it and replace it with our value. We don't do this for "predicate"
+            // type values; since we intend to normalize these later, they need more than just type
+            // compatibility, and we conservatively assume such outputs can never be reused.
+            if inner_origin_ty != TY_PREDICATE {
+                let result_count = rvsdg[branch].value_results().len();
+
+                for result in 0..result_count {
+                    let result_input = rvsdg[branch].value_results()[result];
+
+                    if result_input.ty == rvsdg.value_origin_ty(branch, inner_origin)
+                        && let ValueOrigin::Output {
+                            producer,
+                            output: 0,
+                        } = result_input.origin
+                        && rvsdg[producer].is_const_fallback()
+                    {
+                        rvsdg.reconnect_region_result(branch, result as u32, inner_origin);
+
+                        return ValueOrigin::Output {
+                            producer: switch_node,
+                            output: result as u32,
+                        };
+                    }
+                }
+            }
+
+            // If we reach this point, then apparently we don't already have an appropriate output
+            // available, so we'll create a new one. We'll connect the corresponding result for our
+            // current branch to our inner_origin. For all other branches we'll connect a fallback
+            // node to the result; if we later need emulation values in those branches, we might be
+            // able to reuse such a result.
+            let output = rvsdg.add_switch_output(switch_node, inner_origin_ty);
+            let branch_count = rvsdg[switch_node].expect_switch().branches().len();
+            for i in 0..branch_count {
+                let b = rvsdg[switch_node].expect_switch().branches()[i];
+
+                let origin = if b == branch {
+                    inner_origin
+                } else {
+                    let fallback_node = rvsdg.add_const_fallback(b, inner_origin_ty);
+
+                    ValueOrigin::Output {
+                        producer: fallback_node,
+                        output: 0,
+                    }
+                };
+
+                rvsdg.reconnect_region_result(b, output, origin);
+            }
 
             ValueOrigin::Output {
                 producer: switch_node,
@@ -803,14 +753,8 @@ impl EmulationContext {
 
             info.emulation_root
                 .visit_non_ptr_origins_mut(&mut |inner_origin| {
-                    *inner_origin = resolve_non_ptr_outer_origin(
-                        rvsdg,
-                        &mut self.switch_emulation_registry,
-                        switch_node,
-                        i as u32,
-                        branch,
-                        *inner_origin,
-                    );
+                    *inner_origin =
+                        resolve_non_ptr_outer_origin(rvsdg, switch_node, branch, *inner_origin);
                 });
 
             info.emulation_root
