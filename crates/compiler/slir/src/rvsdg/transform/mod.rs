@@ -9,6 +9,7 @@ pub mod duplicate_loop_value_elimination;
 pub mod duplicate_switch_input_elimination;
 pub mod duplicate_switch_output_elimination;
 pub mod enum_replacement;
+pub mod fallback_value_replacement;
 pub mod function_inlining;
 mod invalid_ptr_replacement;
 pub mod memory_promotion_and_legalization;
@@ -48,4 +49,6 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
     dead_connectible_elimination::transform_entry_points(module, rvsdg);
+    rvsdg.dump_to_file("rvsdg.dump");
+    fallback_value_replacement::transform_entry_points(module, rvsdg);
 }
