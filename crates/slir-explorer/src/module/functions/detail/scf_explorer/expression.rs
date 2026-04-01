@@ -13,7 +13,6 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
     let expr_data = &scf[expr_binding].expect_expr_binding().expression();
 
     match expr_data.kind() {
-        ExpressionKind::FallbackValue => "fallback".into_any(),
         ExpressionKind::ConstU32(v) => format!("{}u32", v).into_any(),
         ExpressionKind::ConstI32(v) => format!("{}i32", v).into_any(),
         ExpressionKind::ConstF32(v) => format!("{}f32", v).into_any(),
