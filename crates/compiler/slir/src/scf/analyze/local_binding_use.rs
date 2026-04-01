@@ -57,8 +57,7 @@ impl UseCounter {
 
     fn count_expr_binding(&mut self, _scf: &Scf, stmt: &ExprBinding) {
         match stmt.expression().kind() {
-            ExpressionKind::FallbackValue
-            | ExpressionKind::ConstU32(_)
+            ExpressionKind::ConstU32(_)
             | ExpressionKind::ConstI32(_)
             | ExpressionKind::ConstF32(_)
             | ExpressionKind::ConstBool(_)

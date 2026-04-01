@@ -334,7 +334,6 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             ConstF32(_) => self.visit_const_f32(node),
             ConstBool(_) => self.visit_const_bool(node),
             ConstPtr(_) => self.visit_const_ptr(node),
-            ConstFallback(_) => self.visit_const_fallback(node),
             OpAlloca(_) => self.visit_op_alloca(node),
             OpStore(_) => self.visit_op_store(node),
             OpLoad(op) => self.prepare_bind_intrinsic(node, op).apply(self),
@@ -358,6 +357,10 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             // treatment here.
             OpCaseToBranchSelector(_) => self.visit_op_case_to_branch_selector(node),
             OpBoolToBranchSelector(_) => self.visit_op_bool_to_branch_selector(node),
+            ConstFallback(_) => panic!(
+                "all fallback-value nodes should be eliminated from the RVSDG IR before converting \
+                to SCF IR"
+            ),
             _ => {
                 panic!(
                     "node kind `{:?}` not currently supported by SLIR's structured control-flow \
@@ -435,15 +438,6 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             ),
             Value::Local(_) => panic!("cannot create pointer to a local value"),
         };
-
-        self.value_mapping.map_output(node, 0, binding.into());
-    }
-
-    fn visit_const_fallback(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_const_fallback();
-        let (_, binding) =
-            self.scf
-                .add_bind_fallback_value(self.dst_block, BlockPosition::Append, data.ty());
 
         self.value_mapping.map_output(node, 0, binding.into());
     }

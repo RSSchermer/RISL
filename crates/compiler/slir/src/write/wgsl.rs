@@ -932,7 +932,6 @@ impl WgslModuleWriter {
 
     fn write_expression(&mut self, cx: Context, expression: &Expression, inline_cx: InlineContext) {
         match expression.kind() {
-            ExpressionKind::FallbackValue => todo!(),
             ExpressionKind::ConstU32(v) => self.write_u32(*v),
             ExpressionKind::ConstI32(v) => self.write_i32(*v),
             ExpressionKind::ConstF32(v) => self.write_f32(*v),

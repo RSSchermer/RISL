@@ -255,7 +255,6 @@ pub enum GlobalPtr {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ExpressionKind {
-    FallbackValue,
     ConstU32(u32),
     ConstI32(i32),
     ConstF32(f32),
@@ -918,37 +917,6 @@ impl Scf {
 
     pub fn get_function_body(&self, function: Function) -> Option<&FunctionBody> {
         self.function_bodies.get(&function)
-    }
-
-    pub fn add_bind_fallback_value(
-        &mut self,
-        block: Block,
-        position: BlockPosition,
-        ty: Type,
-    ) -> (Statement, LocalBinding) {
-        let binding = self.local_bindings.insert(LocalBindingData {
-            ty,
-            // Initialize with a temporary value, remember to adjust after statement initialization.
-            kind: LocalBindingKind::ExprBinding(Statement::default()),
-        });
-
-        let statement = self.statements.insert(StatementData {
-            block,
-            kind: StatementKind::ExprBinding(ExprBinding {
-                binding,
-                expression: Expression {
-                    ty,
-                    kind: ExpressionKind::FallbackValue,
-                },
-            }),
-        });
-
-        self.blocks[block].add_statement(position, statement);
-
-        // Adjust the temporary value we set above to the actual statement.
-        self.local_bindings[binding].kind = LocalBindingKind::ExprBinding(statement);
-
-        (statement, binding)
     }
 
     pub fn add_bind_const_u32(
