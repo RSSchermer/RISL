@@ -225,6 +225,10 @@ impl ValueInput {
 }
 
 /// Enumerates the possible origins of a [ValueInput].
+///
+/// Note that a [ValueOrigin] is not a globally unique identifier for a value in the [Rvsdg], it
+/// only uniquely identifies a value with its [Region]. For a globally unique identifier, a
+/// [ValueOrigin] must be paired with a [Region] value.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum ValueOrigin {
     /// The origin is a region argument in the same region as the [ValueInput].
