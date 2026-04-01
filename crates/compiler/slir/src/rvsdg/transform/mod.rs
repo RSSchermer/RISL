@@ -49,6 +49,5 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
     dead_connectible_elimination::transform_entry_points(module, rvsdg);
-    rvsdg.dump_to_file("rvsdg.dump");
     fallback_value_replacement::transform_entry_points(module, rvsdg);
 }
