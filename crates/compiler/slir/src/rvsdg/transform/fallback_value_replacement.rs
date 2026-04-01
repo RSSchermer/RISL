@@ -9,9 +9,7 @@ pub struct FallbackValueReplacer {
 
 impl FallbackValueReplacer {
     pub fn new() -> Self {
-        Self {
-            queue: Vec::new(),
-        }
+        Self { queue: Vec::new() }
     }
 
     pub fn transform_region(&mut self, rvsdg: &mut Rvsdg, region: Region) {
@@ -30,7 +28,10 @@ impl FallbackValueReplacer {
                 TY_I32 => rvsdg.add_const_i32(region, 0),
                 TY_F32 => rvsdg.add_const_f32(region, 0.0),
                 TY_BOOL => rvsdg.add_const_bool(region, false),
-                _ => panic!("unsupported ConstFallback type `{:?}` for node `{:?}", ty, node),
+                _ => panic!(
+                    "unsupported ConstFallback type `{:?}` for node `{:?}",
+                    ty, node
+                ),
             };
 
             rvsdg.reconnect_value_users(
@@ -79,10 +80,10 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
 mod tests {
     use std::iter;
 
-    use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, TY_DUMMY};
-    use crate::{FnArg, FnSig, Function, Module, Symbol};
-    use crate::rvsdg::{Rvsdg, Connectivity, ValueOrigin, ValueInput};
     use super::FallbackValueReplacer;
+    use crate::rvsdg::{Connectivity, Rvsdg, ValueInput, ValueOrigin};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_F32, TY_I32, TY_U32};
+    use crate::{FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
     fn test_fallback_value_replacement() {
@@ -97,12 +98,10 @@ mod tests {
             FnSig {
                 name: Default::default(),
                 ty: TY_DUMMY,
-                args: vec![
-                    FnArg {
-                        ty: TY_U32,
-                        shader_io_binding: None,
-                    },
-                ],
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
                 ret_ty: Some(TY_U32),
             },
         );
@@ -126,25 +125,41 @@ mod tests {
         transformer.transform_region(&mut rvsdg, region);
 
         // Verify that ValueProxy node inputs connect to the new constant nodes.
-        let ValueOrigin::Output { producer: prod_u32, output: 0 } = rvsdg[proxy_u32].value_inputs()[0].origin else {
+        let ValueOrigin::Output {
+            producer: prod_u32,
+            output: 0,
+        } = rvsdg[proxy_u32].value_inputs()[0].origin
+        else {
             panic!("proxy_u32 should connect to a node output");
         };
         let prod_u32_data = rvsdg[prod_u32].expect_const_u32();
         assert_eq!(prod_u32_data.value(), 0);
 
-        let ValueOrigin::Output { producer: prod_i32, output: 0 } = rvsdg[proxy_i32].value_inputs()[0].origin else {
+        let ValueOrigin::Output {
+            producer: prod_i32,
+            output: 0,
+        } = rvsdg[proxy_i32].value_inputs()[0].origin
+        else {
             panic!("proxy_i32 should connect to a node output");
         };
         let prod_i32_data = rvsdg[prod_i32].expect_const_i32();
         assert_eq!(prod_i32_data.value(), 0);
 
-        let ValueOrigin::Output { producer: prod_f32, output: 0 } = rvsdg[proxy_f32].value_inputs()[0].origin else {
+        let ValueOrigin::Output {
+            producer: prod_f32,
+            output: 0,
+        } = rvsdg[proxy_f32].value_inputs()[0].origin
+        else {
             panic!("proxy_f32 should connect to a node output");
         };
         let prod_f32_data = rvsdg[prod_f32].expect_const_f32();
         assert_eq!(prod_f32_data.value(), 0.0);
 
-        let ValueOrigin::Output { producer: prod_bool, output: 0 } = rvsdg[proxy_bool].value_inputs()[0].origin else {
+        let ValueOrigin::Output {
+            producer: prod_bool,
+            output: 0,
+        } = rvsdg[proxy_bool].value_inputs()[0].origin
+        else {
             panic!("proxy_bool should connect to a node output");
         };
         let prod_bool_data = rvsdg[prod_bool].expect_const_bool();
