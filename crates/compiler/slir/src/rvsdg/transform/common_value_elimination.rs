@@ -1,6 +1,6 @@
 use crate::Module;
 use crate::rvsdg::transform::common_node_elimination::CommonNodeEliminator;
-use crate::rvsdg::transform::dead_connectible_elimination::DeadConnectibleEliminator;
+use crate::rvsdg::transform::dead_value_elimination::DeadValueEliminator;
 use crate::rvsdg::transform::duplicate_loop_value_elimination::DuplicateLoopValueEliminator;
 use crate::rvsdg::transform::duplicate_switch_input_elimination::DuplicateSwitchInputEliminator;
 use crate::rvsdg::transform::duplicate_switch_output_elimination::DuplicateSwitchOutputEliminator;
@@ -11,7 +11,7 @@ pub struct CommonValueEliminator {
     duplicate_switch_input_eliminator: DuplicateSwitchInputEliminator,
     duplicate_loop_value_eliminator: DuplicateLoopValueEliminator,
     duplicate_switch_output_eliminator: DuplicateSwitchOutputEliminator,
-    dead_connectible_eliminator: DeadConnectibleEliminator,
+    dead_value_eliminator: DeadValueEliminator,
 }
 
 impl CommonValueEliminator {
@@ -21,7 +21,7 @@ impl CommonValueEliminator {
             duplicate_switch_input_eliminator: DuplicateSwitchInputEliminator::new(),
             duplicate_loop_value_eliminator: DuplicateLoopValueEliminator::new(),
             duplicate_switch_output_eliminator: DuplicateSwitchOutputEliminator::new(),
-            dead_connectible_eliminator: DeadConnectibleEliminator::new(),
+            dead_value_eliminator: DeadValueEliminator::new(),
         }
     }
 
@@ -48,8 +48,7 @@ impl CommonValueEliminator {
                 .duplicate_switch_output_eliminator
                 .process_region(rvsdg, region);
 
-            self.dead_connectible_eliminator
-                .process_region(rvsdg, region)
+            self.dead_value_eliminator.process_region(rvsdg, region)
         }
     }
 }

@@ -7,12 +7,12 @@ use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, StateUser, ValueOrigin, ValueUser,
 };
 
-pub struct DeadConnectibleEliminator {
+pub struct DeadValueEliminator {
     current_candidates: FxHashSet<Node>,
     next_candidates: FxHashSet<Node>,
 }
 
-impl DeadConnectibleEliminator {
+impl DeadValueEliminator {
     pub fn new() -> Self {
         Self {
             current_candidates: FxHashSet::default(),
@@ -283,7 +283,7 @@ fn process_simple_node(rvsdg: &mut Rvsdg, node: Node, candidates: &mut FxHashSet
 }
 
 pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
-    let mut dce = DeadConnectibleEliminator::new();
+    let mut dce = DeadValueEliminator::new();
 
     let entry_points = module
         .entry_points
@@ -341,7 +341,7 @@ mod tests {
             },
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 
@@ -382,7 +382,7 @@ mod tests {
             ValueInput::output(TY_U32, node_0, 0),
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 
@@ -458,7 +458,7 @@ mod tests {
             },
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 
@@ -525,7 +525,7 @@ mod tests {
             },
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 
@@ -619,7 +619,7 @@ mod tests {
             },
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 
@@ -702,7 +702,7 @@ mod tests {
             },
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 
@@ -790,7 +790,7 @@ mod tests {
             },
         );
 
-        let mut dce = DeadConnectibleEliminator::new();
+        let mut dce = DeadValueEliminator::new();
 
         dce.process_region(&mut rvsdg, region);
 

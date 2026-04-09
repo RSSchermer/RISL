@@ -87,7 +87,7 @@
 //! is now only to track the offset and no longer to provide the slice pointer value. This means
 //! that the original alloca node we're trying to split does not become userless in this case and
 //! cannot yet be removed. It will become userless after the offset-slice-replacement pass and can
-//! then be removed by a dead-connectible-elimination pass.
+//! then be removed by a [dead_value_elimination](super::dead_value_elimination) pass.
 //!
 //! # Splitting switch node results and output
 //!

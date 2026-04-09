@@ -4,7 +4,7 @@ pub mod common_value_elimination;
 pub mod conditional_ub_elimination;
 pub mod const_ptr_pull;
 pub mod const_switch_inlining;
-pub mod dead_connectible_elimination;
+pub mod dead_value_elimination;
 pub mod duplicate_loop_value_elimination;
 pub mod duplicate_switch_input_elimination;
 pub mod duplicate_switch_output_elimination;
@@ -48,7 +48,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     switch_merging::transform_entry_points(module, rvsdg);
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
-    dead_connectible_elimination::transform_entry_points(module, rvsdg);
+    dead_value_elimination::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
     fallback_value_replacement::transform_entry_points(module, rvsdg);
 }

@@ -2,14 +2,14 @@
 //!
 //! Branch-selector normalization ensures that every [SwitchNode][0] connects directly (without
 //! intermediate connections) to a node that produces its branch-selector, and that the
-//! [SwitchNode][0] is this node's only user. After [dead_connectible_elimination][1], this achieves
-//! an RVSDG that is in "predicate continuation form", as described by [Bahmann et al., 2015][2].
+//! [SwitchNode][0] is this node's only user. After [dead_value_elimination][1], this achieves an
+//! RVSDG that is in "predicate continuation form", as described by [Bahmann et al., 2015][2].
 //!
 //! Predicate continuation form simplifies follow-up transformations, such as
 //! [conditional_ub_elimination][3]. It also simplifies the [rvsdg_to_scf][4] conversion.
 //!
 //! [0]: crate::rvsdg::SwitchNode
-//! [1]: crate::rvsdg::transform::dead_connectible_elimination
+//! [1]: crate::rvsdg::transform::dead_value_elimination
 //! [2]: https://doi.org/10.1145/269326
 //! [3]: crate::rvsdg::transform::conditional_ub_elimination
 //! [4]: crate::rvsdg_to_scf
