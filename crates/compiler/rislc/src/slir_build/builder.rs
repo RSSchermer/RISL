@@ -28,6 +28,15 @@ pub struct Builder<'a, 'tcx> {
     basic_block: slir::cfg::BasicBlock,
 }
 
+impl<'a, 'tcx> Builder<'a, 'tcx> {
+    fn debug_write_body(&self) {
+        let cfg = self.cx.cfg.borrow();
+        let function = cfg[self.basic_block].owner();
+
+        slir::cfg::debug::write_body(&mut std::io::stdout(), &cfg, function).unwrap();
+    }
+}
+
 impl<'a, 'tcx> Deref for Builder<'a, 'tcx> {
     type Target = Cx<'a, 'tcx>;
 
@@ -617,7 +626,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         }
     }
 
-    fn store(&mut self, val: Self::Value, ptr: Self::Value, align: Align) -> Self::Value {
+    fn store(&mut self, val: Self::Value, ptr: Self::Value) -> Self::Value {
         let value = val.expect_value();
         let ptr = ptr.expect_value();
 

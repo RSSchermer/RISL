@@ -172,10 +172,10 @@ pub trait BuilderMethods<'a>:
         dest: &PlaceRef<Self::Value>,
     );
 
-    fn store(&mut self, val: Self::Value, ptr: Self::Value, align: Align) -> Self::Value;
+    fn store(&mut self, val: Self::Value, ptr: Self::Value) -> Self::Value;
     fn store_to_place(&mut self, val: Self::Value, place: PlaceValue<Self::Value>) -> Self::Value {
         assert_eq!(place.llextra, None);
-        self.store(val, place.llval, place.align)
+        self.store(val, place.llval)
     }
     fn atomic_store(
         &mut self,

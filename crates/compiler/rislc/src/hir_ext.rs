@@ -431,7 +431,9 @@ pub struct ImplExt {}
 pub struct TraitExt {}
 
 #[derive(Debug)]
-pub struct StructExt {}
+pub struct StructExt {
+    pub core_shim_for: Option<Symbol>,
+}
 
 #[derive(Debug)]
 pub struct EnumExt {}

@@ -284,11 +284,11 @@ impl<'a, V: CodegenObject> OperandRef<V> {
 
             let a_ptr = bx.element_ptr(a_llty, alloca, &[bx.const_usize(0)]);
 
-            bx.store(a, a_ptr, a_layout.layout.abi_align);
+            bx.store(a, a_ptr);
 
             let b_ptr = bx.element_ptr(b_llty, alloca, &[bx.const_usize(1)]);
 
-            bx.store(b, b_ptr, b_layout.layout.abi_align);
+            bx.store(b, b_ptr);
 
             let llty = bx.immediate_backend_type(&self.layout);
 
@@ -380,7 +380,7 @@ impl<'a, V: CodegenObject> OperandRef<V> {
                 // Can't bitcast an aggregate, so round trip through memory.
                 let llptr = bx.alloca(&field);
 
-                bx.store(*llval, llptr, field.layout.abi_align);
+                bx.store(*llval, llptr);
 
                 *llval = bx.load(llfield_ty, llptr, field.layout.abi_align);
             }
@@ -452,7 +452,7 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
             OperandValue::Immediate(s) => {
                 let val = bx.from_immediate(s);
 
-                bx.store(val, dest.val.llval, dest.val.align);
+                bx.store(val, dest.val.llval);
             }
             OperandValue::Pair(a, b) => {
                 let ValueAbi::ScalarPair(a_scalar, b_scalar) = &dest_layout.abi else {
@@ -465,12 +465,12 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                 let a_val = bx.from_immediate(a);
                 let a_ptr = dest.project_field(bx, 0);
 
-                bx.store(a_val, a_ptr.val.llval, a_ptr.val.align);
+                bx.store(a_val, a_ptr.val.llval);
 
                 let b_val = bx.from_immediate(b);
                 let b_ptr = dest.project_field(bx, 1);
 
-                bx.store(b_val, b_ptr.val.llval, b_ptr.val.align);
+                bx.store(b_val, b_ptr.val.llval);
             }
         }
     }

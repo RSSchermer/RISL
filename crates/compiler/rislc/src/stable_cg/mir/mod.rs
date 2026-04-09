@@ -197,6 +197,7 @@ pub fn codegen_mir<'a, Bx: BuilderMethods<'a>>(cx: &'a Bx::CodegenCx, instance: 
             }
 
             let layout = TyAndLayout::expect_from_ty(decl.ty);
+            let layout = cx.adjust_layout(layout);
 
             if needs_alloca.contains(local_index) {
                 if layout.layout.is_unsized() {

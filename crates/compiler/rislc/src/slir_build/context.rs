@@ -11,7 +11,9 @@ use rustc_public::mir::alloc::GlobalAlloc;
 use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::rustc_internal::internal;
 use rustc_public::target::{MachineInfo, MachineSize};
-use rustc_public::ty::{Align, Allocation, GenericArgKind, RigidTy, TyKind, VariantIdx};
+use rustc_public::ty::{
+    Align, Allocation, FnDef, GenericArgKind, GenericArgs, RigidTy, TyKind, VariantIdx,
+};
 use rustc_public::{CrateDef, abi};
 use rustc_public_bridge::IndexedVal;
 
@@ -167,6 +169,25 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
     }
 
     pub fn ty_and_layout_resolve(&self, layout: &TyAndLayout) -> slir::ty::Type {
+        let ty = self
+            .rcx
+            .shim_def_lookup()
+            .maybe_shimmed_ty(self.rcx.tcx(), layout.ty);
+
+        if let Some(ty) = self
+            .rcx
+            .shim_def_lookup()
+            .maybe_shimmed_ty(self.rcx.tcx(), layout.ty)
+        {
+            let layout = TyAndLayout::expect_from_ty(ty);
+
+            self.ty_and_layout_resolve_impl(&layout)
+        } else {
+            self.ty_and_layout_resolve_impl(layout)
+        }
+    }
+
+    fn ty_and_layout_resolve_impl(&self, layout: &TyAndLayout) -> slir::ty::Type {
         // Note: this cannot be inlined into the if-let expression, because then the borrow guard would
         // not drop in time, which would result in an "already borrowed" error.
         let ty = self.ty_to_slir.borrow().get(layout).copied();
@@ -223,7 +244,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
 
     /// Unpacks memory container types.
     ///
-    /// Certain types is the RISL standard library acts as proxies for device-controlled memory
+    /// Certain types is the RISL standard library act as proxies for device-controlled memory
     /// resources (e.g., the `risl::resource::Storage` type). Such wrappers help us achieve the
     /// interface we want to expose, but end up being noise at lower levels of compilation. We
     /// therefore unpack these types here.
@@ -911,7 +932,7 @@ impl<'a, 'tcx> MiscCodegenMethods for CodegenContext<'a, 'tcx> {
         let instance = self
             .rcx
             .shim_def_lookup()
-            .maybe_shimmed(self.rcx.tcx(), *instance);
+            .maybe_shimmed_instance(self.rcx.tcx(), *instance);
         let name = slir::Symbol::from_ref(instance.mangled_name().as_str());
 
         // To facilitate function resolution in SLIR, we store the module name as part of the
@@ -954,6 +975,27 @@ impl<'a, 'tcx> MiscCodegenMethods for CodegenContext<'a, 'tcx> {
 
     fn get_fn_addr(&self, instance: &Instance) -> Self::Value {
         self.get_fn(instance).into()
+    }
+
+    fn resolve_instance(&self, fn_def: FnDef, args: &GenericArgs) -> Instance {
+        let instance =
+            Instance::resolve(fn_def, args).expect("instance should resolve during codegen");
+
+        self.rcx
+            .shim_def_lookup()
+            .maybe_shimmed_instance(self.rcx.tcx(), instance)
+    }
+
+    fn adjust_layout(&self, layout: TyAndLayout) -> TyAndLayout {
+        if let Some(ty) = self
+            .rcx
+            .shim_def_lookup()
+            .maybe_shimmed_ty(self.rcx.tcx(), layout.ty)
+        {
+            TyAndLayout::expect_from_ty(ty)
+        } else {
+            layout
+        }
     }
 }
 

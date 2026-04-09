@@ -595,6 +595,12 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 self.codegen_place_to_pointer(bx, place, mk_ref)
             }
 
+            mir::Rvalue::AddressOf(bk, place) => {
+                let mk_ref = move |ty: Ty| Ty::new_ptr(ty, bk.to_mutable_lossy());
+
+                self.codegen_place_to_pointer(bx, place, mk_ref)
+            }
+
             mir::Rvalue::CopyForDeref(place) => {
                 self.codegen_operand(bx, &mir::Operand::Copy(place.clone()))
             }
@@ -750,7 +756,6 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             }
             mir::Rvalue::ThreadLocalRef(..)
             | mir::Rvalue::ShallowInitBox(..)
-            | mir::Rvalue::AddressOf(..)
             | mir::Rvalue::NullaryOp(..) => {
                 bug!("not supported by RISL")
             }
@@ -1008,12 +1013,12 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
     pub(crate) fn rvalue_creates_operand(&self, rvalue: &Rvalue) -> bool {
         match rvalue {
             Rvalue::Cast(CastKind::Transmute, ..)
-            | Rvalue::AddressOf(..)
             | Rvalue::ShallowInitBox(..)
             | Rvalue::ThreadLocalRef(_) => {
                 bug!("R-value not supported by risl ({:?})", rvalue);
             }
             Rvalue::Ref(..)
+            | Rvalue::AddressOf(..)
             | Rvalue::CopyForDeref(..)
             | Rvalue::Len(..)
             | Rvalue::Cast(..)

@@ -535,7 +535,9 @@ fn visit_instance_use(
     //
     // This attempts to look up such a shim. If a shim is found, then the instance is replaced with
     // the shim instance, otherwise the instance is returned unmodified.
-    let instance = cx.shim_def_lookup().maybe_shimmed(cx.tcx(), instance);
+    let instance = cx
+        .shim_def_lookup()
+        .maybe_shimmed_instance(cx.tcx(), instance);
 
     if !should_codegen_locally(cx.tcx(), instance) {
         return;

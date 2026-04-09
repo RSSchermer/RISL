@@ -14,6 +14,7 @@ members = [
     "tests/behavioral-tests-macros",
     "tests/examples/builtin_vec",
     "tests/examples/external_shader_request",
+    "tests/examples/for_loop",
     "tests/examples/hello_world",
     "tests/examples/simple_enum",
     "tests/examples/simple_lib",

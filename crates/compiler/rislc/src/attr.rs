@@ -240,7 +240,8 @@ impl Attr for AttrCoreShim {
         match target {
             Target::Fn
             | Target::Method(MethodKind::Inherent)
-            | Target::Method(MethodKind::TraitImpl) => true,
+            | Target::Method(MethodKind::TraitImpl)
+            | Target::Struct => true,
             Target::Method(MethodKind::Trait { body }) => *body,
             _ => false,
         }

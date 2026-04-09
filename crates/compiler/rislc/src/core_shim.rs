@@ -10,12 +10,13 @@ use rustc_middle::ty::TyCtxt;
 use rustc_public::CrateDef;
 use rustc_public::mir::mono::Instance;
 use rustc_public::rustc_internal::{internal, stable};
+use rustc_public::ty::{RigidTy, Ty, TyKind};
 use rustc_span::Symbol;
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::SHIM_LOOKUP_HEADER;
 use crate::context::RislContext;
-use crate::hir_ext::{FnExt, GpuFnExt, HirExt};
+use crate::hir_ext::{FnExt, GpuFnExt, HirExt, StructExt};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ShimDefLookup {
@@ -31,7 +32,22 @@ impl ShimDefLookup {
         }
     }
 
-    pub fn maybe_shimmed(&self, tcx: TyCtxt, instance: Instance) -> Instance {
+    pub fn maybe_shimmed_ty(&self, tcx: TyCtxt, ty: Ty) -> Option<Ty> {
+        if let TyKind::RigidTy(RigidTy::Adt(def, args)) = ty.kind() {
+            let def_path = def.0.name();
+
+            if let Some(shimmed_def_id) = self.shim_def_id(&def_path) {
+                let ty = tcx.type_of(shimmed_def_id);
+                let ty = ty.instantiate(tcx, internal(tcx, args));
+
+                return Some(stable(ty));
+            }
+        }
+
+        None
+    }
+
+    pub fn maybe_shimmed_instance(&self, tcx: TyCtxt, instance: Instance) -> Instance {
         let def_path = instance
             .ty()
             .kind()
@@ -40,6 +56,20 @@ impl ShimDefLookup {
             .0
             .name();
 
+        if let Some(shimmed_def_id) = self.shim_def_id(&def_path) {
+            let instance = internal(tcx, instance);
+            let shimmed_instance = rustc_middle::ty::Instance {
+                def: rustc_middle::ty::InstanceKind::Item(shimmed_def_id),
+                args: instance.args,
+            };
+
+            stable(&shimmed_instance)
+        } else {
+            instance
+        }
+    }
+
+    fn shim_def_id(&self, def_path: &str) -> Option<DefId> {
         // The def_paths with items that originate from the `core` crate may instead refer to them
         // as if in `std` (I still don't quite understand why this happens). For the core-shim
         // mapping names in `risl::core_shim` we adopt the convention of always using `core` in
@@ -53,7 +83,7 @@ impl ShimDefLookup {
         //   a match now, cache the new string as an entry in our mapping with the same index we
         //   just found.
         //
-        let index = if let Some(index) = self.mapping.read().unwrap().get(&def_path).copied() {
+        let index = if let Some(index) = self.mapping.read().unwrap().get(def_path).copied() {
             Some(index)
         } else if def_path.contains("std::") {
             // We use an exact match here. Technically that can match path segments other than `std`
@@ -76,26 +106,23 @@ impl ShimDefLookup {
             None
         };
 
-        if let Some(index) = index {
-            let shimmed_def_id = DefId {
-                krate: CrateNum::from_usize(self.shim_crate_num),
-                index: DefIndex::from_usize(index),
-            };
-
-            let instance = internal(tcx, instance);
-            let shimmed_instance = rustc_middle::ty::Instance {
-                def: rustc_middle::ty::InstanceKind::Item(shimmed_def_id),
-                args: instance.args,
-            };
-
-            stable(&shimmed_instance)
-        } else {
-            instance
-        }
+        index.map(|index| DefId {
+            krate: CrateNum::from_usize(self.shim_crate_num),
+            index: DefIndex::from_usize(index),
+        })
     }
 
     pub fn register_gpu_fn_ext(&mut self, def_id: DefId, gpu_fn_ext: &GpuFnExt) {
         if let Some(target) = gpu_fn_ext.core_shim_for {
+            self.mapping
+                .get_mut()
+                .unwrap()
+                .insert(target.to_string(), def_id.index.as_usize());
+        }
+    }
+
+    pub fn register_struct_ext(&mut self, def_id: DefId, struct_ext: &StructExt) {
+        if let Some(target) = struct_ext.core_shim_for {
             self.mapping
                 .get_mut()
                 .unwrap()
@@ -183,6 +210,12 @@ pub fn build_shim_def_lookup(hir_ext: &HirExt) -> ShimDefLookup {
         let def_id = hir_id.expect_owner().def_id;
 
         lookup.register_gpu_fn_ext(def_id.to_def_id(), gpu_fn_ext);
+    }
+
+    for (&item_id, struct_ext) in &hir_ext.struct_ext {
+        let def_id = item_id.owner_id.def_id;
+
+        lookup.register_struct_ext(def_id.to_def_id(), struct_ext);
     }
 
     lookup

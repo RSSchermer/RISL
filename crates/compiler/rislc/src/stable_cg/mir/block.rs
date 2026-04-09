@@ -246,9 +246,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         };
 
         let instance = match ty_kind {
-            RigidTy::FnDef(def_id, args) => {
-                Instance::resolve(def_id, &args).expect("instance should resolve during codegen")
-            }
+            RigidTy::FnDef(def_id, args) => bx.resolve_instance(def_id, &args),
             RigidTy::FnPtr(..) => bug!("function pointers are not supported by RISL"),
             _ => bug!("{} is not callable", callee.layout.ty),
         };
