@@ -947,7 +947,10 @@ impl Cfg {
         let mut local_bindings = Vec::with_capacity(sig.args.len());
 
         for arg in &sig.args {
-            let value = self.add_local_binding(function, arg.ty);
+            let value = self.local_bindings.insert(LocalBindingData {
+                owner: function,
+                ty: arg.ty,
+            });
 
             local_bindings.push(value);
         }
@@ -1649,10 +1652,19 @@ impl Cfg {
     }
 
     fn add_local_binding(&mut self, function: Function, ty: Type) -> LocalBinding {
-        self.local_bindings.insert(LocalBindingData {
+        let binding = self.local_bindings.insert(LocalBindingData {
             owner: function,
             ty,
-        })
+        });
+
+        let body = self
+            .function_body_map
+            .get_mut(&function)
+            .expect("cannot add a local-binding to a function without a body");
+
+        body.local_bindings.push(binding);
+
+        binding
     }
 
     fn validate_value(&self, owner: Function, value: &Value, desc: &str) {
