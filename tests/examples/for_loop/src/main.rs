@@ -10,6 +10,9 @@ pub mod shader {
     #[resource(group = 0, binding = 0)]
     static VALUES: Storage<[u32]>;
 
+    #[resource(group = 0, binding = 1)]
+    static RESULT: StorageMut<u32>;
+
     #[compute]
     fn main(factor: f32) {
         let mut iter = VALUES.iter();
@@ -17,6 +20,10 @@ pub mod shader {
 
         while let Some(value) = iter.next() {
             sum += value;
+        }
+
+        unsafe {
+            *RESULT.as_mut_unchecked() = sum;
         }
     }
 }
