@@ -7,6 +7,5 @@
 
 mod enum_result;
 mod slice;
-mod slice_index;
 mod variable_pointer_if_else;
 mod while_loop;

@@ -433,7 +433,7 @@ pub fn test_runner(macro_input: TokenStream) -> TokenStream {
                 self.queue.submit(command_buffer);
 
                 readback_buffer.map_read().await?;
-                let result = readback_buffer.mapped().clone();
+                let result = readback_buffer.mapped().to_owned();
                 readback_buffer.unmap();
 
                 Ok(result)
