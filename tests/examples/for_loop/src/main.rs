@@ -15,10 +15,9 @@ pub mod shader {
 
     #[compute]
     fn main(factor: f32) {
-        let mut iter = VALUES.iter();
         let mut sum = 0u32;
 
-        while let Some(value) = iter.next() {
+        for value in &*VALUES {
             sum += value;
         }
 

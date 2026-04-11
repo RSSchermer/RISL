@@ -2,7 +2,7 @@ use std::{mem, ops};
 
 use risl_macros::gpu;
 
-use crate::intrinsic;
+use crate::{core_shim, intrinsic};
 
 #[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::len"))]
@@ -66,12 +66,44 @@ pub fn slice_iter<T>(slice: &[T]) -> Iter<'_, T> {
 }
 
 #[gpu]
+impl<'a, T> core_shim::iter::IntoIterator for &'a [T] {
+    type IntoIter = Iter<'a, T>;
+    type Item = &'a T;
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim(
+            "core::slice::iter::<impl core::iter::IntoIterator for &'a [T]>::into_iter"
+        )
+    )]
+    fn into_iter(self) -> Self::IntoIter {
+        slice_iter(self)
+    }
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::iter_mut"))]
 pub fn slice_iter_mut<T>(slice: &mut [T]) -> IterMut<'_, T> {
     IterMut {
         start: 0,
         end: slice.len(),
         slice,
+    }
+}
+
+#[gpu]
+impl<'a, T> core_shim::iter::IntoIterator for &'a mut [T] {
+    type IntoIter = IterMut<'a, T>;
+    type Item = &'a mut T;
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim(
+            "core::slice::iter::<impl core::iter::IntoIterator for &'a mut [T]>::into_iter"
+        )
+    )]
+    fn into_iter(self) -> Self::IntoIter {
+        slice_iter_mut(self)
     }
 }
 

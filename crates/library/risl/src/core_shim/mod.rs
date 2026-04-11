@@ -3,5 +3,6 @@
 //! This is an implementation detail of the RISL compiler. You should never use anything defined in
 //! this module directly; instead use the corresponding type, trait, or function in `core`/`std`.
 
+mod iter;
 pub mod ops;
 pub mod slice;

@@ -410,7 +410,11 @@ impl<'a, 'tcx> Locator<'a, 'tcx> {
 
     fn visit_item_trait(&mut self, item: &Item<'tcx>, attrs: &Attributes) {
         if attrs.gpu.is_some() {
-            self.hir_ext.trait_ext.insert(item.item_id(), TraitExt {});
+            let core_shim_for = attrs.core_shim.as_ref().map(|s| s.target);
+
+            self.hir_ext
+                .trait_ext
+                .insert(item.item_id(), TraitExt { core_shim_for });
         }
     }
 

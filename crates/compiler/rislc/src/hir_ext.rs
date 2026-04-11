@@ -428,7 +428,9 @@ impl From<EntryPoint> for FnExt {
 pub struct ImplExt {}
 
 #[derive(Debug)]
-pub struct TraitExt {}
+pub struct TraitExt {
+    pub core_shim_for: Option<Symbol>,
+}
 
 #[derive(Debug)]
 pub struct StructExt {
