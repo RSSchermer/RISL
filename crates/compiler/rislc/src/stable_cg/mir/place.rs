@@ -1,5 +1,5 @@
 use rustc_middle::bug;
-use rustc_public::abi::{FieldsShape, VariantsShape};
+use rustc_public::abi::{FieldsShape, ValueAbi, VariantsShape};
 use rustc_public::mir;
 use rustc_public::mir::Mutability;
 use rustc_public::ty::{Align, RigidTy, Ty, TyKind, VariantIdx};
@@ -144,6 +144,21 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
     /// Access a field, at a point when the value's case is known.
     pub fn project_field<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx, ix: usize) -> Self {
         let field = self.layout.field(ix);
+
+        // For single-field structs where the field is a scalar or scalar-pair, rustc likes to also
+        // represent the struct itself with a scalar or scalar-pair ABI, effectively unpacking the
+        // field already. The MIR will still want to project to this field, so we detect such cases
+        // and turn these projections into no-ops.
+        if self.layout.ty.kind().is_struct()
+            && matches!(
+                self.layout.layout.abi,
+                ValueAbi::Scalar(_) | ValueAbi::ScalarPair(_, _)
+            )
+            && self.layout.layout.fields.count() == 1
+        {
+            return self.val.with_type(field);
+        }
+
         let ptr = bx.element_ptr(
             bx.backend_type(&field),
             self.val.llval,

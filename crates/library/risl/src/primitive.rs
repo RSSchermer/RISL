@@ -25,11 +25,6 @@ pub struct vec2_u32(pub u32, pub u32);
 pub struct vec2_i32(pub i32, pub i32);
 
 #[gpu]
-#[derive(Clone, Copy, Eq, Debug, Default)]
-#[cfg_attr(rislc, rislc::primitive(vec2_bool))]
-pub struct vec2_bool(pub bool, pub bool);
-
-#[gpu]
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C, align(16))]
 #[cfg_attr(rislc, rislc::primitive(vec3_f32))]
@@ -46,11 +41,6 @@ pub struct vec3_u32(pub u32, pub u32, pub u32);
 #[repr(C, align(16))]
 #[cfg_attr(rislc, rislc::primitive(vec3_i32))]
 pub struct vec3_i32(pub i32, pub i32, pub i32);
-
-#[gpu]
-#[derive(Clone, Copy, Eq, Debug, Default)]
-#[cfg_attr(rislc, rislc::primitive(vec3_bool))]
-pub struct vec3_bool(pub bool, pub bool, pub bool);
 
 #[gpu]
 #[derive(Clone, Copy, Debug, Default)]
@@ -70,11 +60,6 @@ pub struct vec4_u32(pub u32, pub u32, pub u32, pub u32);
 #[cfg_attr(rislc, rislc::primitive(vec4_i32))]
 pub struct vec4_i32(pub i32, pub i32, pub i32, pub i32);
 
-#[gpu]
-#[derive(Clone, Copy, Eq, Debug, Default)]
-#[cfg_attr(rislc, rislc::primitive(vec4_bool))]
-pub struct vec4_bool(pub bool, pub bool, pub bool, pub bool);
-
 macro_rules! impl_vec_partial_eq {
     ($name:ident, $el_ty_:ident, ($($el_id:tt : $el_ty:ident),*)) => {
         #[gpu]
@@ -89,15 +74,12 @@ macro_rules! impl_vec_partial_eq {
 impl_vec_partial_eq!(vec2_f32, f32, (0: f32, 1: f32));
 impl_vec_partial_eq!(vec2_u32, u32, (0: u32, 1: u32));
 impl_vec_partial_eq!(vec2_i32, i32, (0: i32, 1: i32));
-impl_vec_partial_eq!(vec2_bool, bool, (0: bool, 1: bool));
 impl_vec_partial_eq!(vec3_f32, f32, (0: f32, 1: f32, 2: f32));
 impl_vec_partial_eq!(vec3_u32, u32, (0: u32, 1: u32, 2: u32));
 impl_vec_partial_eq!(vec3_i32, i32, (0: i32, 1: i32, 2: i32));
-impl_vec_partial_eq!(vec3_bool, bool, (0: bool, 1: bool, 2: bool));
 impl_vec_partial_eq!(vec4_f32, f32, (0: f32, 1: f32, 2: f32, 3: f32));
 impl_vec_partial_eq!(vec4_u32, u32, (0: u32, 1: u32, 2: u32, 3: u32));
 impl_vec_partial_eq!(vec4_i32, i32, (0: i32, 1: i32, 2: i32, 3: i32));
-impl_vec_partial_eq!(vec4_bool, bool, (0: bool, 1: bool, 2: bool, 3: bool));
 
 macro_rules! impl_vec_arith {
     ($name:ident, $el_ty_:ident, ($($el_id:tt : $el_ty:ident),*)) => {

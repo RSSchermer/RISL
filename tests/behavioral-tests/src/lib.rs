@@ -7,5 +7,7 @@
 
 mod enum_result;
 mod slice;
+mod struct_single_scalar_field;
+mod struct_single_slice_field;
 mod variable_pointer_if_else;
 mod while_loop;

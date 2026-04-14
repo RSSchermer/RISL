@@ -10,7 +10,6 @@ doctest = false
 
 [features]
 test_enum_result = []
-test_variable_pointer_if_else = []
 test_slice_is_empty = []
 test_slice_len = []
 test_slice_index_range_get = []
@@ -44,6 +43,9 @@ test_slice_index_usize_get_unchecked_mut = []
 test_slice_iter_iter = []
 test_slice_iter_iter_mut = []
 test_slice_iter_iter_sub_slice = []
+test_struct_single_scalar_field = []
+test_struct_single_slice_field = []
+test_variable_pointer_if_else = []
 test_while_loop = []
 
 [dependencies]

@@ -328,6 +328,25 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         s1: abi::Scalar,
         layout: &TyAndLayout,
     ) -> slir::ty::Type {
+        if layout.ty.kind().is_adt() && layout.layout.fields.count() == 1 {
+            // Single-field ADTs where the field has a scalar-pair ABI are themselves also
+            // represented with a scalar-pair ABI. In these cases, the actual type we want to
+            // register is the type of the ADTs field, so we first project the layout to the first
+            // field.
+            let layout = layout.field(0);
+
+            self.register_scalar_pair_ty_impl(s0, s1, &layout)
+        } else {
+            self.register_scalar_pair_ty_impl(s0, s1, layout)
+        }
+    }
+
+    fn register_scalar_pair_ty_impl(
+        &self,
+        s0: abi::Scalar,
+        s1: abi::Scalar,
+        layout: &TyAndLayout,
+    ) -> slir::ty::Type {
         let t0 = self.resolve_scalar_ty(s0, &layout.field(0));
         let t1 = self.resolve_scalar_ty(s1, &layout.field(1));
 
