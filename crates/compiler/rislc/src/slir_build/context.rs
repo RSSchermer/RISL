@@ -124,6 +124,27 @@ fn primitive_ty_to_slir(primitive_ty: RislPrimitiveTy) -> slir::ty::Type {
     }
 }
 
+fn scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAndLayout) {
+    if !matches!(layout.layout.abi, ValueAbi::ScalarPair(..)) {
+        bug!("expected scalar pair layout");
+    }
+
+    // We have to account or "transparent" struct types. If a struct has only a single field, and
+    // the field has a scalar-pair ABI, then the struct itself is also represented with a
+    // scalar-pair. To get at the actual field types, we'll have to unpack its field, potentially
+    // recursively.
+    if layout.ty.kind().is_struct() && layout.layout.fields.count() == 1 {
+        let layout = layout.field(0);
+
+        return scalar_pair_field_layouts(&layout);
+    }
+
+    let field_0 = layout.field(0);
+    let field_1 = layout.field(1);
+
+    (field_0, field_1)
+}
+
 #[derive(Clone, Copy)]
 pub enum SlirStatic {
     Uniform(slir::UniformBinding),
@@ -328,27 +349,10 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         s1: abi::Scalar,
         layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        if layout.ty.kind().is_adt() && layout.layout.fields.count() == 1 {
-            // Single-field ADTs where the field has a scalar-pair ABI are themselves also
-            // represented with a scalar-pair ABI. In these cases, the actual type we want to
-            // register is the type of the ADTs field, so we first project the layout to the first
-            // field.
-            let layout = layout.field(0);
+        let (l0, l1) = scalar_pair_field_layouts(layout);
 
-            self.register_scalar_pair_ty_impl(s0, s1, &layout)
-        } else {
-            self.register_scalar_pair_ty_impl(s0, s1, layout)
-        }
-    }
-
-    fn register_scalar_pair_ty_impl(
-        &self,
-        s0: abi::Scalar,
-        s1: abi::Scalar,
-        layout: &TyAndLayout,
-    ) -> slir::ty::Type {
-        let t0 = self.resolve_scalar_ty(s0, &layout.field(0));
-        let t1 = self.resolve_scalar_ty(s1, &layout.field(1));
+        let t0 = self.resolve_scalar_ty(s0, &l0);
+        let t1 = self.resolve_scalar_ty(s1, &l1);
 
         // My understanding from rustc_codegen_llvm is that there is never any padding between
         // the values of a scalar pair (as they are never meant to be stored to memory).
@@ -658,13 +662,13 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
                         bug!("value ABI does not match pass-mode")
                     };
 
-                    let layout = TyAndLayout {
+                    let (l0, l1) = scalar_pair_field_layouts(&TyAndLayout {
                         ty: arg.ty,
                         layout: arg.layout.shape(),
-                    };
+                    });
 
-                    let a_ty = self.resolve_scalar_ty(a, &layout.field(0));
-                    let b_ty = self.resolve_scalar_ty(b, &layout.field(1));
+                    let a_ty = self.resolve_scalar_ty(a, &l0);
+                    let b_ty = self.resolve_scalar_ty(b, &l1);
 
                     args.push(slir::FnArg {
                         ty: a_ty,

@@ -1,4 +1,4 @@
-#![cfg(feature = "test_struct_single_scalar_field")]
+#![cfg(feature = "test_adt_struct_single_scalar_field")]
 
 // Rustc likes to represent single field structs with the layout of only the field. This test
 // verifies that we generate the correct SLIR in such cases.
@@ -17,8 +17,15 @@ struct Value {
 }
 
 #[gpu]
-fn increment_value(value: &mut Value) {
+fn increment_value_by_ref(value: &mut Value) {
     value.a += 1;
+}
+
+#[gpu]
+fn increment_value_by_val(mut value: Value) -> Value {
+    value.a += 1;
+
+    value
 }
 
 test_runner! {
@@ -30,7 +37,9 @@ test_runner! {
     shader: {
         let mut value = *VALUE;
 
-        increment_value(&mut value);
+        increment_value_by_ref(&mut value);
+
+        let value = increment_value_by_val(value);
 
         unsafe {
             *RESULT.as_mut_unchecked() = value.a;
@@ -41,7 +50,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = TestRunner::init().await?;
 
-    assert_eq!(runner.run(Value { a: 0 }).await?, 1u32);
+    assert_eq!(runner.run(Value { a: 0 }).await?, 2u32);
 
     Ok(())
 }

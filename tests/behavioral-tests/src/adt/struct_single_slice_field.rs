@@ -1,4 +1,4 @@
-#![cfg(feature = "test_struct_single_slice_field")]
+#![cfg(feature = "test_adt_struct_single_slice_field")]
 
 // Rustc likes to represent single field structs with the layout of only the field. This test
 // verifies that we generate the correct SLIR in such cases.
@@ -17,7 +17,12 @@ struct SliceWrapper<'a> {
 }
 
 #[gpu]
-fn slice_wrapper_len(wrapper: &SliceWrapper) -> u32 {
+fn slice_wrapper_len_by_ref(wrapper: &SliceWrapper) -> u32 {
+    wrapper.slice.len() as u32
+}
+
+#[gpu]
+fn slice_wrapper_len_by_val(wrapper: SliceWrapper) -> u32 {
     wrapper.slice.len() as u32
 }
 
@@ -29,10 +34,12 @@ test_runner! {
     result: u32,
     shader: {
         let wrapper = SliceWrapper { slice: VALUES.as_ref() };
-        let len = slice_wrapper_len(&wrapper);
+        let mut v = slice_wrapper_len_by_ref(&wrapper);
+
+        v += slice_wrapper_len_by_val(wrapper);
 
         unsafe {
-            *RESULT.as_mut_unchecked() = len;
+            *RESULT.as_mut_unchecked() = v;
         }
     },
 }
@@ -40,7 +47,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = TestRunner::init().await?;
 
-    assert_eq!(runner.run(vec![0u32, 1u32, 2u32, 3u32]).await?, 4u32);
+    assert_eq!(runner.run(vec![0u32, 1u32, 2u32, 3u32]).await?, 8u32);
 
     Ok(())
 }

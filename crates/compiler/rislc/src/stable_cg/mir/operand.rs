@@ -462,6 +462,15 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                     );
                 };
 
+                // Struct destinations may have a scalar-pair abi, if the struct has only a single
+                // field and that field has a scalar-pair abi. In such cases, before we can project
+                // the destination to both scalar-pair parts, we have to "unpack" the struct
+                // type-and-layout until we're left with the actual scalar-pair type-and-layout.
+                let mut dest = dest.clone();
+                while dest.layout.ty.kind().is_struct() && dest.layout.layout.fields.count() == 1 {
+                    dest = dest.project_field(bx, 0);
+                }
+
                 let a_val = bx.from_immediate(a);
                 let a_ptr = dest.project_field(bx, 0);
 
