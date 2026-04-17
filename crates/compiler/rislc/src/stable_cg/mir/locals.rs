@@ -97,8 +97,6 @@ impl<'a, 'b, Bx: BuilderMethods<'b>> NeedsInitAnalyzer<'a, 'b, Bx> {
             if !self.fx.cx.is_backend_immediate(&layout)
                 && !self.fx.cx.is_backend_scalar_pair(&layout)
             {
-                println!("needs alloca: {:?}", layout);
-
                 self.needs_alloca.insert(place.local);
             }
         }
