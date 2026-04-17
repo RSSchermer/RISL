@@ -1,5 +1,5 @@
 use rustc_middle::bug;
-use rustc_public::abi::{LayoutShape, Primitive, Scalar, VariantsShape};
+use rustc_public::abi::{LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape};
 use rustc_public::target::{MachineInfo, MachineSize};
 use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
@@ -176,6 +176,21 @@ impl TyAndLayout {
             }
             _ => bug!("invalid variant"),
         }
+    }
+
+    /// If the type is a new-type struct that wraps a scalar or scalar-pair value, unpacks the
+    /// layout to the underlying scalar or scalar-pair value.
+    pub fn unpack_immediate_or_scalar_pair(mut self) -> TyAndLayout {
+        if matches!(
+            self.layout.abi,
+            ValueAbi::Scalar(_) | ValueAbi::ScalarPair(..)
+        ) {
+            if self.ty.kind().is_struct() {
+                self = self.field(0);
+            }
+        }
+
+        self
     }
 }
 

@@ -160,11 +160,15 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             }
 
             PassMode::Direct(_) | PassMode::Pair(..) => {
-                let op = self.codegen_consume(bx, RETURN_PLACE_REF);
+                let mut op = self.codegen_consume(bx, RETURN_PLACE_REF);
 
                 if let Ref(place_val) = op.val {
                     bx.load_from_place(bx.backend_type(&op.layout), place_val)
                 } else {
+                    // The return type may be a struct new-type around the actual scalar-pair type,
+                    // so we adjust the layout if necessary, before codegen-ing the return value.
+                    op.layout = op.layout.unpack_immediate_or_scalar_pair();
+
                     op.immediate_or_packed_pair(bx)
                 }
             }

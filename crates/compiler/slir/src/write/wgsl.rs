@@ -397,7 +397,10 @@ impl WgslModuleWriter {
             | TypeKind::Enum(_)
             | TypeKind::Function(_)
             | TypeKind::Predicate
-            | TypeKind::Dummy => panic!("type should not occur in final output"),
+            | TypeKind::Dummy => panic!(
+                "`{}` type should not occur in final output",
+                ty.to_string(&cx.module.ty)
+            ),
         }
     }
 

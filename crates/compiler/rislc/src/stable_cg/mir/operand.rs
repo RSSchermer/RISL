@@ -318,6 +318,7 @@ impl<'a, V: CodegenObject> OperandRef<V> {
         } else {
             OperandValue::Immediate(llval)
         };
+
         OperandRef { val, layout }
     }
 
