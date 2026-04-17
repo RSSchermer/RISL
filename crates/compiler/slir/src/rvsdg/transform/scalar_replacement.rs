@@ -388,7 +388,7 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
                 // These operations take a pointer to an aggregate as input, but splitting does not
                 // propagate past these node kinds, so we end the search
             }
-            Switch(_) | Loop(_) | Simple(OpOffsetSlice(_)) => {
+            Switch(_) | Loop(_) | Simple(OpOffsetSlice(_)) | Simple(ValueProxy(_)) => {
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
             _ => unreachable!(
