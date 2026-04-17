@@ -442,8 +442,6 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             }
 
             _ => {
-                assert!(self.rvalue_creates_operand(rvalue));
-
                 let temp = self.codegen_rvalue_operand(bx, rvalue);
                 temp.val.store(bx, dest);
             }
@@ -500,11 +498,6 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         bx: &mut Bx,
         rvalue: &mir::Rvalue,
     ) -> OperandRef<Bx::Value> {
-        assert!(
-            self.rvalue_creates_operand(rvalue),
-            "cannot codegen {rvalue:?} to operand",
-        );
-
         match rvalue {
             mir::Rvalue::Cast(kind, source, mir_cast_ty) => {
                 let operand = self.codegen_operand(bx, source);
@@ -1006,51 +999,6 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             }
             _ => {
                 bug!("unexpected wide ptr binop");
-            }
-        }
-    }
-
-    pub(crate) fn rvalue_creates_operand(&self, rvalue: &Rvalue) -> bool {
-        match rvalue {
-            Rvalue::Cast(CastKind::Transmute, ..)
-            | Rvalue::ShallowInitBox(..)
-            | Rvalue::ThreadLocalRef(_) => {
-                bug!("R-value not supported by risl ({:?})", rvalue);
-            }
-            Rvalue::Ref(..)
-            | Rvalue::AddressOf(..)
-            | Rvalue::CopyForDeref(..)
-            | Rvalue::Len(..)
-            | Rvalue::Cast(..)
-            | Rvalue::BinaryOp(..)
-            | Rvalue::CheckedBinaryOp(..)
-            | Rvalue::UnaryOp(..)
-            | Rvalue::Discriminant(..)
-            | Rvalue::NullaryOp(..)
-            | Rvalue::Use(..) => true,
-            // Arrays are always aggregates, so it's not worth checking anything here.
-            // (If it's really `[(); N]` or `[T; 0]` and we use the place path, fine.)
-            Rvalue::Repeat(..) => false,
-            Rvalue::Aggregate(kind, _) => {
-                let allowed_kind = match kind {
-                    AggregateKind::Array(..) => false,
-                    AggregateKind::Tuple => true,
-                    AggregateKind::Adt(adt_def, ..) => adt_def.kind().is_struct(),
-                    mir::AggregateKind::Closure(..) => true,
-                    AggregateKind::RawPtr(..)
-                    | AggregateKind::Coroutine(..)
-                    | AggregateKind::CoroutineClosure(..) => {
-                        bug!("not supported by RISL")
-                    }
-                };
-
-                allowed_kind && {
-                    let ty = rvalue
-                        .ty(self.mir.locals())
-                        .expect("should be able to resolve type during codegen");
-
-                    !self.cx.is_backend_ref(&TyAndLayout::expect_from_ty(ty))
-                }
             }
         }
     }

@@ -5,14 +5,16 @@
 use std::ops::Index;
 
 use bit_set::BitSet;
-use bit_vec::BitVec;
 use rustc_public::mir;
 use rustc_public::mir::visit::Location;
-use rustc_public::mir::{BasicBlockIdx, MirVisitor, Rvalue, Statement, StatementKind};
+use rustc_public::mir::{
+    BasicBlockIdx, MirVisitor, Rvalue, Statement, StatementKind, Terminator, TerminatorKind,
+};
 use tracing::debug;
 
+use crate::stable_cg::TyAndLayout;
 use crate::stable_cg::mir::{FunctionCx, LocalRef};
-use crate::stable_cg::traits::BuilderMethods;
+use crate::stable_cg::traits::{BuilderMethods, CodegenMethods};
 
 pub(super) struct Locals<V> {
     values: Vec<LocalRef<V>>,
@@ -86,6 +88,23 @@ struct NeedsInitAnalyzer<'a, 'b, Bx: BuilderMethods<'b>> {
     needs_alloca: BitSet<usize>,
 }
 
+impl<'a, 'b, Bx: BuilderMethods<'b>> NeedsInitAnalyzer<'a, 'b, Bx> {
+    fn visit_assign_or_call_dest(&mut self, place: &mir::Place) {
+        if place.projection.is_empty() {
+            let ty = self.fx.mir.locals()[place.local].ty;
+            let layout = TyAndLayout::expect_from_ty(ty);
+
+            if !self.fx.cx.is_backend_immediate(&layout)
+                && !self.fx.cx.is_backend_scalar_pair(&layout)
+            {
+                println!("needs alloca: {:?}", layout);
+
+                self.needs_alloca.insert(place.local);
+            }
+        }
+    }
+}
+
 impl<'a, 'b, Bx: BuilderMethods<'b>> MirVisitor for NeedsInitAnalyzer<'a, 'b, Bx> {
     fn visit_place(
         &mut self,
@@ -131,15 +150,19 @@ impl<'a, 'b, Bx: BuilderMethods<'b>> MirVisitor for NeedsInitAnalyzer<'a, 'b, Bx
     }
 
     fn visit_statement(&mut self, stmt: &Statement, location: Location) {
-        if let StatementKind::Assign(place, rvalue) = &stmt.kind {
-            if place.projection.is_empty() {
-                if !self.fx.rvalue_creates_operand(rvalue) {
-                    self.needs_alloca.insert(place.local);
-                }
-            }
+        if let StatementKind::Assign(place, _) = &stmt.kind {
+            self.visit_assign_or_call_dest(place);
         }
 
         self.super_statement(stmt, location)
+    }
+
+    fn visit_terminator(&mut self, term: &Terminator, location: Location) {
+        if let TerminatorKind::Call { destination, .. } = &term.kind {
+            self.visit_assign_or_call_dest(destination);
+        }
+
+        self.super_terminator(term, location)
     }
 
     fn visit_rvalue(&mut self, rvalue: &Rvalue, location: Location) {

@@ -2,3 +2,4 @@ mod struct_single_nested_scalar_field;
 mod struct_single_nested_slice_field;
 mod struct_single_scalar_field;
 mod struct_single_slice_field;
+mod struct_single_struct_field;
