@@ -13,6 +13,7 @@ pub mod enum_replacement;
 pub mod fallback_value_replacement;
 pub mod function_inlining;
 pub mod invalid_ptr_replacement;
+pub mod loop_passthrough_elimination;
 pub mod memory_promotion_and_legalization;
 pub mod memory_transform;
 pub mod offset_slice_elaboration;
@@ -36,6 +37,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
     const_ptr_pull::transform_entry_points(module, rvsdg);
     switch_passthrough_elimination::transform_entry_points(module, rvsdg);
+    loop_passthrough_elimination::transform_entry_points(module, rvsdg);
     offset_slice_elaboration::transform_entry_points(module, rvsdg);
     memory_transform::transform_entry_points(module, rvsdg);
     offset_slice_replacement::transform_entry_points(module, rvsdg);
@@ -50,6 +52,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
     switch_passthrough_elimination::transform_entry_points(module, rvsdg);
+    loop_passthrough_elimination::transform_entry_points(module, rvsdg);
     dead_loop_value_normalization::transform_entry_points(module, rvsdg);
     dead_value_elimination::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
