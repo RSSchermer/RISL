@@ -56,6 +56,86 @@ where
 }
 
 #[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::first"))]
+pub fn slice_first<T>(slice: &[T]) -> Option<&T> {
+    if let [first, ..] = slice {
+        Some(first)
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::first_mut"))]
+pub fn slice_first_mut<T>(slice: &mut [T]) -> Option<&mut T> {
+    if let [first, ..] = slice {
+        Some(first)
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::split_first"))]
+pub fn slice_split_first<T>(slice: &[T]) -> Option<(&T, &[T])> {
+    if let [first, rest @ ..] = slice {
+        Some((first, rest))
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::split_first_mut"))]
+pub fn slice_split_first_mut<T>(slice: &mut [T]) -> Option<(&mut T, &mut [T])> {
+    if let [first, rest @ ..] = slice {
+        Some((first, rest))
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::last"))]
+pub fn slice_last<T>(slice: &[T]) -> Option<&T> {
+    if let [.., last] = slice {
+        Some(last)
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::last_mut"))]
+pub fn slice_last_mut<T>(slice: &mut [T]) -> Option<&mut T> {
+    if let [.., last] = slice {
+        Some(last)
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::split_last"))]
+pub fn slice_split_last<T>(slice: &[T]) -> Option<(&T, &[T])> {
+    if let [rest @ .., last] = slice {
+        Some((last, rest))
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::split_last_mut"))]
+pub fn slice_split_last_mut<T>(slice: &mut [T]) -> Option<(&mut T, &mut [T])> {
+    if let [rest @ .., last] = slice {
+        Some((last, rest))
+    } else {
+        None
+    }
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::iter"))]
 pub fn slice_iter<T>(slice: &[T]) -> Iter<'_, T> {
     Iter {

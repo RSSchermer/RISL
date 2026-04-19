@@ -1,6 +1,14 @@
 mod destructure_first;
 mod destructure_last;
+mod first;
+mod first_mut;
 mod index;
 mod is_empty;
 mod iter;
+mod last;
+mod last_mut;
 mod len;
+mod split_first;
+mod split_first_mut;
+mod split_last;
+mod split_last_mut;
