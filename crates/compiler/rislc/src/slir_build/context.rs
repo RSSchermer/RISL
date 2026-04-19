@@ -456,7 +456,8 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
                 // io-binding attributes must have io-binding attributes on all fields and therefore
                 // all fields must be of io-bindable types (which does not include fat pointers);
                 // for such types this should always resolve to the correct field-def.
-                let io_binding = field_defs.as_ref()
+                let io_binding = field_defs
+                    .as_ref()
                     .and_then(|defs| defs.get(i))
                     .and_then(|def| internal(self.rcx.tcx(), def.def).as_local())
                     .and_then(|id| self.rcx.hir_ext().field_ext.get(&id))
