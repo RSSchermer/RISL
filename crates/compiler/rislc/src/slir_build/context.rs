@@ -433,14 +433,15 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         field_offsets: &[MachineSize],
         layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        let TyKind::RigidTy(RigidTy::Adt(def, _)) = layout.ty.kind() else {
-            panic!("expected a struct type")
+        let field_defs = if let TyKind::RigidTy(RigidTy::Adt(def, _)) = layout.ty.kind() {
+            Some(
+                def.variant(VariantIdx::to_val(0))
+                    .expect("expected a struct variant")
+                    .fields(),
+            )
+        } else {
+            None
         };
-
-        let field_defs = def
-            .variant(VariantIdx::to_val(0))
-            .expect("expected a struct variant")
-            .fields();
 
         let fields = shape
             .fields
@@ -455,15 +456,12 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
                 // io-binding attributes must have io-binding attributes on all fields and therefore
                 // all fields must be of io-bindable types (which does not include fat pointers);
                 // for such types this should always resolve to the correct field-def.
-                let io_binding = if let Some(field_def) = field_defs.get(i) {
-                    internal(self.rcx.tcx(), field_def.def)
-                        .as_local()
-                        .and_then(|id| self.rcx.hir_ext().field_ext.get(&id))
-                        .and_then(|ext| ext.shader_io_binding)
-                        .map(shader_io_binding_to_slir)
-                } else {
-                    None
-                };
+                let io_binding = field_defs.as_ref()
+                    .and_then(|defs| defs.get(i))
+                    .and_then(|def| internal(self.rcx.tcx(), def.def).as_local())
+                    .and_then(|id| self.rcx.hir_ext().field_ext.get(&id))
+                    .and_then(|ext| ext.shader_io_binding)
+                    .map(shader_io_binding_to_slir);
 
                 slir::ty::StructField {
                     offset: field_offsets[i].bytes() as u64,
