@@ -509,21 +509,10 @@ impl<'a> Coalescer<'a> {
 
         match user {
             StateUser::Result => {
-                let owner = rvsdg[region].owner();
-
-                match rvsdg[owner].kind() {
-                    NodeKind::Switch(_) | NodeKind::Loop(_) => {
-                        let owner_region = rvsdg[owner].region();
-
-                        if let Some(state) = rvsdg[owner].state() {
-                            self.visit_state_user(rvsdg, owner_region, state.user);
-                        }
-                    }
-                    NodeKind::Function(_) => {
-                        // Do nothing, we're done...
-                    }
-                    _ => unreachable!("node kind cannot own a region"),
-                }
+                // We've reached the end of the region's state chain. If this region is owned by a
+                // control-flow node (Switch or Loop), then the visit_node call for that node will
+                // continue to the next node in the outer region's state chain. If this region is
+                // the function's body region, then we're done.
             }
             StateUser::Node(node) => self.visit_node(rvsdg, node),
         }
