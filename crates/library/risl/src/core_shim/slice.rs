@@ -136,6 +136,58 @@ pub fn slice_split_last_mut<T>(slice: &mut [T]) -> Option<(&mut T, &mut [T])> {
 }
 
 #[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::split_at_checked"))]
+pub fn slice_split_at_checked<T>(slice: &[T], mid: usize) -> Option<(&[T], &[T])> {
+    if mid <= slice.len() {
+        unsafe { Some(slice_split_at_unchecked(slice, mid)) }
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::split_at_unchecked"))]
+pub unsafe fn slice_split_at_unchecked<T>(slice: &[T], mid: usize) -> (&[T], &[T]) {
+    unsafe {
+        let p0 = slice.get_unchecked(..mid);
+        let p1 = slice.get_unchecked(mid..);
+
+        (p0, p1)
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("core::slice::<impl [T]>::split_at_mut_checked")
+)]
+pub fn slice_split_at_mut_checked<T>(slice: &mut [T], mid: usize) -> Option<(&mut [T], &mut [T])> {
+    if mid <= slice.len() {
+        unsafe { Some(slice_split_at_mut_unchecked(slice, mid)) }
+    } else {
+        None
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("core::slice::<impl [T]>::split_at_mut_unchecked")
+)]
+pub unsafe fn slice_split_at_mut_unchecked<T>(slice: &mut [T], mid: usize) -> (&mut [T], &mut [T]) {
+    unsafe {
+        // We use a transmute here to effectively erase the lifetime of the first borrow, without
+        // having to use raw pointers, which RISL does not support. Transmutes are generally also
+        // not supported, but a lifetime transmute like this is treated as a no-op in the MIR, so
+        // we don't need any special handling.
+        let p0: &mut [T] = mem::transmute(slice.get_unchecked_mut(..mid));
+        let p1 = slice.get_unchecked_mut(mid..);
+
+        (p0, p1)
+    }
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::slice::<impl [T]>::iter"))]
 pub fn slice_iter<T>(slice: &[T]) -> Iter<'_, T> {
     Iter {
