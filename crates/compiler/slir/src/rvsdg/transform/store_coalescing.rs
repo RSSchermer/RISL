@@ -426,7 +426,7 @@ impl<'a> Coalescer<'a> {
     fn visit_region(&mut self, rvsdg: &mut Rvsdg, region: Region) {
         let user = rvsdg[region].state_argument();
 
-        self.visit_state_user(rvsdg, region, *user);
+        self.visit_state_user(rvsdg, *user);
     }
 
     fn visit_node(&mut self, rvsdg: &mut Rvsdg, node: Node) {
@@ -495,13 +495,11 @@ impl<'a> Coalescer<'a> {
         };
 
         if let Some(state) = rvsdg[node].state() {
-            let region = rvsdg[node].region();
-
-            self.visit_state_user(rvsdg, region, state.user);
+            self.visit_state_user(rvsdg, state.user);
         }
     }
 
-    fn visit_state_user(&mut self, rvsdg: &mut Rvsdg, region: Region, user: StateUser) {
+    fn visit_state_user(&mut self, rvsdg: &mut Rvsdg, user: StateUser) {
         if StateUser::Result == user {
             // Reset at region boundaries.
             self.state.reset();
