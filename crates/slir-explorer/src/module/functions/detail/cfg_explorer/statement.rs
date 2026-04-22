@@ -1,57 +1,60 @@
 use leptos::prelude::*;
+use slir::cfg::Cfg;
 
 use crate::module::functions::detail::cfg_explorer::value::Value;
 use crate::module::module::use_module_data;
 use crate::module::url::function_url;
 
 #[component]
-pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-
-    let inner = match &module_data.cfg.read_value()[statement] {
-        slir::cfg::StatementData::Assign(_) => view! { <Assign statement/> }.into_any(),
-        slir::cfg::StatementData::Bind(_) => view! { <Bind statement/> }.into_any(),
+pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let inner = match &cfg.read_value()[statement] {
+        slir::cfg::StatementData::Assign(_) => view! { <Assign cfg statement/> }.into_any(),
+        slir::cfg::StatementData::Bind(_) => view! { <Bind cfg statement/> }.into_any(),
         slir::cfg::StatementData::Uninitialized(_) => {
-            view! { <Uninitialized statement/> }.into_any()
+            view! { <Uninitialized cfg statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpAlloca(_) => view! { <OpAlloca statement/> }.into_any(),
-        slir::cfg::StatementData::OpLoad(_) => view! { <OpLoad statement/> }.into_any(),
-        slir::cfg::StatementData::OpStore(_) => view! { <OpStore statement/> }.into_any(),
+        slir::cfg::StatementData::OpAlloca(_) => view! { <OpAlloca cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpLoad(_) => view! { <OpLoad cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpStore(_) => view! { <OpStore cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpExtractField(_) => {
-            view! { <OpExtractField statement/> }.into_any()
+            view! { <OpExtractField cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpExtractElement(_) => {
-            view! { <OpExtractElement statement/> }.into_any()
+            view! { <OpExtractElement cfg statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpFieldPtr(_) => view! { <OpFieldPtr statement/> }.into_any(),
-        slir::cfg::StatementData::OpElementPtr(_) => view! { <OpElementPtr statement/> }.into_any(),
-        slir::cfg::StatementData::OpVariantPtr(_) => view! { <OpVariantPtr statement/> }.into_any(),
+        slir::cfg::StatementData::OpFieldPtr(_) => view! { <OpFieldPtr cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpElementPtr(_) => {
+            view! { <OpElementPtr cfg statement/> }.into_any()
+        }
+        slir::cfg::StatementData::OpVariantPtr(_) => {
+            view! { <OpVariantPtr cfg statement/> }.into_any()
+        }
         slir::cfg::StatementData::OpGetDiscriminant(_) => {
-            view! { <OpGetDiscriminant statement/> }.into_any()
+            view! { <OpGetDiscriminant cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpSetDiscriminant(_) => {
-            view! { <OpSetDiscriminant statement/> }.into_any()
+            view! { <OpSetDiscriminant cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpOffsetSlice(_) => {
-            view! { <OpOffsetSlice statement/> }.into_any()
+            view! { <OpOffsetSlice cfg statement/> }.into_any()
         }
-        slir::cfg::StatementData::OpUnary(_) => view! { <OpUnary statement/> }.into_any(),
-        slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary statement/> }.into_any(),
-        slir::cfg::StatementData::OpCall(_) => view! { <OpCall statement/> }.into_any(),
+        slir::cfg::StatementData::OpUnary(_) => view! { <OpUnary cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
-            view! { <OpConvertToU32 statement/> }.into_any()
+            view! { <OpConvertToU32 cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpConvertToI32(_) => {
-            view! { <OpConvertToI32 statement/> }.into_any()
+            view! { <OpConvertToI32 cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpConvertToF32(_) => {
-            view! { <OpConvertToF32 statement/> }.into_any()
+            view! { <OpConvertToF32 cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpConvertToBool(_) => {
-            view! { <OpConvertToBool statement/> }.into_any()
+            view! { <OpConvertToBool cfg statement/> }.into_any()
         }
         slir::cfg::StatementData::OpArrayLength(_) => {
-            view! { <OpArrayLength statement/> }.into_any()
+            view! { <OpArrayLength cfg statement/> }.into_any()
         }
     };
 
@@ -61,230 +64,214 @@ pub fn Statement(statement: slir::cfg::Statement) -> impl IntoView {
 }
 
 #[component]
-pub fn Assign(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_assign();
+pub fn Assign(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_assign();
     let binding = stmt.local_binding();
     let value = stmt.value();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value/>
+        <Value cfg value=binding.into()/>" = "<Value cfg value/>
     }
 }
 
 #[component]
-pub fn Bind(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_bind();
+pub fn Bind(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_bind();
     let binding = stmt.local_binding();
     let value = stmt.value();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value/>
+        <Value cfg value=binding.into()/>" = "<Value cfg value/>
     }
 }
 
 #[component]
-pub fn Uninitialized(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_uninitialized();
+pub fn Uninitialized(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_uninitialized();
     let binding = stmt.local_binding();
 
     view! {
-        <Value value=binding.into()/>" = uninitialized"
+        <Value cfg value=binding.into()/>" = uninitialized"
     }
 }
 
 #[component]
-pub fn OpAlloca(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_alloca();
+pub fn OpAlloca(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_alloca();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/> " = alloca"
+        <Value cfg value=binding.into()/> " = alloca"
     }
 }
 
 #[component]
-pub fn OpLoad(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_load();
+pub fn OpLoad(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_load();
     let binding = stmt.result();
     let pointer = stmt.ptr();
 
     view! {
-        <Value value=binding.into()/> " = load "<Value value=pointer/>
+        <Value cfg value=binding.into()/> " = load "<Value cfg value=pointer/>
     }
 }
 
 #[component]
-pub fn OpStore(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_store();
+pub fn OpStore(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_store();
     let pointer = stmt.ptr();
     let value = stmt.value();
 
     view! {
-        "store "<Value value/>" into "<Value value=pointer/>
+        "store "<Value cfg value/>" into "<Value cfg value=pointer/>
     }
 }
 
 #[component]
-pub fn OpExtractField(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_extract_field();
+pub fn OpExtractField(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_extract_field();
     let aggregate = stmt.value();
     let field_index = stmt.field_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value=aggregate/>"._"{field_index}
+        <Value cfg value=binding.into()/>" = "<Value cfg value=aggregate/>"._"{field_index}
     }
 }
 
 #[component]
-pub fn OpExtractElement(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_extract_element();
+pub fn OpExtractElement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_extract_element();
     let aggregate = stmt.value();
     let index = stmt.element_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value=aggregate/>"["<Value value=index/>"]"
+        <Value cfg value=binding.into()/>" = "<Value cfg value=aggregate/>"["<Value cfg value=index/>"]"
     }
 }
 
 #[component]
-pub fn OpFieldPtr(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_field_ptr();
+pub fn OpFieldPtr(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_field_ptr();
     let ptr = stmt.ptr();
     let field_index = stmt.field_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value=ptr/>"._"{field_index}
+        <Value cfg value=binding.into()/>" = "<Value cfg value=ptr/>"._"{field_index}
     }
 }
 
 #[component]
-pub fn OpElementPtr(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_element_ptr();
+pub fn OpElementPtr(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_element_ptr();
     let ptr = stmt.ptr();
     let index = stmt.element_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = &"<Value value=ptr/>"["<Value value=index/>"]"
+        <Value cfg value=binding.into()/>" = &"<Value cfg value=ptr/>"["<Value cfg value=index/>"]"
     }
 }
 
 #[component]
-pub fn OpVariantPtr(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_variant_ptr();
+pub fn OpVariantPtr(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_variant_ptr();
     let ptr = stmt.ptr();
     let variant_index = stmt.variant_index();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = variant-ptr "<Value value=ptr/>":"{variant_index}
+        <Value cfg value=binding.into()/>" = variant-ptr "<Value cfg value=ptr/>":"{variant_index}
     }
 }
 
 #[component]
-pub fn OpGetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_get_discriminant();
+pub fn OpGetDiscriminant(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_get_discriminant();
     let ptr = stmt.ptr();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = get-discriminant "<Value value=ptr/>
+        <Value cfg value=binding.into()/>" = get-discriminant "<Value cfg value=ptr/>
     }
 }
 
 #[component]
-pub fn OpSetDiscriminant(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_set_discriminant();
+pub fn OpSetDiscriminant(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_set_discriminant();
     let ptr = stmt.ptr();
     let variant_index = stmt.variant_index();
 
     view! {
-        "set-discriminant "{variant_index}" on "<Value value=ptr/>
+        "set-discriminant "{variant_index}" on "<Value cfg value=ptr/>
     }
 }
 
 #[component]
-pub fn OpOffsetSlice(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_offset_slice_ptr();
+pub fn OpOffsetSlice(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_offset_slice_ptr();
     let ptr = stmt.ptr();
     let offset = stmt.offset();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>
+        <Value cfg value=binding.into()/>
         " = offset "
-        <Value value=ptr/>
+        <Value cfg value=ptr/>
         " by "
-        <Value value=offset/>
+        <Value cfg value=offset/>
     }
 }
 
 #[component]
-pub fn OpUnary(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_unary();
+pub fn OpUnary(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_unary();
     let value = stmt.value();
     let operator = stmt.operator();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>{format!(" = {}", operator)}<Value value/>
+        <Value cfg value=binding.into()/>{format!(" = {}", operator)}<Value cfg value/>
     }
 }
 
 #[component]
-pub fn OpBinary(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_binary();
+pub fn OpBinary(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_binary();
     let operator = stmt.operator();
     let lhs = stmt.lhs();
     let rhs = stmt.rhs();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = "<Value value=lhs/>{format!(" {} ", operator)}<Value value=rhs/>
+        <Value cfg value=binding.into()/>" = "<Value cfg value=lhs/>{format!(" {} ", operator)}<Value cfg value=rhs/>
     }
 }
 
 #[component]
-pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpCall(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
     let module_data = use_module_data();
     let module_name = module_data.module.read_value().name;
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_call();
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_call();
     let callee = stmt.callee();
     let binding = stmt.maybe_result();
 
@@ -296,14 +283,14 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
             arg_views.push(view! {", "}.into_any());
         }
 
-        arg_views.push(view! { <Value value=arg/> }.into_any());
+        arg_views.push(view! { <Value cfg value=arg/> }.into_any());
 
         is_first = false;
     }
 
     view! {
         {{move || binding.map(|binding | view! {
-            <Value value=binding.into()/>" = "
+            <Value cfg value=binding.into()/>" = "
         })}}
 
         <a href=function_url(module_name, callee)>
@@ -314,66 +301,61 @@ pub fn OpCall(statement: slir::cfg::Statement) -> impl IntoView {
 }
 
 #[component]
-pub fn OpConvertToU32(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_convert_to_u32();
+pub fn OpConvertToU32(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_convert_to_u32();
     let value = stmt.value();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = u32("<Value value/>")"
+        <Value cfg value=binding.into()/>" = u32("<Value cfg value/>")"
     }
 }
 
 #[component]
-pub fn OpConvertToI32(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_convert_to_i32();
+pub fn OpConvertToI32(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_convert_to_i32();
     let value = stmt.value();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = i32("<Value value/>")"
+        <Value cfg value=binding.into()/>" = i32("<Value cfg value/>")"
     }
 }
 
 #[component]
-pub fn OpConvertToF32(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_convert_to_f32();
+pub fn OpConvertToF32(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_convert_to_f32();
     let value = stmt.value();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = f32("<Value value/>")"
+        <Value cfg value=binding.into()/>" = f32("<Value cfg value/>")"
     }
 }
 
 #[component]
-pub fn OpConvertToBool(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_convert_to_bool();
+pub fn OpConvertToBool(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_convert_to_bool();
     let value = stmt.value();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = bool("<Value value/>")"
+        <Value cfg value=binding.into()/>" = bool("<Value cfg value/>")"
     }
 }
 
 #[component]
-pub fn OpArrayLength(statement: slir::cfg::Statement) -> impl IntoView {
-    let module_data = use_module_data();
-    let cfg = module_data.cfg.read_value();
-    let stmt = cfg[statement].expect_op_array_length();
+pub fn OpArrayLength(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_array_length();
     let value = stmt.ptr();
     let binding = stmt.result();
 
     view! {
-        <Value value=binding.into()/>" = array-length("<Value value/>")"
+        <Value cfg value=binding.into()/>" = array-length("<Value cfg value/>")"
     }
 }

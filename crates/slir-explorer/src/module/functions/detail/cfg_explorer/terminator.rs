@@ -1,11 +1,11 @@
 use leptos::prelude::*;
-use slir::cfg::BranchSelector;
+use slir::cfg::{BranchSelector, Cfg};
 use slotmap::Key;
 
 use crate::module::functions::detail::cfg_explorer::value::Value;
 
 #[component]
-pub fn Terminator(terminator: slir::cfg::Terminator) -> impl IntoView {
+pub fn Terminator(cfg: StoredValue<Cfg>, terminator: slir::cfg::Terminator) -> impl IntoView {
     match terminator {
         slir::cfg::Terminator::Branch(branch) => {
             let targets = branch.targets().iter().copied().collect::<Vec<_>>();
@@ -35,7 +35,7 @@ pub fn Terminator(terminator: slir::cfg::Terminator) -> impl IntoView {
             match branch.selector() {
                 BranchSelector::Single => view! { "branch " {targets}}.into_any(),
                 BranchSelector::Bool(value) => view! {
-                    "branch_bool("<Value value=value.into()/>")" {targets}
+                    "branch_bool("<Value cfg value=value.into()/>")" {targets}
                 }
                 .into_any(),
                 BranchSelector::Case { value, cases } => {
@@ -46,12 +46,12 @@ pub fn Terminator(terminator: slir::cfg::Terminator) -> impl IntoView {
                         .join(", ");
 
                     view! {
-                        "branch_case("<Value value=value.into()/>" : [" {cases} "])" {targets}
+                        "branch_case("<Value cfg value=value.into()/>" : [" {cases} "])" {targets}
                     }
                     .into_any()
                 }
                 BranchSelector::U32(value) => view! {
-                    "branch_u32("<Value value=value.into()/>")" {targets}
+                    "branch_u32("<Value cfg value=value.into()/>")" {targets}
                 }
                 .into_any(),
             }
@@ -61,7 +61,7 @@ pub fn Terminator(terminator: slir::cfg::Terminator) -> impl IntoView {
         }
         .into_any(),
         slir::cfg::Terminator::Return(Some(value)) => view! {
-            "return "<Value value/>
+            "return "<Value cfg value/>
         }
         .into_any(),
         slir::cfg::Terminator::Unreachable => view! {

@@ -15,32 +15,54 @@ type HighlightSignal = (
     WriteSignal<Option<slir::cfg::LocalBinding>>,
 );
 
+#[derive(Copy, Clone)]
+pub enum CfgStage {
+    Initial,
+    Structurized,
+}
+
 #[component]
-pub fn CfgExplorer() -> impl IntoView {
+pub fn CfgExplorer(stage: CfgStage) -> impl IntoView {
     let module_data = use_module_data();
     let function = use_function();
     let highlight_signal: HighlightSignal = signal(None);
+    let cfg = match stage {
+        CfgStage::Initial => Some(module_data.cfg_initial),
+        CfgStage::Structurized => module_data.cfg_structurized,
+    };
 
     provide_context(highlight_signal);
 
     view! {
-        <div class="params">
-            <div class="param-list-header">
-                Function Parameters
-            </div>
-            <ul class="param-list">
-                {move || {
-                    module_data.cfg.read_value()[function].argument_values().iter().map(|p| view! {
-                        <li><Value value=(*p).into()/></li>
-                    }).collect_view()
-                }}
-            </ul>
-        </div>
-
         {move || {
-            module_data.cfg.read_value()[function].basic_blocks().iter().copied().map(|bb| view! {
-                <BasicBlock bb/>
-            }).collect_view()
+            if let Some(cfg) = cfg {
+                view! {
+                    <div class="params">
+                        <div class="param-list-header">
+                            Function Parameters
+                        </div>
+                        <ul class="param-list">
+                            {move || {
+                                cfg.read_value()[function].argument_values().iter().map(|p| view! {
+                                    <li><Value cfg value=(*p).into()/></li>
+                                }).collect_view()
+                            }}
+                        </ul>
+                    </div>
+
+                    {move || {
+                        cfg.read_value()[function].basic_blocks().iter().copied().map(|bb| view! {
+                            <BasicBlock cfg bb/>
+                        }).collect_view()
+                    }}
+                }.into_any()
+            } else {
+                view! {
+                    <div class="info-page-container">
+                        <p>"No CFG for the current function."</p>
+                    </div>
+                }.into_any()
+            }
         }}
     }
 }

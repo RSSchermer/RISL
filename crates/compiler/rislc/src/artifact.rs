@@ -11,7 +11,8 @@ use slir::smi::ShaderModuleInterface;
 use crate::context::RislContext;
 
 pub const MODULE_IDENTIFIER: &'static str = "module";
-pub const CFG_IDENTIFIER: &'static str = "cfg";
+pub const CFG_INITIAL_IDENTIFIER: &'static str = "cfg_initial";
+pub const CFG_STRUCTURIZED_IDENTIFIER: &'static str = "cfg_structurized";
 pub const SCF_IDENTIFIER: &'static str = "scf";
 pub const RVSDG_INITIAL_IDENTIFIER: &'static str = "rvsdg_initial";
 pub const RVSDG_TRANSFORMED_IDENTIFIER: &'static str = "rvsdg_transformed";
@@ -20,6 +21,7 @@ pub const SMI_IDENTIFIER: &'static str = "smi";
 
 pub struct SlirArtifactBuilderConfig {
     pub module_id: LocalModDefId,
+    pub include_cfg_structurized: bool,
     pub include_rvsdg_initial: bool,
     pub include_rvsdg_transformed: bool,
     pub include_wgsl: bool,
@@ -29,7 +31,8 @@ pub struct SlirArtifactBuilderConfig {
 pub struct SlirArtifactBuilder {
     inner: GnuBuilder<File>,
     module_identifier: Vec<u8>,
-    cfg_identifier: Vec<u8>,
+    cfg_initial_identifier: Vec<u8>,
+    cfg_structurized_identifier: Option<Vec<u8>>,
     scf_identifier: Vec<u8>,
     rvsdg_initial_identifier: Option<Vec<u8>>,
     rvsdg_transformed_identifier: Option<Vec<u8>>,
@@ -41,6 +44,7 @@ impl SlirArtifactBuilder {
     pub fn new(cx: &RislContext, config: SlirArtifactBuilderConfig) -> Self {
         let SlirArtifactBuilderConfig {
             module_id,
+            include_cfg_structurized,
             include_rvsdg_initial,
             include_rvsdg_transformed,
             include_wgsl,
@@ -51,7 +55,9 @@ impl SlirArtifactBuilder {
         let file = File::create(filename).expect("failed to create slir artifact file");
 
         let module_identifier = MODULE_IDENTIFIER.as_bytes().to_vec();
-        let cfg_identifier = CFG_IDENTIFIER.as_bytes().to_vec();
+        let cfg_initial_identifier = CFG_INITIAL_IDENTIFIER.as_bytes().to_vec();
+        let cfg_structurized_identifier =
+            include_cfg_structurized.then(|| CFG_STRUCTURIZED_IDENTIFIER.as_bytes().to_vec());
         let scf_identifier = SCF_IDENTIFIER.as_bytes().to_vec();
         let rvsdg_initial_identifier =
             include_rvsdg_initial.then(|| RVSDG_INITIAL_IDENTIFIER.as_bytes().to_vec());
@@ -62,9 +68,13 @@ impl SlirArtifactBuilder {
 
         let mut identifiers = vec![
             module_identifier.clone(),
-            cfg_identifier.clone(),
+            cfg_initial_identifier.clone(),
             scf_identifier.clone(),
         ];
+
+        if let Some(cfg_structurized_identifier) = &cfg_structurized_identifier {
+            identifiers.push(cfg_structurized_identifier.clone());
+        }
 
         if let Some(rvsdg_initial_identifier) = &rvsdg_initial_identifier {
             identifiers.push(rvsdg_initial_identifier.clone());
@@ -87,7 +97,8 @@ impl SlirArtifactBuilder {
         SlirArtifactBuilder {
             inner,
             module_identifier,
-            cfg_identifier,
+            cfg_initial_identifier,
+            cfg_structurized_identifier,
             scf_identifier,
             rvsdg_initial_identifier,
             rvsdg_transformed_identifier,
@@ -96,16 +107,18 @@ impl SlirArtifactBuilder {
         }
     }
 
-    pub fn add_cfg(&mut self, cfg: &Cfg) {
+    pub fn add_cfg_initial(&mut self, cfg: &Cfg) {
         let encoding = bincode::serde::encode_to_vec(cfg, bincode::config::standard())
-            .expect("failed to encode SLIR Control-Flow Graph");
+            .expect("failed to encode the initial SLIR Control-Flow Graph");
 
         self.inner
             .append(
-                &Header::new(self.cfg_identifier.clone(), encoding.len() as u64),
+                &Header::new(self.cfg_initial_identifier.clone(), encoding.len() as u64),
                 encoding.as_slice(),
             )
-            .expect("failed to append SLIR Control-Flow Graph to SLIR artifact archive");
+            .expect(
+                "failed to append the initial SLIR Control-Flow Graph to SLIR artifact archive",
+            );
     }
 
     pub fn add_scf(&mut self, cfg: &Scf) {
@@ -118,6 +131,23 @@ impl SlirArtifactBuilder {
                 encoding.as_slice(),
             )
             .expect("failed to append SLIR Structured Control-Flow to SLIR artifact archive");
+    }
+
+    pub fn maybe_add_cfg_structurized(&mut self, cfg: &Cfg) {
+        if let Some(identifier) = self.cfg_structurized_identifier.clone() {
+            let encoding = bincode::serde::encode_to_vec(cfg, bincode::config::standard())
+                .expect("failed to encode the structurized SLIR Control-Flow Graph");
+
+            self.inner
+                .append(
+                    &Header::new(identifier, encoding.len() as u64),
+                    encoding.as_slice(),
+                )
+                .expect(
+                    "failed to append the structurized SLIR Control-Flow Graph to SLIR artifact \
+                    archive",
+                );
+        }
     }
 
     pub fn maybe_add_rvsdg_initial(&mut self, rvsdg: &Rvsdg) {

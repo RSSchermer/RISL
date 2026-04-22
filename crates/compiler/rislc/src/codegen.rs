@@ -72,6 +72,7 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
                 cx,
                 SlirArtifactBuilderConfig {
                     module_id: shader_module.def_id,
+                    include_cfg_structurized: true,
                     include_rvsdg_initial: true,
                     include_rvsdg_transformed: true,
                     include_wgsl: true,
@@ -83,10 +84,11 @@ pub fn codegen_shader_modules(cx: &Cx) -> (slir::Module, slir::cfg::Cfg) {
 
             slir::dependencies::import_dependencies(&mut module, &mut cfg, &mut dependency_loader);
 
-            artifact_builder.add_cfg(&cfg);
+            artifact_builder.add_cfg_initial(&cfg);
 
             let mut rvsdg = slir::cfg_to_rvsdg::cfg_to_rvsdg(&mut module, &mut cfg);
 
+            artifact_builder.maybe_add_cfg_structurized(&cfg);
             artifact_builder.maybe_add_rvsdg_initial(&rvsdg);
 
             rvsdg::transform::transform(&mut module, &mut rvsdg);

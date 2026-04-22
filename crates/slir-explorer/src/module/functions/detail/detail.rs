@@ -5,13 +5,14 @@ use leptos_router::params::Params;
 use slir::{Function, Symbol};
 use urlencoding::decode as urldecode;
 
-use crate::module::functions::detail::cfg_explorer::CfgExplorer;
+use crate::module::functions::detail::cfg_explorer::{CfgExplorer, CfgStage};
 use crate::module::functions::detail::rvsdg_explorer::{RvsdgExplorer, RvsdgStage};
 use crate::module::functions::detail::scf_explorer::ScfExplorer;
 use crate::module::module::use_module_data;
 use crate::module::ty::Type;
 
-const MODE_CFG: &'static str = "cfg";
+const MODE_CFG_INITIAL: &'static str = "cfg-initial";
+const MODE_CFG_STRUCTURIZED: &'static str = "cfg-structurized";
 const MODE_RVSDG_INITIAL: &'static str = "rvsdg-initial";
 const MODE_RVSDG_TRANSFORMED: &'static str = "rvsdg-transformed";
 const MODE_SCF: &'static str = "scf";
@@ -22,7 +23,8 @@ pub fn use_function() -> Function {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Mode {
-    Cfg,
+    CfgInitial,
+    CfgStructurized,
     RvsdgInitial,
     RvsdgTransformed,
     Scf,
@@ -31,10 +33,11 @@ enum Mode {
 impl Mode {
     fn from_str(str: &str) -> Self {
         match str {
+            MODE_CFG_STRUCTURIZED => Mode::CfgStructurized,
             MODE_RVSDG_INITIAL => Mode::RvsdgInitial,
             MODE_RVSDG_TRANSFORMED => Mode::RvsdgTransformed,
             MODE_SCF => Mode::Scf,
-            _ => Mode::Cfg,
+            _ => Mode::CfgInitial,
         }
     }
 }
@@ -109,8 +112,11 @@ pub fn Detail() -> impl IntoView {
                             <div class="function-body">
                                 {move || {
                                     match mode() {
-                                        Mode::Cfg => view! {
-                                            <CfgExplorer/>
+                                        Mode::CfgInitial => view! {
+                                            <CfgExplorer stage=CfgStage::Initial/>
+                                        }.into_any(),
+                                        Mode::CfgStructurized => view! {
+                                            <CfgExplorer stage=CfgStage::Structurized/>
                                         }.into_any(),
                                         Mode::RvsdgInitial => view! {
                                             <RvsdgExplorer stage=RvsdgStage::Initial/>
@@ -184,11 +190,17 @@ fn FnSig(function: Function) -> impl IntoView {
 fn ModeList(selected_mode: Mode) -> impl IntoView {
     view! {
         <div class="function-mode-list">
-            <a href=format!("?mode={}", MODE_CFG)
+            <a href=format!("?mode={}", MODE_CFG_INITIAL)
                 class="function-mode"
-                class:active=move || selected_mode == Mode::Cfg
+                class:active=move || selected_mode == Mode::CfgInitial
             >
-                "CFG"
+                "CFG-initial"
+            </a>
+            <a href=format!("?mode={}", MODE_CFG_STRUCTURIZED)
+                class="function-mode"
+                class:active=move || selected_mode == Mode::CfgStructurized
+            >
+                "CFG-structurized"
             </a>
             <a href=format!("?mode={}", MODE_RVSDG_INITIAL)
                 class="function-mode"

@@ -22,7 +22,8 @@ pub fn use_module_data() -> ModuleData {
 #[derive(Clone, Copy)]
 pub struct ModuleData {
     pub module: StoredValue<Module>,
-    pub cfg: StoredValue<Cfg>,
+    pub cfg_initial: StoredValue<Cfg>,
+    pub cfg_structurized: Option<StoredValue<Cfg>>,
     pub rvsdg_initial: Option<StoredValue<Rvsdg>>,
     pub rvsdg_transformed: Option<StoredValue<Rvsdg>>,
     pub scf: Option<StoredValue<Scf>>,
@@ -34,7 +35,8 @@ impl ModuleData {
         let mut archive = Archive::new(bytes);
 
         let mut module = None;
-        let mut cfg = None;
+        let mut cfg_initial = None;
+        let mut cfg_structurized = None;
         let mut rvsdg_initial = None;
         let mut rvsdg_transformed = None;
         let mut scf = None;
@@ -51,12 +53,20 @@ impl ModuleData {
                 module = Some(decoded);
             }
 
-            if entry.header().identifier() == "cfg".as_bytes() {
+            if entry.header().identifier() == "cfg_initial".as_bytes() {
                 let decoded: slir::cfg::CfgData =
                     bincode::serde::decode_from_std_read(&mut entry, bincode::config::standard())
-                        .map_err(|_| "CFG encoding was invalid".to_string())?;
+                        .map_err(|_| "CFG-initial encoding was invalid".to_string())?;
 
-                cfg = Some(decoded);
+                cfg_initial = Some(decoded);
+            }
+
+            if entry.header().identifier() == "cfg_structurized".as_bytes() {
+                let decoded: slir::cfg::CfgData =
+                    bincode::serde::decode_from_std_read(&mut entry, bincode::config::standard())
+                        .map_err(|_| "CFG-structurized encoding was invalid".to_string())?;
+
+                cfg_structurized = Some(decoded);
             }
 
             if entry.header().identifier() == "rvsdg_initial".as_bytes() {
@@ -96,9 +106,11 @@ impl ModuleData {
 
         let module =
             module.ok_or("SLIR arfifact should always contain a `module` entry".to_string())?;
-        let cfg_data =
-            cfg.ok_or("SLIR arfifact should always contain a `cfg` entry".to_string())?;
-        let cfg = Cfg::from_ty_and_data(module.ty.clone(), cfg_data);
+        let cfg_initial_data = cfg_initial
+            .ok_or("SLIR arfifact should always contain a `cfg_initial` entry".to_string())?;
+        let cfg_initial = Cfg::from_ty_and_data(module.ty.clone(), cfg_initial_data);
+        let cfg_structurized =
+            cfg_structurized.map(|data| Cfg::from_ty_and_data(module.ty.clone(), data));
         let rvsdg_initial =
             rvsdg_initial.map(|data| Rvsdg::from_ty_and_data(module.ty.clone(), data));
         let rvsdg_transformed =
@@ -107,7 +119,8 @@ impl ModuleData {
 
         Ok(ModuleData {
             module: StoredValue::new(module),
-            cfg: StoredValue::new(cfg),
+            cfg_initial: StoredValue::new(cfg_initial),
+            cfg_structurized: cfg_structurized.map(StoredValue::new),
             rvsdg_initial: rvsdg_initial.map(StoredValue::new),
             rvsdg_transformed: rvsdg_transformed.map(StoredValue::new),
             scf: scf.map(StoredValue::new),
