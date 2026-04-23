@@ -21,7 +21,7 @@ impl Intrinsic for OpStore {
             ));
         };
 
-        if arg_1 != pointee_ty {
+        if !ty_registry.can_coerce(arg_1, pointee_ty) {
             return Err(format!(
                 "store operation expected the second argument to be of type `{}`, but found type \
                 `{}`",
