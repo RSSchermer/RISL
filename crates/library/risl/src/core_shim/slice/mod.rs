@@ -1,3 +1,3 @@
-mod cmp;
+pub mod cmp;
 pub mod iter;
 pub mod slice;
