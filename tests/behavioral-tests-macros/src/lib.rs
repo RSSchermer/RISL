@@ -393,11 +393,11 @@ pub fn test_runner(macro_input: TokenStream) -> TokenStream {
 
                 #input_buffer_creations
 
-                let result_buffer = self.device.create_buffer(
+                let result_buffer: empa::buffer::Buffer<#result_ty, _> = self.device.create_buffer(
                     <#result_ty>::default(),
                     empa::buffer::Usages::storage_binding().and_copy_src(),
                 );
-                let readback_buffer = self.device.create_buffer(
+                let readback_buffer: empa::buffer::Buffer<#result_ty, _> = self.device.create_buffer(
                     <#result_ty>::default(),
                     empa::buffer::Usages::map_read().and_copy_dst(),
                 );
