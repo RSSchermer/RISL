@@ -98,9 +98,11 @@ impl Index<LocalBinding> for InputStateTracker {
     type Output = ValueInput;
 
     fn index(&self, value: LocalBinding) -> &Self::Output {
-        self.state
-            .get(&InputState::Value(value))
-            .expect("no input found for value")
+        if let Some(input) = self.state.get(&InputState::Value(value)) {
+            input
+        } else {
+            panic!("no input found for value `{:?}`", value);
+        }
     }
 }
 
@@ -128,33 +130,41 @@ struct RegionBuilder<'a> {
 }
 
 impl<'a> RegionBuilder<'a> {
-    fn visit_node_expect_linear(&mut self, node: ControlTreeNode) {
+    fn visit_node_expect_linear(&mut self, node: ControlTreeNode, post_demand: &[LocalBinding]) {
         let data = self.control_tree[node].expect_linear();
 
-        self.visit_linear_node(data);
+        self.visit_linear_node(data, post_demand);
     }
 
-    fn visit_linear_node(&mut self, data: &LinearNode) {
+    fn visit_node(&mut self, node: ControlTreeNode, post_demand: &[LocalBinding]) {
+        match &self.control_tree[node] {
+            ControlTreeNodeKind::BasicBlock(bb) => self.visit_basic_block(*bb),
+            ControlTreeNodeKind::Linear(data) => self.visit_linear_node(data, post_demand),
+            ControlTreeNodeKind::Branching(data) => {
+                self.visit_branching_node((node, data), post_demand)
+            }
+            ControlTreeNodeKind::Loop(data) => self.visit_loop_node((node, data)),
+        }
+    }
+
+    fn visit_linear_node(&mut self, data: &LinearNode, post_demand: &[LocalBinding]) {
         for i in 0..data.children.len() {
             let child = data.children[i];
 
-            match &self.control_tree[child] {
-                ControlTreeNodeKind::BasicBlock(bb) => self.visit_basic_block(*bb),
-                ControlTreeNodeKind::Linear(child_data) => self.visit_linear_node(child_data),
-                ControlTreeNodeKind::Branching(child_data) => {
-                    let next_sibling = data.children.get(i + 1).copied();
+            let child_post_demand = if let Some(next_sibling) = data.children.get(i + 1) {
+                self.demand.get(*next_sibling)
+            } else {
+                post_demand
+            };
 
-                    self.visit_branching_node((child, child_data), next_sibling);
-                }
-                ControlTreeNodeKind::Loop(child_data) => self.visit_loop_node((child, child_data)),
-            }
+            self.visit_node(child, child_post_demand);
         }
     }
 
     fn visit_branching_node(
         &mut self,
         (node, data): (ControlTreeNode, &BranchingNode),
-        next_sibling: Option<ControlTreeNode>,
+        post_demand: &[LocalBinding],
     ) {
         let item_deps = self.item_dependencies.get(node);
         let demand = self.demand.get(node);
@@ -211,16 +221,10 @@ impl<'a> RegionBuilder<'a> {
         //
         // Note that we don't have a node handle for the switch node yet, so we'll have to update
         // the input state tracker later.
-        let value_outputs = if let Some(next_sibling) = next_sibling {
-            let next_sibling_demand = self.demand.get(next_sibling);
-
-            next_sibling_demand
-                .iter()
-                .map(|value| ValueOutput::new(self.cfg[*value].ty()))
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let value_outputs = post_demand
+            .iter()
+            .map(|value| ValueOutput::new(self.cfg[*value].ty()))
+            .collect();
 
         let state_origin = uses_state.then(|| self.state_origin);
 
@@ -234,27 +238,19 @@ impl<'a> RegionBuilder<'a> {
             let region = self.rvsdg.add_switch_branch(node);
             let mut branch_builder = self.subregion_builder(region, branch_input_state.clone());
 
-            branch_builder.visit_node_expect_linear(*branch);
+            branch_builder.visit_node_expect_linear(*branch, post_demand);
 
             // If the switch node has output demand, then connect the results of the branch region
-            if let Some(next_sibling) = next_sibling {
-                let next_sibling_demand = branch_builder.demand.get(next_sibling);
-
-                for (i, value) in next_sibling_demand.iter().enumerate() {
-                    branch_builder.connect_value_result(i as u32, value.into());
-                }
+            for (i, value) in post_demand.iter().enumerate() {
+                branch_builder.connect_value_result(i as u32, value.into());
             }
         }
 
         // Now that we have a node handle, update the input state tracker with the switch node's
         // outputs
-        if let Some(next_sibling) = next_sibling {
-            let next_sibling_demand = self.demand.get(next_sibling);
-
-            for (i, value) in next_sibling_demand.iter().enumerate() {
-                self.input_state_tracker
-                    .insert_value_node(self.cfg, *value, node, i as u32);
-            }
+        for (i, value) in post_demand.iter().enumerate() {
+            self.input_state_tracker
+                .insert_value_node(self.cfg, *value, node, i as u32);
         }
 
         // Keep track of the state tail
@@ -295,7 +291,7 @@ impl<'a> RegionBuilder<'a> {
 
         let mut inner_builder = self.subregion_builder(region, inner_input_state);
 
-        inner_builder.visit_node_expect_linear(data.inner);
+        inner_builder.visit_node_expect_linear(data.inner, demand);
 
         // Connect the re-entry predicate result
         inner_builder.connect_value_result(0, reentry_condition.into());
@@ -565,7 +561,7 @@ fn build_body(
         state_origin: StateOrigin::Argument,
     };
 
-    region_builder.visit_node_expect_linear(control_tree.root());
+    region_builder.visit_node_expect_linear(control_tree.root(), &[]);
 }
 
 fn add_item(
