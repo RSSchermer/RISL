@@ -1,3 +1,4 @@
+mod cmp;
 mod destructure_first;
 mod destructure_last;
 mod first;
