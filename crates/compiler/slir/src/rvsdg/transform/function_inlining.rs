@@ -4,7 +4,7 @@ use rustc_hash::FxHashSet;
 
 use crate::Module;
 use crate::rvsdg::transform::region_replication::replicate_region;
-use crate::rvsdg::visit::bottom_up::{BottomUpVisitor, visit_node_bottom_up};
+use crate::rvsdg::visit::region_nodes::{self, RegionNodesVisitor};
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueInput, ValueOrigin};
 
 /// Adds missing dependencies to the function we're inlining into.
@@ -195,13 +195,13 @@ impl CallNodeCollector {
     }
 }
 
-impl BottomUpVisitor for CallNodeCollector {
+impl RegionNodesVisitor for CallNodeCollector {
     fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
         if rvsdg[node].is_op_call() && self.seen.insert(node) {
             self.queue.push_back(node);
         }
 
-        visit_node_bottom_up(self, rvsdg, node);
+        region_nodes::visit_node(self, rvsdg, node);
     }
 }
 
