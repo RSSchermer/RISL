@@ -33,4 +33,15 @@ where
             false
         }
     }
+
+    #[cfg_attr(
+        rislc,
+        rislc::core_shim("core::slice::cmp::<impl core::cmp::PartialEq<[U]> for [T]>::ne")
+    )]
+    fn ne(&self, other: &[U]) -> bool {
+        !crate::core_shim::cmp::PartialEq::eq(self, other)
+    }
 }
+
+#[gpu]
+impl<T: Eq> crate::core_shim::cmp::Eq for [T] {}

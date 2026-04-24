@@ -12,3 +12,7 @@ where
         !self.eq(other)
     }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::cmp::Eq"))]
+pub trait Eq: core::cmp::PartialEq {}
