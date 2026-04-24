@@ -525,7 +525,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     | mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_))
                     | mir::CastKind::PointerCoercion(PointerCoercion::ClosureFnPointer(_))
                     | mir::CastKind::PointerCoercion(PointerCoercion::UnsafeFnPointer) => {
-                        bug!("cast not supported by RISL")
+                        bug!("cast `{:?}` not supported by RISL", kind)
                     }
                     mir::CastKind::PointerCoercion(PointerCoercion::Unsize) => {
                         assert!(bx.cx().is_backend_scalar_pair(&cast));
