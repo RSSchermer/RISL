@@ -1,5 +1,6 @@
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
+    ValueUser,
 };
 use crate::ty::{TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry};
 
@@ -111,6 +112,8 @@ impl<'a> EnumAllocaReplacer<'a> {
         match self.rvsdg[node].kind() {
             Switch(_) => self.split_switch_input(node, input, split_input),
             Loop(_) => self.split_loop_input(node, input, split_input),
+            Simple(OpLoad(_)) => self.split_op_load(node, split_input),
+            Simple(OpStore(_)) => self.split_op_store(node, input, split_input),
             Simple(OpGetDiscriminant(_)) => self.replace_op_get_discriminant(node, split_input),
             Simple(OpSetDiscriminant(_)) => self.replace_op_set_discriminant(node, split_input),
             Simple(OpDiscriminantPtr(_)) => self.elide_op_discriminant_ptr(node, split_input),
@@ -219,6 +222,222 @@ impl<'a> EnumAllocaReplacer<'a> {
             state_origin,
         );
         self.rvsdg.remove_node(node);
+    }
+
+    fn split_op_load(&mut self, node: Node, split_input: &[ValueInput]) {
+        let region = self.rvsdg[node].region();
+        let state_origin = self.rvsdg[node]
+            .state()
+            .expect("load operation should part of state chain")
+            .origin;
+
+        // The OpLoad nodes we produce will have to be linked into the state chain. Though the
+        // order in which this happens does not matter semantically to the program, for inspection
+        // of the RVSDG it is more intuitive when this matches the input order. Because of the way
+        // successively inserting a node with the same state origin behaves, we reverse the
+        // iteration order to achieve this.
+        let mut split_output = split_input
+            .iter()
+            .rev()
+            .map(|input| {
+                let TypeKind::Ptr(output_ty) = *self.rvsdg.ty().kind(input.ty) else {
+                    panic!("expected input to load operation to be a pointer");
+                };
+
+                let split_node = self.rvsdg.add_op_load(region, *input, state_origin);
+
+                ValueInput {
+                    ty: output_ty,
+                    origin: ValueOrigin::Output {
+                        producer: split_node,
+                        output: 0,
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // We reversed the iteration order when we produced this list. Though again the order of
+        // these does not matter semantically to the program, for inspection of the RVSDG it is
+        // more intuitive to maintain a consistent order, so we unreverse the order here.
+        split_output.reverse();
+
+        self.visit_users(node, 0, &split_output);
+        self.rvsdg.remove_node(node);
+    }
+
+    fn split_op_store(&mut self, node: Node, input: u32, split_input: &[ValueInput]) {
+        assert!(input < 2, "OpStore only has 2 value inputs");
+
+        let node_data = &self.rvsdg[node];
+        let region = node_data.region();
+        let state_origin = node_data
+            .state()
+            .expect("store operation should be part of the state-chain")
+            .origin;
+        let node_data = node_data.expect_op_store();
+        let ptr_input = *node_data.ptr_input();
+
+        if input == 0 {
+            // If we reach the OpStore node via its pointer-input, then we defer the splitting
+            // until it gets reached via its value-input later. This is because SLIR does not
+            // expose nodes that allow us to extract the parts of an enum value that is not behind
+            // a pointer.
+            return self.defer_split_op_store(region, node, ptr_input, split_input);
+        }
+
+        // We've reached this OpStore via its value-input. In this case we can procede with actually
+        // splitting the OpStore node.
+
+        let split_ptr_input = self.split_op_store_ptr_input(region, node, ptr_input);
+        let split_value_input = split_input;
+
+        assert_eq!(
+            split_ptr_input.len(),
+            split_value_input.len(),
+            "split pointer/value arity should match when splitting OpStore"
+        );
+
+        // Reverse iteration keeps state-chain order intuitive.
+        for i in (0..split_ptr_input.len()).rev() {
+            self.rvsdg.add_op_store(
+                region,
+                split_ptr_input[i],
+                split_value_input[i],
+                state_origin,
+            );
+        }
+
+        self.rvsdg.remove_node(node);
+    }
+
+    fn defer_split_op_store(
+        &mut self,
+        region: Region,
+        node: Node,
+        ptr_input: ValueInput,
+        split_ptr_input: &[ValueInput],
+    ) {
+        assert!(
+            !split_ptr_input.is_empty(),
+            "split pointer input should include discriminant pointer"
+        );
+
+        let synthetic_original_node = self.rvsdg.add_const_fallback(region, ptr_input.ty);
+        let synthetic_original = ValueInput {
+            ty: ptr_input.ty,
+            origin: ValueOrigin::Output {
+                producer: synthetic_original_node,
+                output: 0,
+            },
+        };
+        let reaggregation = self.rvsdg.add_reaggregation(
+            region,
+            synthetic_original,
+            split_ptr_input.iter().copied(),
+        );
+
+        self.rvsdg.reconnect_value_input(
+            node,
+            0,
+            ValueOrigin::Output {
+                producer: reaggregation,
+                output: 0,
+            },
+        );
+    }
+
+    fn reaggregation_from_origin(&self, origin: ValueOrigin) -> Option<Node> {
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = origin
+        else {
+            return None;
+        };
+
+        if self.rvsdg[producer].is_reaggregation() {
+            return Some(producer);
+        }
+
+        if self.rvsdg[producer].is_value_proxy() {
+            let proxied_origin = self.rvsdg[producer].expect_value_proxy().input().origin;
+
+            if let ValueOrigin::Output {
+                producer: reaggregation,
+                output: 0,
+            } = proxied_origin
+                && self.rvsdg[reaggregation].is_reaggregation()
+            {
+                return Some(reaggregation);
+            }
+        }
+
+        None
+    }
+
+    fn split_op_store_ptr_input(
+        &mut self,
+        region: Region,
+        store_node: Node,
+        mut ptr_input: ValueInput,
+    ) -> Vec<ValueInput> {
+        if let Some(reaggregation_node) = self.reaggregation_from_origin(ptr_input.origin) {
+            if let ValueOrigin::Output {
+                producer: proxy,
+                output: 0,
+            } = ptr_input.origin
+                && self.rvsdg[proxy].is_value_proxy()
+            {
+                self.rvsdg.dissolve_value_proxy(proxy);
+            }
+
+            let parts = self.rvsdg[reaggregation_node]
+                .expect_reaggregation()
+                .parts()
+                .to_vec();
+            self.rvsdg.dissolve_reaggregation(reaggregation_node);
+
+            return parts;
+        }
+
+        // Defensively proxy the pointer origin, as we don't want to add more users to a user-set
+        // that is potentially being iterated over. We instead add the new users to the new proxy
+        // output.
+        let proxy = self.rvsdg.proxy_origin_user(
+            region,
+            ptr_input.ty,
+            ptr_input.origin,
+            ValueUser::Input {
+                consumer: store_node,
+                input: 0,
+            },
+        );
+
+        ptr_input.origin = ValueOrigin::Output {
+            producer: proxy,
+            output: 0,
+        };
+
+        let mut split_ptr_input = Vec::new();
+
+        let discriminant_ptr = self.rvsdg.add_op_discriminant_ptr(region, ptr_input);
+
+        split_ptr_input.push(ValueInput::output(TY_PTR_U32, discriminant_ptr, 0));
+
+        let ty_kind = self.ty.kind(self.enum_ty);
+        let variant_count = ty_kind.expect_enum().variants.len();
+
+        for i in 0..variant_count {
+            let variant_ptr = self.rvsdg.add_op_variant_ptr(region, ptr_input, i as u32);
+            let variant_ptr_ty = self.rvsdg[variant_ptr]
+                .expect_op_variant_ptr()
+                .value_output()
+                .ty;
+
+            split_ptr_input.push(ValueInput::output(variant_ptr_ty, variant_ptr, 0));
+        }
+
+        split_ptr_input
     }
 
     fn split_switch_input(&mut self, node: Node, input: u32, split_input: &[ValueInput]) {
