@@ -5,6 +5,7 @@
 use std::ops::Index;
 
 use bit_set::BitSet;
+use rustc_public::abi::{FieldsShape, VariantsShape};
 use rustc_public::mir;
 use rustc_public::mir::visit::Location;
 use rustc_public::mir::{
@@ -83,6 +84,25 @@ pub(super) fn needs_alloca<'a, Bx: BuilderMethods<'a>>(
     analyzer.needs_alloca
 }
 
+fn ty_contains_enum(ty_layout: &TyAndLayout) -> bool {
+    if ty_layout.ty.kind().is_enum() {
+        return true;
+    }
+
+    match (&ty_layout.layout.fields, &ty_layout.layout.variants) {
+        (FieldsShape::Primitive, _) | (FieldsShape::Union(_), _) => false,
+        (FieldsShape::Array { count, .. }, _) => {
+            *count > 0 && ty_contains_enum(&ty_layout.field(0))
+        }
+        (FieldsShape::Arbitrary { .. }, VariantsShape::Empty) => false,
+        (FieldsShape::Arbitrary { .. }, VariantsShape::Multiple { .. }) => true,
+        (FieldsShape::Arbitrary { .. }, VariantsShape::Single { .. }) => {
+            (0..ty_layout.layout.fields.count())
+                .any(|field_idx| ty_contains_enum(&ty_layout.field(field_idx)))
+        }
+    }
+}
+
 struct NeedsInitAnalyzer<'a, 'b, Bx: BuilderMethods<'b>> {
     fx: &'a FunctionCx<'b, Bx>,
     needs_alloca: BitSet<usize>,
@@ -93,10 +113,10 @@ impl<'a, 'b, Bx: BuilderMethods<'b>> NeedsInitAnalyzer<'a, 'b, Bx> {
         if place.projection.is_empty() {
             let ty = self.fx.mir.locals()[place.local].ty;
             let layout = TyAndLayout::expect_from_ty(ty);
+            let is_immediate_or_scalar_pair = self.fx.cx.is_backend_immediate(&layout)
+                || self.fx.cx.is_backend_scalar_pair(&layout);
 
-            if !self.fx.cx.is_backend_immediate(&layout)
-                && !self.fx.cx.is_backend_scalar_pair(&layout)
-            {
+            if !is_immediate_or_scalar_pair || ty_contains_enum(&layout) {
                 self.needs_alloca.insert(place.local);
             }
         }
