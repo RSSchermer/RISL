@@ -52,7 +52,7 @@ impl ShimDefLookup {
             // Only function with explicit function definitions can be mapped to shims.
             // Anonymous functions/closures are never shimmed.
 
-            return instance
+            return instance;
         };
 
         let def_path = fn_def.name();
