@@ -433,8 +433,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         match &terminator.kind {
             mir::TerminatorKind::Assert { .. }
             | mir::TerminatorKind::InlineAsm { .. }
-            | TerminatorKind::Resume
-            | TerminatorKind::Abort => bug!("not supported by RISL"),
+            | mir::TerminatorKind::Abort => bug!("`{:?}` not supported by RISL", terminator.kind),
 
             mir::TerminatorKind::Goto { target } => {
                 let mergeable_succ = mergeable_succ();
@@ -452,7 +451,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 MergingSucc::False
             }
 
-            mir::TerminatorKind::Unreachable => {
+            mir::TerminatorKind::Resume | mir::TerminatorKind::Unreachable => {
                 bx.unreachable();
                 MergingSucc::False
             }
