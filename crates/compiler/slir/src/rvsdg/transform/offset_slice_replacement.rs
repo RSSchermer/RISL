@@ -143,6 +143,11 @@ impl PtrOffsetReplacer {
         region: Region,
         ptr_origin: ValueOrigin,
     ) -> PtrOffset {
+        assert!(
+            !ptr_origin.is_placeholder(),
+            "encountered placeholder value origin while resolving slice offset",
+        );
+
         match ptr_origin {
             ValueOrigin::Argument(argument) => self.offset_for_argument(rvsdg, region, argument),
             ValueOrigin::Output { producer, output } => {
