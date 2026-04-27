@@ -1252,6 +1252,8 @@ impl Replacer<'_, '_> {
 
         // Finally, redirect the value output using the output mapping
         self.visit_users(node, input, &split_outputs);
+
+        self.finalize_split_loop_value(node, loop_region, input);
     }
 
     fn split_loop_result(&mut self, region: Region, result: u32, split_input: &[ValueInput]) {
@@ -1420,6 +1422,29 @@ impl Replacer<'_, '_> {
 
         // Redirect the value output using the output mapping
         self.visit_users(owner, input_index, &split_outputs);
+
+        self.finalize_split_loop_value(owner, region, input_index);
+    }
+
+    fn finalize_split_loop_value(&mut self, loop_node: Node, loop_region: Region, input: u32) {
+        let input_index = input as usize;
+        let output_has_users = !self.rvsdg[loop_node].expect_loop().value_outputs()[input_index]
+            .users
+            .is_empty();
+        let argument_has_users = !self.rvsdg[loop_region].value_arguments()[input_index]
+            .users
+            .is_empty();
+
+        if output_has_users || argument_has_users {
+            // Keep the lane but ensure the result does not remain as a placeholder origin.
+            self.rvsdg.reconnect_region_result(
+                loop_region,
+                input + 1,
+                ValueOrigin::Argument(input),
+            );
+        } else {
+            self.rvsdg.remove_loop_input(loop_node, input);
+        }
     }
 
     fn visit_value_proxy(&mut self, node: Node, split_input: &[ValueInput]) {
@@ -1452,7 +1477,9 @@ impl Replacer<'_, '_> {
     /// start at `split_results_start`, via either [OpElementPtr] or [OpExtractElement] nodes
     /// depending on whether to original input type is a pointer or immediate value.
     ///
-    /// Leaves the original result connected to the "placeholder" origin.
+    /// Leaves the original result connected to the "placeholder" origin. The corresponding
+    /// loop-value lane should be removed after user redirection when this is used for loop
+    /// splitting.
     fn redirect_region_result(
         &mut self,
         region: Region,
@@ -2664,16 +2691,16 @@ mod tests {
         let loop_data = rvsdg[loop_node].expect_loop();
         let loop_region = loop_data.loop_region();
 
-        assert_eq!(loop_data.value_inputs().len(), 5);
+        assert_eq!(loop_data.value_inputs().len(), 4);
         assert_eq!(loop_data.value_inputs()[0].ty, TY_U32);
         assert_eq!(loop_data.value_inputs()[1].ty, TY_U32);
+        assert_eq!(loop_data.value_inputs()[2].ty, field_ptr_ty);
         assert_eq!(loop_data.value_inputs()[3].ty, field_ptr_ty);
-        assert_eq!(loop_data.value_inputs()[4].ty, field_ptr_ty);
 
         let ValueOrigin::Output {
             producer: field_0_alloca_node,
             output: 0,
-        } = loop_data.value_inputs()[3].origin
+        } = loop_data.value_inputs()[2].origin
         else {
             panic!("the third input to the switch node should be the first output of a node")
         };
@@ -2685,14 +2712,14 @@ mod tests {
             &field_0_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: loop_node,
-                input: 3,
+                input: 2,
             }]
         );
 
         let ValueOrigin::Output {
             producer: field_1_alloca_node,
             output: 0,
-        } = loop_data.value_inputs()[4].origin
+        } = loop_data.value_inputs()[3].origin
         else {
             panic!("the third input to the switch node should be the first output of a node")
         };
@@ -2704,13 +2731,13 @@ mod tests {
             &field_1_alloca.value_output().users,
             &thin_set![ValueUser::Input {
                 consumer: loop_node,
-                input: 4,
+                input: 3,
             }]
         );
 
         let load = rvsdg[load_node].expect_op_load();
 
-        assert_eq!(load.ptr_input().origin, ValueOrigin::Argument(3));
+        assert_eq!(load.ptr_input().origin, ValueOrigin::Argument(2));
         assert_eq!(
             &load.value_output().users,
             &thin_set![ValueUser::Input {
@@ -2721,13 +2748,13 @@ mod tests {
 
         let arguments = rvsdg[loop_region].value_arguments();
 
-        assert_eq!(arguments.len(), 5);
+        assert_eq!(arguments.len(), 4);
 
-        assert_eq!(arguments[3].ty, field_ptr_ty);
+        assert_eq!(arguments[2].ty, field_ptr_ty);
         assert_eq!(
-            &arguments[3].users,
+            &arguments[2].users,
             &thin_set![
-                ValueUser::Result(4),
+                ValueUser::Result(3),
                 ValueUser::Input {
                     consumer: store_node,
                     input: 0,
@@ -2739,18 +2766,20 @@ mod tests {
             ]
         );
 
-        assert_eq!(arguments[4].ty, field_ptr_ty);
-        assert_eq!(arguments[4].users, thin_set![ValueUser::Result(5)]);
+        assert_eq!(arguments[3].ty, field_ptr_ty);
+        assert_eq!(arguments[3].users, thin_set![ValueUser::Result(4)]);
 
         let results = rvsdg[loop_region].value_results();
 
-        assert_eq!(results.len(), 6);
+        assert_eq!(results.len(), 5);
+
+        assert_eq!(results[3].ty, field_ptr_ty);
+        assert_eq!(results[3].origin, ValueOrigin::Argument(2));
 
         assert_eq!(results[4].ty, field_ptr_ty);
         assert_eq!(results[4].origin, ValueOrigin::Argument(3));
 
-        assert_eq!(results[5].ty, field_ptr_ty);
-        assert_eq!(results[5].origin, ValueOrigin::Argument(4));
+        assert!(!results.iter().any(|result| result.origin.is_placeholder()));
 
         assert!(!rvsdg.is_live_node(op_ptr_field_ptr_node));
     }
