@@ -48,13 +48,14 @@ impl ShimDefLookup {
     }
 
     pub fn maybe_shimmed_instance(&self, tcx: TyCtxt, instance: Instance) -> Instance {
-        let def_path = instance
-            .ty()
-            .kind()
-            .fn_def()
-            .expect("instance should be a function")
-            .0
-            .name();
+        let Some((fn_def, _)) = instance.ty().kind().fn_def() else {
+            // Only function with explicit function definitions can be mapped to shims.
+            // Anonymous functions/closures are never shimmed.
+
+            return instance
+        };
+
+        let def_path = fn_def.name();
 
         if let Some(shimmed_def_id) = self.shim_def_id(&def_path) {
             let instance = internal(tcx, instance);
