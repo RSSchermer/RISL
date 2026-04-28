@@ -36,3 +36,25 @@ where
 
     accum
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::count"))]
+pub fn iterator_count<I>(iter: I) -> usize
+where
+    I: Iterator,
+{
+    iterator_fold(iter, 0, |count, _| count + 1)
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::last"))]
+pub fn iterator_last<I>(iter: I) -> Option<I::Item>
+where
+    I: Iterator,
+{
+    fn some<T>(_: Option<T>, x: T) -> Option<T> {
+        Some(x)
+    }
+
+    iterator_fold(iter, None, some)
+}
