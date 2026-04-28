@@ -14,20 +14,17 @@ pub fn slice_iter<T>(slice: &[T]) -> Iter<'_, T> {
     }
 }
 
+// Note: the `T: 'a` bound is required to force the same signature shape as `impl IntoIterator`
 #[gpu]
-impl<'a, T> core_shim::iter::IntoIterator for &'a [T] {
-    type IntoIter = Iter<'a, T>;
-    type Item = &'a T;
-
-    #[cfg_attr(
-        rislc,
-        rislc::core_shim(
-            "core::slice::iter::<impl core::iter::IntoIterator for &'a [T]>::into_iter"
-        )
-    )]
-    fn into_iter(self) -> Self::IntoIter {
-        slice_iter(self)
-    }
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("core::slice::iter::<impl core::iter::IntoIterator for &'a [T]>::into_iter")
+)]
+pub fn slice_into_iter<'a, T>(slice: &'a [T]) -> Iter<'a, T>
+where
+    T: 'a,
+{
+    slice_iter(slice)
 }
 
 #[gpu]
@@ -40,20 +37,19 @@ pub fn slice_iter_mut<T>(slice: &mut [T]) -> IterMut<'_, T> {
     }
 }
 
+// Note: the `T: 'a` bound is required to force the same signature shape as `impl IntoIterator`
 #[gpu]
-impl<'a, T> core_shim::iter::IntoIterator for &'a mut [T] {
-    type IntoIter = IterMut<'a, T>;
-    type Item = &'a mut T;
-
-    #[cfg_attr(
-        rislc,
-        rislc::core_shim(
-            "core::slice::iter::<impl core::iter::IntoIterator for &'a mut [T]>::into_iter"
-        )
-    )]
-    fn into_iter(self) -> Self::IntoIter {
-        slice_iter_mut(self)
-    }
+#[cfg_attr(
+    rislc,
+    rislc::core_shim(
+        "core::slice::iter::<impl core::iter::IntoIterator for &'a mut [T]>::into_iter"
+    )
+)]
+pub fn slice_into_iter_mut<'a, T>(slice: &'a mut [T]) -> IterMut<'a, T>
+where
+    T: 'a,
+{
+    slice_iter_mut(slice)
 }
 
 #[gpu]

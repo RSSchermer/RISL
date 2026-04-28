@@ -1,3 +1,4 @@
+mod fold;
 mod size_hint;
 
 pub struct SimpleIter<const N: usize> {
