@@ -309,52 +309,93 @@ impl BranchSelectorNormalizer {
         loop_value_index: u32,
     ) {
         let outer_region = rvsdg[node].region();
-        let input_origin = rvsdg[node].value_inputs()[loop_value_index as usize].origin;
-        let input_resolved = self.resolve_value(rvsdg, outer_region, input_origin);
-        let value_input = input_resolved
-            .value_input()
-            .expect("a loop input should not connect a fallback predicate");
+        let result_index = loop_value_index + 1;
 
+        let input_origin = rvsdg[node].value_inputs()[loop_value_index as usize].origin;
+        let result_origin = rvsdg[loop_region].value_results()[result_index as usize].origin;
+
+        let input_resolved = self.resolve_value(rvsdg, outer_region, input_origin);
+
+        let ty = match &input_resolved {
+            ResolvedValue::Fallback => {
+                // If the loop-input resolves to a fallback predicate, then we can assume that it
+                // was the loop-output that triggered the normalization, as the loop-input should
+                // be userless. We'll resolve the value for the loop-result origin to determine the
+                // type for the new loop value.
+                //
+                // Note that we assert explicitly that the loop-argument is unused, since when for
+                // whatever reason the loop-result would resolve to this loop-argument, we would
+                // trigger a recursion loop resulting in a stack-overflow.
+                assert!(
+                    rvsdg[loop_region].value_arguments()[loop_value_index as usize]
+                        .users
+                        .is_empty()
+                );
+
+                // Note that we end op resolving the same origin again below, but since
+                // `resolve_value` caches its results, this is not as expensive as it might seem.
+                match self.resolve_value(rvsdg, loop_region, result_origin) {
+                    ResolvedValue::Bool(_) => TY_BOOL,
+                    ResolvedValue::Case { .. } => TY_U32,
+                    ResolvedValue::Fallback => {
+                        panic!("a loop result should not resolve to a fallback predicate");
+                    }
+                }
+            }
+            ResolvedValue::Bool(_) => TY_BOOL,
+            ResolvedValue::Case { .. } => TY_U32,
+        };
+
+        // Add the new loop-value.
+        let value_input = input_resolved.value_input().unwrap_or_else(|| {
+            let node = rvsdg.add_const_fallback(outer_region, ty);
+
+            ValueInput::output(ty, node, 0)
+        });
         let new_index = rvsdg.add_loop_input(node, value_input);
 
-        // Cache a new resolved value for the predicate argument
+        // Register the mapping from the original predicate argument to the new loop-argument that
+        // we've just added. Make sure we do this before we try to resolve the loop-result's origin,
+        // as the loop-result's origin may resolve to the loop-argument, and if we haven't already
+        // registered an entry for it, this would lead to a recursion loop and a stack-overflow.
         let predicate_arg = ValueOrigin::Argument(loop_value_index);
-        let resolved_arg = input_resolved
+        let arg_value = input_resolved
             .clone()
-            .with_input(ValueInput::argument(value_input.ty, new_index));
-        self.cache
-            .insert((loop_region, predicate_arg), resolved_arg);
+            .with_input(ValueInput::argument(ty, new_index));
+        self.cache.insert((loop_region, predicate_arg), arg_value);
 
-        // Cache a new resolved value for the predicate output
+        // Now we can safely resolve the loop-result's value.
+        let result_resolved = self.resolve_value(rvsdg, loop_region, result_origin);
+
+        // Replace the initial placeholder input that the new loop-result was created with, with the
+        // value we just resolved.
+        let result_origin = result_resolved
+            .value_input()
+            .expect("a loop result should not resolve to a fallback predicate")
+            .origin;
+        rvsdg.reconnect_region_result(loop_region, new_index + 1, result_origin);
+
+        // Register the mapping from the original predicate output to the new loop-output that
+        // we've just added.
         let predicate_output = ValueOrigin::Output {
             producer: node,
             output: loop_value_index,
         };
-        let resolved_output =
-            input_resolved
+        let output_value =
+            result_resolved
                 .clone()
                 .with_input(ValueInput::output(value_input.ty, node, new_index));
         self.cache
-            .insert((outer_region, predicate_output), resolved_output);
+            .insert((outer_region, predicate_output), output_value);
 
-        // The first region result is the reentry condition. The loop-value results come after that.
-        // Therefore, add 1.
-        let result_origin =
-            rvsdg[loop_region].value_results()[(loop_value_index + 1) as usize].origin;
-        let result_resolved = self.resolve_value(rvsdg, loop_region, result_origin);
-        let result_origin = result_resolved
-            .value_input()
-            .expect("a loop result should not connect a fallback predicate")
-            .origin;
-
+        // Final check to ensure that the values we resolved for the loop-input and the loop-result
+        // are compatible.
         if matches!(
             input_resolved.fold(result_resolved),
             ResolvedValue::Fallback
         ) {
             panic!("incompatible branch selector kinds at loop");
         }
-
-        rvsdg.reconnect_region_result(loop_region, new_index + 1, result_origin);
     }
 
     fn normalize_switch_branch_selector(&mut self, rvsdg: &mut Rvsdg, switch_node: Node) {
