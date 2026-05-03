@@ -4,6 +4,7 @@ use std::ops::Index;
 use std::path::Path;
 use std::{mem, slice};
 
+use anyhow::{Context, bail};
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
@@ -2467,7 +2468,7 @@ impl Rvsdg {
     pub fn add_switch_input(&mut self, switch_node: Node, input: ValueInput) -> u32 {
         let region = self.nodes[switch_node].region();
 
-        self.validate_node_value_input(region, &input);
+        self.validate_node_value_input(region, &input).unwrap();
 
         let node_data = self.nodes[switch_node].expect_switch_mut();
         let input_index = node_data.value_inputs.len();
@@ -2674,7 +2675,7 @@ impl Rvsdg {
         state_origin: Option<StateOrigin>,
     ) -> (Node, Region) {
         for input in &value_inputs {
-            self.validate_node_value_input(region, input);
+            self.validate_node_value_input(region, input).unwrap();
         }
 
         // The output signature and the contained region arguments and results all match the
@@ -2753,7 +2754,7 @@ impl Rvsdg {
     pub fn add_loop_input(&mut self, loop_node: Node, input: ValueInput) -> u32 {
         let region = self.nodes[loop_node].region();
 
-        self.validate_node_value_input(region, &input);
+        self.validate_node_value_input(region, &input).unwrap();
 
         let node_data = self.nodes[loop_node].expect_loop_mut();
         let input_index = node_data.value_inputs.len();
@@ -2964,7 +2965,7 @@ impl Rvsdg {
         let value_inputs: SmallVec<[ValueInput; 2]> = value_inputs.into_iter().collect();
 
         for input in &value_inputs {
-            self.validate_node_value_input(region, input);
+            self.validate_node_value_input(region, input).unwrap();
         }
 
         let output_ty = intrinsic
@@ -3326,7 +3327,7 @@ impl Rvsdg {
     }
 
     pub fn add_value_proxy(&mut self, region: Region, input: ValueInput) -> Node {
-        self.validate_node_value_input(region, &input);
+        self.validate_node_value_input(region, &input).unwrap();
 
         let node = self.nodes.insert(NodeData {
             kind: NodeKind::Simple(
@@ -3356,7 +3357,7 @@ impl Rvsdg {
         inputs.extend(parts);
 
         for input in &inputs {
-            self.validate_node_value_input(region, input);
+            self.validate_node_value_input(region, input).unwrap();
         }
 
         let node = self.nodes.insert(NodeData {
@@ -3387,7 +3388,9 @@ impl Rvsdg {
                 ty: old_input.ty,
                 origin,
             },
-        );
+        )
+        .with_context(|| format!("error reconnecting {node:?} input `{value_input}` to {origin:?}"))
+        .unwrap();
 
         let user = ValueUser::Input {
             consumer: node,
@@ -3415,7 +3418,9 @@ impl Rvsdg {
                 ty: old_input.ty,
                 origin,
             },
-        );
+        )
+        .with_context(|| format!("error reconnecting {region:?} result `{result}` to {origin:?}"))
+        .unwrap();
 
         let user = ValueUser::Result(result);
 
@@ -3936,14 +3941,18 @@ impl Rvsdg {
 
     /// A helper function that validates that the origin of the given `value_input` exists, belongs
     /// to the given `region`, and matches the `value_input`'s expected typed.
-    fn validate_node_value_input(&mut self, region: Region, value_input: &ValueInput) {
+    fn validate_node_value_input(
+        &mut self,
+        region: Region,
+        value_input: &ValueInput,
+    ) -> Result<(), anyhow::Error> {
         match &value_input.origin {
             ValueOrigin::Argument(i) => {
                 let region = &self[region];
 
                 if let Some(a) = region.value_arguments().get(*i as usize) {
                     if !self.ty.can_coerce(a.ty, value_input.ty) {
-                        panic!(
+                        bail!(
                             "cannot connect a node input of type `{}` to a region argument of type \
                             `{}`",
                             value_input.ty.to_string(self.ty()),
@@ -3951,7 +3960,7 @@ impl Rvsdg {
                         );
                     }
                 } else {
-                    panic!(
+                    bail!(
                         "tried to connect to region argument `{}`, but region only has {} \
                         arguments",
                         i,
@@ -3963,19 +3972,19 @@ impl Rvsdg {
                 let producer = &self[*producer];
 
                 if producer.region != Some(region) {
-                    panic!("cannot connect a node input to a node output in a different region");
+                    bail!("cannot connect a node input to a node output in a different region");
                 }
 
                 if let Some(output) = producer.value_outputs().get(*output as usize) {
                     if !self.ty.can_coerce(output.ty, value_input.ty) {
-                        panic!(
+                        bail!(
                             "cannot connect a node input of type `{:?}` to an output of type `{:?}",
                             value_input.ty.to_string(self.ty()),
                             output.ty.to_string(self.ty())
                         );
                     }
                 } else {
-                    panic!(
+                    bail!(
                         "tried to connect to node output `{}`, but the target only has {} outputs",
                         output,
                         producer.value_outputs().len()
@@ -3983,6 +3992,8 @@ impl Rvsdg {
                 }
             }
         }
+
+        Ok(())
     }
 
     /// Helper that adds all of a node's value inputs to the corresponding value outputs as users.
