@@ -805,16 +805,16 @@ impl EmulationContext {
             }
 
             // The value origin is not available outside the loop, add a new loop value to make it
-            // available. We'll have to provide an input value (that will be unused). All
-            // non-pointer values in pointer emulation are `u32` values, so we'll add a constant
-            // `u32` node with value `0`.
+            // available. We'll have to provide an input value (that will be unused), so we'll
+            // create a new "fallback" value.
 
             let outer_region = rvsdg[loop_node].region();
-            let input_value = rvsdg.add_const_u32(outer_region, 0);
+            let ty = rvsdg.value_origin_ty(outer_region, inner_origin);
+            let input_value = rvsdg.add_const_fallback(outer_region, ty);
             let output = rvsdg[loop_node].value_inputs().len() as u32;
             let result = output + 1;
 
-            rvsdg.add_loop_input(loop_node, ValueInput::output(TY_U32, input_value, 0));
+            rvsdg.add_loop_input(loop_node, ValueInput::output(ty, input_value, 0));
             rvsdg.reconnect_region_result(loop_region, result, inner_origin);
 
             ValueOrigin::Output {
