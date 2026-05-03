@@ -2,6 +2,7 @@ mod count;
 mod fold;
 mod last;
 mod size_hint;
+mod try_fold;
 
 pub struct SimpleIter<const N: usize> {
     pub values: [u32; N],

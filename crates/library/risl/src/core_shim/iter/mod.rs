@@ -1,3 +1,5 @@
+use std::ops::Try;
+
 use risl_macros::gpu;
 
 /// Shim marker to help the RISL compiler recognize the [core::iter::IntoIterator] trait as a
@@ -35,6 +37,23 @@ where
     }
 
     accum
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::try_fold"))]
+pub fn iterator_try_fold<I, B, F, R>(iter: &mut I, init: B, mut f: F) -> R
+where
+    I: Iterator,
+    F: FnMut(B, I::Item) -> R,
+    R: Try<Output = B>,
+{
+    let mut accum = init;
+
+    while let Some(x) = Iterator::next(iter) {
+        accum = f(accum, x)?;
+    }
+
+    R::from_output(accum)
 }
 
 #[gpu]
