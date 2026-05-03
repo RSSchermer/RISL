@@ -145,16 +145,25 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
     pub fn project_field<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx, ix: usize) -> Self {
         let field = self.layout.field(ix);
 
-        // For single-field structs where the field is a scalar or scalar-pair, rustc likes to also
-        // represent the struct itself with a scalar or scalar-pair ABI, effectively unpacking the
-        // field already. The MIR will still want to project to this field, so we detect such cases
-        // and turn these projections into no-ops.
-        if self.layout.ty.kind().is_struct()
+        // For single-variant, single-field ADTs where the field is a scalar or scalar-pair, rustc
+        // likes to also represent the ADT itself with a scalar or scalar-pair ABI, effectively
+        // unpacking the field already. The MIR will still want to project to this field, so we
+        // detect such cases and turn these projections into no-ops.
+        //
+        // There is an exception to this: we always use structs to represent enum variants, whereas
+        // rustc may still specify scalar or scalar-pair ABIs for struct variants. We therefore add
+        // an additional check to ensure that the ADT is not a struct variant.
+
+        if matches!(self.layout.layout.variants, VariantsShape::Single { .. })
+            && self.layout.layout.fields.count() == 1
             && matches!(
                 self.layout.layout.abi,
                 ValueAbi::Scalar(_) | ValueAbi::ScalarPair(_, _)
             )
-            && self.layout.layout.fields.count() == 1
+            && !matches!(
+                self.layout.ty.layout().unwrap().shape().variants,
+                VariantsShape::Multiple { .. }
+            )
         {
             return self.val.with_type(field);
         }

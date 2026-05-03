@@ -1,7 +1,10 @@
 use std::assert_matches::assert_matches;
+use std::io;
+use std::io::Write;
 use std::ops::Deref;
+use std::path::Path;
 
-use rustc_public::abi::{FnAbi, Scalar, ValueAbi};
+use rustc_public::abi::{FnAbi, Scalar, ValueAbi, VariantsShape};
 use rustc_public::mir::mono::Instance;
 use rustc_public::target::MachineSize;
 use rustc_public::ty::{Align, Span, VariantIdx};
@@ -266,7 +269,11 @@ pub trait BuilderMethods<'a>:
             "cannot directly copy into unsized values"
         );
 
-        if self.is_backend_immediate(&layout) {
+        // TODO: the test for the type not being an enum is a temporary fix. We should probably
+        // modify is_backend_immediate to reject enum types instead.
+        if self.is_backend_immediate(&layout)
+            && !matches!(layout.layout.variants, VariantsShape::Multiple { .. })
+        {
             let temp = self.load_operand(&src.with_type(layout.clone()));
 
             temp.val.store(self, &dst.with_type(layout.clone()));
@@ -348,4 +355,8 @@ pub trait BuilderMethods<'a>:
         instance: Option<&Instance>,
     ) -> Self::Value;
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value;
+
+    fn debug_write_body<W: Write>(&self, w: &mut W);
+
+    fn debug_write_body_to_file<P: AsRef<Path>>(&self, path: P) -> io::Result<()>;
 }

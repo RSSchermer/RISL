@@ -85,8 +85,8 @@ pub(super) fn needs_alloca<'a, Bx: BuilderMethods<'a>>(
 }
 
 fn ty_contains_enum(ty_layout: &TyAndLayout) -> bool {
-    if ty_layout.ty.kind().is_enum() {
-        return true;
+    if ty_layout.layout.is_1zst() {
+        return false;
     }
 
     match (&ty_layout.layout.fields, &ty_layout.layout.variants) {

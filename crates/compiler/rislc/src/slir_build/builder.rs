@@ -1,9 +1,12 @@
-use std::mem;
+use std::fs::File;
+use std::io::Write;
 use std::ops::Deref;
+use std::path::Path;
+use std::{io, mem};
 
 use rustc_middle::bug;
 use rustc_public::abi;
-use rustc_public::abi::{ArgAbi, FnAbi, PassMode, ValueAbi};
+use rustc_public::abi::{ArgAbi, FnAbi, PassMode, ValueAbi, VariantsShape};
 use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::target::MachineSize;
 use rustc_public::ty::{Align, Span, VariantIdx};
@@ -26,15 +29,6 @@ use crate::stable_cg::{
 pub struct Builder<'a, 'tcx> {
     cx: &'a Cx<'a, 'tcx>,
     basic_block: slir::cfg::BasicBlock,
-}
-
-impl<'a, 'tcx> Builder<'a, 'tcx> {
-    fn debug_write_body(&self) {
-        let cfg = self.cx.cfg.borrow();
-        let function = cfg[self.basic_block].owner();
-
-        slir::cfg::debug::write_body(&mut std::io::stdout(), &cfg, function).unwrap();
-    }
 }
 
 impl<'a, 'tcx> Deref for Builder<'a, 'tcx> {
@@ -568,7 +562,9 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
             return OperandRef::zero_sized(place.layout.clone());
         }
 
-        let val = if place.val.llextra.is_some() || place.layout.ty.kind().is_enum() {
+        let val = if place.val.llextra.is_some()
+            || matches!(place.layout.layout.variants, VariantsShape::Multiple { .. })
+        {
             OperandValue::Ref(place.val)
         } else if self.is_backend_immediate(&place.layout) {
             let llval = self.load(
@@ -980,5 +976,20 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
 
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
         todo!()
+    }
+
+    fn debug_write_body<W: Write>(&self, w: &mut W) {
+        let cfg = self.cx.cfg.borrow();
+        let function = cfg[self.basic_block].owner();
+
+        slir::cfg::debug::write_body(w, &cfg, function).unwrap();
+    }
+
+    fn debug_write_body_to_file<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+        let mut file = File::create(path)?;
+
+        self.debug_write_body(&mut file);
+
+        Ok(())
     }
 }

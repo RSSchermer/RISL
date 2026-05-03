@@ -1,3 +1,4 @@
+use rustc_abi::Variants;
 use rustc_middle::ty::{Ty, TyCtxt};
 use rustc_middle::util::Providers;
 use rustc_target::callconv::{ArgAbi, ArgAttributes, FnAbi, PassMode};
@@ -22,7 +23,10 @@ pub fn provide(providers: &mut Providers) {
                 arg.mode = PassMode::Direct(ArgAttributes::new());
             }
 
-            if arg.layout.ty.is_enum() && !matches!(arg.mode, PassMode::Indirect { .. }) {
+            if matches!(arg.layout.layout.variants(), Variants::Multiple { .. })
+                && !arg.layout.is_1zst()
+                && !matches!(arg.mode, PassMode::Indirect { .. } | PassMode::Ignore)
+            {
                 arg.mode = PassMode::Indirect {
                     attrs: ArgAttributes::new(),
                     meta_attrs: None,

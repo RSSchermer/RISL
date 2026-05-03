@@ -98,6 +98,24 @@ fn resource_binding_to_slir(resource_binding: &ResourceBinding) -> slir::Resourc
     }
 }
 
+fn is_caller_location_arg(arg: &abi::ArgAbi) -> bool {
+    if !matches!(arg.mode, PassMode::Direct(_)) {
+        return false;
+    }
+
+    let TyKind::RigidTy(RigidTy::Ref(_, pointee_ty, _)) = arg.ty.kind() else {
+        return false;
+    };
+
+    let TyKind::RigidTy(RigidTy::Adt(adt_def, _)) = pointee_ty.kind() else {
+        return false;
+    };
+
+    let name = adt_def.name();
+
+    name == "core::panic::Location" || name == "std::panic::Location"
+}
+
 fn primitive_ty_to_slir(primitive_ty: RislPrimitiveTy) -> slir::ty::Type {
     match primitive_ty {
         RislPrimitiveTy::Vec2F32 => slir::ty::TY_VEC2_F32,
@@ -129,11 +147,12 @@ fn scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAndLayout)
         bug!("expected scalar pair layout");
     }
 
-    // We have to account or "transparent" struct types. If a struct has only a single field, and
-    // the field has a scalar-pair ABI, then the struct itself is also represented with a
-    // scalar-pair. To get at the actual field types, we'll have to unpack its field, potentially
-    // recursively.
-    if layout.ty.kind().is_struct() && layout.layout.fields.count() == 1 {
+    // We have to account or "transparent" ADT types. For single-variant ADTs with a single field,
+    // where the field has a scalar-pair ABI, the ADT itself is also represented with a scalar-pair.
+    // To get at the actual field types, we'll have to unpack its field, potentially recursively.
+    if matches!(layout.layout.variants, VariantsShape::Single { .. })
+        && layout.layout.fields.count() == 1
+    {
         let layout = layout.field(0);
 
         return scalar_pair_field_layouts(&layout);
@@ -589,8 +608,12 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
         let def_id = internal(self.rcx.tcx(), instance.def.def_id());
 
         let abi = instance.fn_abi().unwrap();
+        let caller_location_arg_count =
+            usize::from(abi.args.last().is_some_and(is_caller_location_arg));
+        debug_assert!(abi.args.len() >= caller_location_arg_count);
+        let source_arg_count = abi.args.len() - caller_location_arg_count;
 
-        let mut arg_io_bindings = vec![None; abi.args.len()];
+        let mut arg_io_bindings = vec![None; source_arg_count];
 
         if let Some(local_id) = def_id.as_local()
             && let Some(fn_ext) = self.rcx.hir_ext().fn_ext(local_id)
@@ -642,7 +665,7 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
             })
         }
 
-        for (arg, binding) in abi.args.iter().zip(arg_io_bindings) {
+        for (arg, binding) in abi.args[..source_arg_count].iter().zip(arg_io_bindings) {
             match arg.mode {
                 PassMode::Ignore => {}
                 PassMode::Direct(_) => {

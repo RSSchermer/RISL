@@ -4,7 +4,7 @@ use std::fmt;
 use arrayvec::ArrayVec;
 use either::Either;
 use rustc_middle::bug;
-use rustc_public::abi::ValueAbi;
+use rustc_public::abi::{ValueAbi, VariantsShape};
 use rustc_public::mir;
 use rustc_public::target::MachineInfo;
 use rustc_public::ty::{Align, ConstantKind, MirConst};
@@ -463,12 +463,14 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                     );
                 };
 
-                // Struct destinations may have a scalar-pair abi, if the struct has only a single
-                // field and that field has a scalar-pair abi. In such cases, before we can project
-                // the destination to both scalar-pair parts, we have to "unpack" the struct
-                // type-and-layout until we're left with the actual scalar-pair type-and-layout.
+                // ADT destinations may have a scalar-pair abi, if the ADT has a single variant and
+                // a single field, where that field has a scalar-pair abi. In such cases, before we
+                // can project the destination to both scalar-pair parts, we have to "unpack" the
+                // ADT type-and-layout until we're left with the actual scalar-pair type-and-layout.
                 let mut dest = dest.clone();
-                while dest.layout.ty.kind().is_struct() && dest.layout.layout.fields.count() == 1 {
+                while matches!(dest.layout.layout.variants, VariantsShape::Single { .. })
+                    && dest.layout.layout.fields.count() == 1
+                {
                     dest = dest.project_field(bx, 0);
                 }
 
