@@ -5,10 +5,12 @@ use std::error::Error;
 use behavioral_tests_macros::test_runner;
 use empa::abi;
 use futures::FutureExt;
+use risl::gpu;
 
 use crate::iter::iterator::SimpleIter;
 
 #[derive(Copy, Clone, abi::Sized, PartialEq, Default, Debug)]
+#[gpu]
 struct Results {
     is_ok: u32,
     fold_value: u32,

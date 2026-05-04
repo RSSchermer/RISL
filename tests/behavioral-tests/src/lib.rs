@@ -9,6 +9,7 @@ mod adt;
 mod array;
 mod enum_result;
 mod iter;
+mod ops;
 mod slice;
 mod variable_pointer_if_else;
 mod while_loop;

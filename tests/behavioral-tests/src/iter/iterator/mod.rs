@@ -4,11 +4,15 @@ mod last;
 mod size_hint;
 mod try_fold;
 
+use risl::gpu;
+
+#[gpu]
 pub struct SimpleIter<const N: usize> {
     pub values: [u32; N],
     pub index: usize,
 }
 
+#[gpu]
 impl<const N: usize> Iterator for SimpleIter<N> {
     type Item = u32;
 

@@ -5,8 +5,10 @@ use std::error::Error;
 use behavioral_tests_macros::test_runner;
 use empa::abi;
 use futures::FutureExt;
+use risl::gpu;
 
 #[derive(Copy, Clone, abi::Sized)]
+#[gpu]
 struct Values {
     v0: u32,
     v1: u32,
@@ -15,6 +17,7 @@ struct Values {
 }
 
 #[derive(Copy, Clone, abi::Sized, PartialEq, Default, Debug)]
+#[gpu]
 struct Results {
     eq: u32,
     ne: u32,
