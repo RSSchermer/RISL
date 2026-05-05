@@ -168,7 +168,7 @@ pub fn OpFieldPtr(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> imp
     let binding = stmt.result();
 
     view! {
-        <Value cfg value=binding.into()/>" = "<Value cfg value=ptr/>"._"{field_index}
+        <Value cfg value=binding.into()/>" = &"<Value cfg value=ptr/>"._"{field_index}
     }
 }
 
