@@ -3,6 +3,7 @@
     custom_inner_attributes,
     nonzero_internals,
     ptr_metadata,
+    specialization,
     try_trait_v2
 )]
 #![cfg_attr(rislc, rislc::core_shim_crate)]

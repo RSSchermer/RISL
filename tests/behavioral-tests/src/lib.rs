@@ -2,7 +2,8 @@
     stmt_expr_attributes,
     maybe_uninit_array_assume_init,
     maybe_uninit_uninit_array_transpose,
-    macro_metavar_expr
+    macro_metavar_expr,
+    iter_advance_by
 )]
 
 mod adt;
