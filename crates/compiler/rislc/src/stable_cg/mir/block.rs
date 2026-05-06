@@ -683,7 +683,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             match self.locals[dest.local].clone() {
                 LocalRef::Place(dest) => dest,
                 LocalRef::UnsizedPlace(_) => bug!("return type must be sized"),
-                LocalRef::PendingOperand => {
+                LocalRef::PendingOperand | LocalRef::Operand(_) => {
                     // Handle temporary places, specifically `Operand` ones, as
                     // they don't have `alloca`s.
                     return if matches!(fn_ret.mode, PassMode::Indirect { .. }) {
@@ -715,9 +715,6 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     } else {
                         ReturnDest::DirectOperand(dest.local)
                     };
-                }
-                LocalRef::Operand(_) => {
-                    bug!("place local already assigned to");
                 }
             }
         } else {
@@ -782,7 +779,11 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                     },
                 );
 
-                self.overwrite_local(index, LocalRef::Operand(op));
+                if let LocalRef::Operand(_) = &self.locals[index] {
+                    self.reassign_local_operand(bx, index, op);
+                } else {
+                    self.overwrite_local(index, LocalRef::Operand(op));
+                }
             }
         }
     }

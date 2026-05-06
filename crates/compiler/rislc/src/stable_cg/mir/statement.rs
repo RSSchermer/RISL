@@ -37,38 +37,10 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
 
                             self.overwrite_local(place.local, LocalRef::Operand(operand));
                         }
-                        LocalRef::Operand(old) => {
-                            let mut new = self.codegen_rvalue_operand(bx, rvalue);
+                        LocalRef::Operand(_) => {
+                            let new = self.codegen_rvalue_operand(bx, rvalue);
 
-                            match (old.val, &mut new.val) {
-                                (OperandValue::Ref(place), new_val) => {
-                                    new_val.store(bx, &place.with_type(new.layout.clone()));
-                                }
-                                (OperandValue::Immediate(old), OperandValue::Immediate(new)) => {
-                                    let local = bx.as_local(old);
-
-                                    bx.assign(local, *new);
-
-                                    *new = bx.local_value(local);
-                                }
-                                (
-                                    OperandValue::Pair(a_old, b_old),
-                                    OperandValue::Pair(a_new, b_new),
-                                ) => {
-                                    let a_local = bx.as_local(a_old);
-                                    let b_local = bx.as_local(b_old);
-
-                                    bx.assign(a_local, *a_new);
-                                    bx.assign(b_local, *b_new);
-
-                                    *a_new = bx.local_value(a_local);
-                                    *b_new = bx.local_value(b_local);
-                                }
-                                (OperandValue::ZeroSized, OperandValue::ZeroSized) => {}
-                                _ => bug!(),
-                            }
-
-                            self.overwrite_local(place.local, LocalRef::Operand(new));
+                            self.reassign_local_operand(bx, place.local, new);
                         }
                     }
                 } else {

@@ -5,6 +5,7 @@
 use std::ops::Index;
 
 use bit_set::BitSet;
+use rustc_middle::bug;
 use rustc_public::abi::{FieldsShape, VariantsShape};
 use rustc_public::mir;
 use rustc_public::mir::visit::Location;
@@ -13,9 +14,9 @@ use rustc_public::mir::{
 };
 use tracing::debug;
 
-use crate::stable_cg::TyAndLayout;
 use crate::stable_cg::mir::{FunctionCx, LocalRef};
 use crate::stable_cg::traits::{BuilderMethods, CodegenMethods};
+use crate::stable_cg::{OperandRef, OperandValue, TyAndLayout};
 
 pub(super) struct Locals<V> {
     values: Vec<LocalRef<V>>,
@@ -45,6 +46,44 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         assert!(self.locals.values.is_empty());
 
         self.locals.values = values;
+    }
+
+    pub(super) fn reassign_local_operand(
+        &mut self,
+        bx: &mut Bx,
+        local: mir::Local,
+        mut new: OperandRef<Bx::Value>,
+    ) {
+        let LocalRef::Operand(old) = &self.locals[local] else {
+            panic!("can only reassign an operand local")
+        };
+
+        match (old.val, &mut new.val) {
+            (OperandValue::Ref(place), new_val) => {
+                new_val.store(bx, &place.with_type(new.layout.clone()));
+            }
+            (OperandValue::Immediate(old), OperandValue::Immediate(new)) => {
+                let local = bx.as_local(old);
+
+                bx.assign(local, *new);
+
+                *new = bx.local_value(local);
+            }
+            (OperandValue::Pair(a_old, b_old), OperandValue::Pair(a_new, b_new)) => {
+                let a_local = bx.as_local(a_old);
+                let b_local = bx.as_local(b_old);
+
+                bx.assign(a_local, *a_new);
+                bx.assign(b_local, *b_new);
+
+                *a_new = bx.local_value(a_local);
+                *b_new = bx.local_value(b_local);
+            }
+            (OperandValue::ZeroSized, OperandValue::ZeroSized) => {}
+            _ => bug!(),
+        }
+
+        self.overwrite_local(local, LocalRef::Operand(new));
     }
 
     pub(super) fn overwrite_local(&mut self, local: mir::Local, mut value: LocalRef<Bx::Value>) {
