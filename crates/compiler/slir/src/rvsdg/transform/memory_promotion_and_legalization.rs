@@ -232,8 +232,17 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
     }
 }
 
+struct TouchedOuterAllocaFrame {
+    /// The region owning the switch/loop node that pushed this frame.
+    owner_region: Region,
+
+    /// The set of alloca nodes "touched" by store operations inside the switch/loop node that
+    /// pushed this frame.
+    touched: IndexSet<Node>,
+}
+
 struct TouchedOuterAllocaStack {
-    stack: Vec<IndexSet<Node>>,
+    stack: Vec<TouchedOuterAllocaFrame>,
 }
 
 impl TouchedOuterAllocaStack {
@@ -242,30 +251,35 @@ impl TouchedOuterAllocaStack {
     }
 
     fn touch(&mut self, op_alloca: Node) {
-        if let Some(touched_allocas) = self.stack.last_mut() {
-            touched_allocas.insert(op_alloca);
+        if let Some(frame) = self.stack.last_mut() {
+            frame.touched.insert(op_alloca);
         }
     }
 
-    fn push(&mut self) {
-        self.stack.push(IndexSet::new());
+    fn push_frame(&mut self, rvsdg: &Rvsdg, frame_owner: Node) {
+        let owner_region = rvsdg[frame_owner].region();
+        self.stack.push(TouchedOuterAllocaFrame {
+            owner_region,
+            touched: IndexSet::new(),
+        });
     }
 
-    fn pop(&mut self) -> Option<IndexSet<Node>> {
-        let touched_allocas = self.stack.pop();
+    fn pop_frame(&mut self, rvsdg: &Rvsdg) -> Option<IndexSet<Node>> {
+        let frame = self.stack.pop()?;
 
         // When an alloca is touched in a region, it should also be considered touched in all of
-        // that region's ancestor regions. Instead of moving up the entire stack every time
-        // TouchedAllocaStack::touch is called, we instead add them all at once here when popping.
-        if let Some(touched_allocas) = &touched_allocas
-            && let Some(parent) = self.stack.last_mut()
-        {
-            for alloca in touched_allocas.iter().copied() {
-                parent.insert(alloca);
+        // that region's ancestor regions, up to the region that owns the alloca node. Instead of
+        // moving up the entire stack every time TouchedAllocaStack::touch is called, we instead add
+        // them all at once here when popping.
+        if let Some(parent) = self.stack.last_mut() {
+            for alloca in frame.touched.iter().copied() {
+                if rvsdg[alloca].region() != frame.owner_region {
+                    parent.touched.insert(alloca);
+                }
             }
         }
 
-        touched_allocas
+        Some(frame.touched)
     }
 
     fn clear(&mut self) {
@@ -412,7 +426,8 @@ impl MemoryPromoterLegalizer {
         let switch_data = rvsdg[switch_node].expect_switch();
         let branch_count = switch_data.branches().len();
 
-        self.touched_outer_alloca_stack.push();
+        self.touched_outer_alloca_stack
+            .push_frame(rvsdg, switch_node);
 
         for i in 0..branch_count {
             let branch = rvsdg[switch_node].expect_switch().branches()[i];
@@ -424,7 +439,7 @@ impl MemoryPromoterLegalizer {
 
         let touched_allocas = self
             .touched_outer_alloca_stack
-            .pop()
+            .pop_frame(rvsdg)
             .expect("we should be able to pop the set we pushed earlier");
 
         // Create an output for every input alloca (an alloca that originates outside the switch
@@ -467,7 +482,7 @@ impl MemoryPromoterLegalizer {
         let region = rvsdg[loop_node].region();
         let loop_region = rvsdg[loop_node].expect_loop().loop_region();
 
-        self.touched_outer_alloca_stack.push();
+        self.touched_outer_alloca_stack.push_frame(rvsdg, loop_node);
 
         self.state_origin = (loop_region, StateOrigin::Argument);
 
@@ -491,7 +506,7 @@ impl MemoryPromoterLegalizer {
 
         let touched_allocas = self
             .touched_outer_alloca_stack
-            .pop()
+            .pop_frame(rvsdg)
             .expect("we should be able to pop the set we pushed earlier");
 
         // Create an output for every input alloca (an alloca that originates from outside the loop
