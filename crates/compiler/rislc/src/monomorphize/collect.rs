@@ -607,10 +607,10 @@ fn collect_items_of_instance(cx: &Cx, instance: Instance) -> MonoItems {
         .is_empty();
 
     if is_risl_intrinsic {
-        // If the instance is an RISL intrinsic, then in the phase one of rislc (the "RISL phase")
+        // If the instance is an RISL intrinsic, then in Phase One of rislc (the "RISL phase")
         // we don't have to collect any used items from the body; though items marked as RISL
-        // intrinsics may have function bodies that are used in phase two (the "regular Rust
-        // phase"), in phase one the function body is wholly replaced with an intrinsic
+        // intrinsics may have function bodies that are used in Phase Two (the "regular Rust
+        // phase"), in Phase One the function body is wholly replaced with an intrinsic
         // implementation during codegen.
         return used_items;
     }
