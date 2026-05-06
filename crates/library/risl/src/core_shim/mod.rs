@@ -6,5 +6,6 @@
 pub mod array;
 pub mod cmp;
 pub mod iter;
+pub mod num;
 pub mod ops;
 pub mod slice;

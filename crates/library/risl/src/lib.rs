@@ -1,4 +1,10 @@
-#![feature(core_intrinsics, custom_inner_attributes, ptr_metadata, try_trait_v2)]
+#![feature(
+    core_intrinsics,
+    custom_inner_attributes,
+    nonzero_internals,
+    ptr_metadata,
+    try_trait_v2
+)]
 #![cfg_attr(rislc, rislc::core_shim_crate)]
 extern crate core;
 

@@ -4,7 +4,8 @@ use rustc_public::abi::{PassMode, ValueAbi};
 use rustc_public::crate_def::Attribute;
 use rustc_public::mir::mono::{Instance, MonoItem};
 use slir::BinaryOperator;
-use slir::cfg::{BlockPosition, LocalBinding, Terminator};
+use slir::cfg::{BlockPosition, InlineConst, LocalBinding, Terminator};
+use slir::ty::{TY_I32, TY_U32};
 
 use crate::slir_build::context::CodegenContext;
 use crate::stable_cg::traits::MiscCodegenMethods;
@@ -24,6 +25,9 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::SliceElementRef => define_slice_element_ref(instance, cx),
             RislIntrinsic::SliceRange => define_slice_range(instance, cx),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
+            RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
+            RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
+            RislIntrinsic::NonZeroGet => define_non_zero_get(instance, cx),
         }
 
         None
@@ -42,6 +46,9 @@ pub enum RislIntrinsic {
     SliceElementRef,
     SliceRange,
     MemResourceAsRef,
+    NonZeroNew,
+    NonZeroNewUnchecked,
+    NonZeroGet,
 }
 
 impl RislIntrinsic {
@@ -64,6 +71,9 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(slice_element_ref)]" => RislIntrinsic::SliceElementRef,
         "#[rislc::intrinsic(slice_range)]" => RislIntrinsic::SliceRange,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
+        "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
+        "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
+        "#[rislc::intrinsic(non_zero_get)]" => RislIntrinsic::NonZeroGet,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
 }
@@ -273,4 +283,103 @@ fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {
         // argument.
         cfg.set_terminator(bb, Terminator::return_value(ptr_arg.into()));
     }
+}
+
+fn define_non_zero_new(instance: Instance, cx: &CodegenContext) {
+    // println!("define_non_zero_new {:?} {:?}", instance, instance.fn_abi().unwrap());
+    //
+    // let function = cx.get_fn(&instance);
+    //
+    // let mut cfg = cx.cfg.borrow_mut();
+    // let body = cfg
+    //     .get_function_body(function)
+    //     .expect("function should have been predefined");
+    // println!("body {:?}", body);
+    // let n = body.argument_values()[0];
+    //
+    // let entry_bb = body.entry_block();
+    // cfg.set_terminator(entry_bb, Terminator::return_value(n.into()));
+
+    println!(
+        "define_non_zero_new {:?} {:?}",
+        instance,
+        instance.fn_abi().unwrap()
+    );
+
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    println!("body {:?}", body);
+
+    let ret_ptr = body.argument_values()[0];
+    let n = body.argument_values()[1];
+
+    let entry_bb = body.entry_block();
+    let zero_bb = cfg.add_basic_block(function);
+    let non_zero_bb = cfg.add_basic_block(function);
+
+    let ty = cfg[n].ty();
+
+    let zero_value = match ty {
+        TY_U32 => InlineConst::U32(0),
+        TY_I32 => InlineConst::I32(0),
+        _ => panic!("`u32` and `i32` are the only zeroable types supported by RISL"),
+    };
+    let (_, is_zero) = cfg.add_stmt_op_binary(
+        entry_bb,
+        BlockPosition::Append,
+        BinaryOperator::Eq,
+        n.into(),
+        zero_value.into(),
+    );
+
+    cfg.set_terminator(
+        entry_bb,
+        Terminator::branch_bool(is_zero, zero_bb, non_zero_bb),
+    );
+
+    // Handle the "zero" case.
+    cfg.add_stmt_op_set_discriminant(zero_bb, BlockPosition::Append, ret_ptr.into(), 0);
+    cfg.set_terminator(zero_bb, Terminator::return_void());
+
+    // Handle the "non-zero" case.
+    let (_, some_ptr) =
+        cfg.add_stmt_op_variant_ptr(non_zero_bb, BlockPosition::Append, ret_ptr.into(), 1);
+    let (_, val_ptr) =
+        cfg.add_stmt_op_field_ptr(non_zero_bb, BlockPosition::Append, some_ptr.into(), 0);
+    cfg.add_stmt_op_store(non_zero_bb, BlockPosition::Append, val_ptr.into(), n.into());
+    cfg.add_stmt_op_set_discriminant(non_zero_bb, BlockPosition::Append, ret_ptr.into(), 1);
+    cfg.set_terminator(non_zero_bb, Terminator::return_void());
+}
+
+fn define_non_zero_new_unchecked(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let n = body.argument_values()[0];
+
+    let entry_bb = body.entry_block();
+    cfg.set_terminator(entry_bb, Terminator::return_value(n.into()));
+}
+
+fn define_non_zero_get(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let n = body.argument_values()[0];
+
+    let entry_bb = body.entry_block();
+    cfg.set_terminator(entry_bb, Terminator::return_value(n.into()));
 }

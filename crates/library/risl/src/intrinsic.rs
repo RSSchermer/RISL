@@ -1,5 +1,7 @@
 //! Intrinsics for the RISL compiler.
 
+use std::num::{NonZero, ZeroablePrimitive};
+
 use crate::gpu;
 use crate::mem::{Storage, StorageMut, Uniform, Workgroup};
 
@@ -28,3 +30,6 @@ gen_intrinsic!(slice_element_ref: fn slice_element_ref<T>(slice: &[T], index: us
 gen_intrinsic!(slice_element_ref: fn slice_element_mut<T>(slice: &mut [T], index: usize) -> &mut T);
 gen_intrinsic!(slice_range: fn slice_range<T>(slice: &[T], start: usize, end: usize) -> &[T]);
 gen_intrinsic!(slice_range: fn slice_range_mut<T>(slice: &mut [T], start: usize, end: usize) -> &mut [T]);
+gen_intrinsic!(non_zero_new: fn non_zero_new<T: ZeroablePrimitive>(n: T) -> Option<NonZero<T>>);
+gen_intrinsic!(non_zero_new_unchecked: fn non_zero_new_unchecked<T: ZeroablePrimitive>(n: T) -> NonZero<T>);
+gen_intrinsic!(non_zero_get: fn non_zero_get<T: ZeroablePrimitive>(n: NonZero<T>) -> T);
