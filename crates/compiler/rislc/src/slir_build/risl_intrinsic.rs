@@ -286,34 +286,12 @@ fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {
 }
 
 fn define_non_zero_new(instance: Instance, cx: &CodegenContext) {
-    // println!("define_non_zero_new {:?} {:?}", instance, instance.fn_abi().unwrap());
-    //
-    // let function = cx.get_fn(&instance);
-    //
-    // let mut cfg = cx.cfg.borrow_mut();
-    // let body = cfg
-    //     .get_function_body(function)
-    //     .expect("function should have been predefined");
-    // println!("body {:?}", body);
-    // let n = body.argument_values()[0];
-    //
-    // let entry_bb = body.entry_block();
-    // cfg.set_terminator(entry_bb, Terminator::return_value(n.into()));
-
-    println!(
-        "define_non_zero_new {:?} {:?}",
-        instance,
-        instance.fn_abi().unwrap()
-    );
-
     let function = cx.get_fn(&instance);
 
     let mut cfg = cx.cfg.borrow_mut();
     let body = cfg
         .get_function_body(function)
         .expect("function should have been predefined");
-
-    println!("body {:?}", body);
 
     let ret_ptr = body.argument_values()[0];
     let n = body.argument_values()[1];
