@@ -2,6 +2,7 @@ mod advance_by;
 mod count;
 mod fold;
 mod last;
+mod nth;
 mod size_hint;
 mod try_fold;
 

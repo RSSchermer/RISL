@@ -80,6 +80,16 @@ where
 }
 
 #[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::nth"))]
+pub fn iterator_nth<I>(iter: &mut I, n: usize) -> Option<I::Item>
+where
+    I: Iterator + ?Sized,
+{
+    iterator_advance_by(iter, n).ok()?;
+    iter.next()
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::advance_by"))]
 pub fn iterator_advance_by<I>(iter: &mut I, n: usize) -> Result<(), NonZero<usize>>
 where
