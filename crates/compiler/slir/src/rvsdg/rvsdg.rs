@@ -2652,6 +2652,7 @@ impl Rvsdg {
         }
 
         self.unlink_state(switch_node);
+        self.nodes[switch_node].expect_switch_mut().state = None;
     }
 
     /// Adds a [LoopNode] to the given `region`.
@@ -2887,6 +2888,7 @@ impl Rvsdg {
         }
 
         self.unlink_state(loop_node);
+        self.nodes[loop_node].expect_loop_mut().state = None;
     }
 
     add_const_methods! {
