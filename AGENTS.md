@@ -5,11 +5,11 @@ the RISL (Rust-Integrated Shading Language) compiler project.
 
 ## Project Mental Map
 
-RISL is a compiler for a domain-specific language integrated into Rust, targeting modern GPU APIs
-(via the `empa` crate). It translates Rust code into target shader languages, primarily WGSL (the
-WebGPU Shading Language) and SPIR-V. To achieve this, Rust's Mid-level Intermediate Representation 
-(MIR) is lowered through 3 additional intermediate representations that are collectively referred 
-to as the Shading Language Intermediate Representation (SLIR):
+RISL is a domain-specific language integrated into Rust, targeting modern GPU APIs (e.g., via the 
+`empa` crate). It translates Rust code into target shader languages, primarily WGSL (the WebGPU 
+Shading Language) and SPIR-V. To achieve this, Rust's Mid-level Intermediate Representation (MIR) 
+is lowered through 3 additional intermediate representations that are collectively referred to as 
+the Shading Language Intermediate Representation (SLIR):
 
 - **SLIR-CFG**: a Control-Flow Graph representation that is meant to be easy to target from Rust 
   MIR.
@@ -18,12 +18,28 @@ to as the Shading Language Intermediate Representation (SLIR):
 - **SLIR-SCF**: a Structured Control-Flow representation that is semantically close to both WGSL and
   SPIR-V. This representation facilitates the final translation step into the target shader language.
 
+RISL is a subset of Rust. User-defined types (struct and enums), traits and functions may be decorated
+with a `#[gpu]` attribute to indicate that the type/trait/function is intended to be "GPU compatible";
+for such types/traits/functions GPU-compatibility is enforced by the compiler. The `#[gpu]` attribute
+acts an an "effect", similar to Rust's builtin `const` effect. For example, like a `const` function can
+only call other `const` functions, a `#[gpu]` function can only call other `#[gpu]` functions. RISL
+also comes with a standard library of foundational GPU-compatible types, traits and functions that 
+users may use to compose their own types, traits and functions. 
+
+This standard library in part reuses Rust's `core` library through a process we call "core-shimming". 
+The `core` library does not natively contain `#[gpu]` types/traits/functions, and many types, functions
+and default trait methods are not implemented in a GPU-compatible manner. For a subset of the `core`
+library, we define "shim" types/traits/functions that map to a type/trait/function in the `core` library
+via an `rislc::core_shim` attribute. This allows users to use the `core` library types/traits/functions
+in their RISL code, and the compiler will opaquely replace these with their corresponding "shim" versions.
+
 ### Core Crates
 
 - **`crates/compiler/rislc`**: The main compiler binary. It acts as a `rustc` wrapper and driver for
   the compilation pipeline.
 - **`crates/compiler/slir`**: Defines the Shading Language Intermediate Representation.
-- **`crates/library/risl*`**: Support libraries and macros that users use to write RISL code.
+- **`crates/library/risl*`**: A standard library for RISL. Contains both RISL-specific types, traits 
+  and functions, as well as the "core shims".
 - **`crates/rvsdg-dump-cli`**: A diagnostic tool for analyzing RVSDG binary dumps.
   **Use this instead of raw binary inspection.**
 - **`xtask`**: A dedicated crate for project automation (running tests, rebuilding the compiler).
