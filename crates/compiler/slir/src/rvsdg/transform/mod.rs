@@ -21,6 +21,7 @@ pub mod offset_slice_replacement;
 pub mod pred_to_case_extraction;
 pub mod pred_to_case_to_pred_merging;
 pub mod proxy_node_elimination;
+pub mod redundant_state_link_elimination;
 pub mod region_replication;
 pub mod scalar_replacement;
 pub mod store_coalescing;
@@ -40,6 +41,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     loop_passthrough_elimination::transform_entry_points(module, rvsdg);
     offset_slice_elaboration::transform_entry_points(module, rvsdg);
     memory_transform::transform_entry_points(module, rvsdg);
+    redundant_state_link_elimination::transform_entry_points(module, rvsdg);
     offset_slice_replacement::transform_entry_points(module, rvsdg);
     pred_to_case_extraction::transform_entry_points(module, rvsdg);
     pred_to_case_to_pred_merging::transform_entry_points(module, rvsdg);
