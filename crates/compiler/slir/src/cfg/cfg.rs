@@ -475,6 +475,13 @@ impl OpMin {
     gen_intrinsic_result!();
 }
 
+pub type OpRound = IntrinsicOp<intrinsic::OpRound>;
+
+impl OpRound {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpBoolToBranchSelector = IntrinsicOp<intrinsic::OpBoolToBranchSelector>;
 
 impl OpBoolToBranchSelector {
@@ -592,6 +599,7 @@ gen_statement_data! {
     OpBinary is_op_binary expect_op_binary "binary",
     OpMax is_op_max expect_op_max "max",
     OpMin is_op_min expect_op_min "min",
+    OpRound is_op_round expect_op_round "round",
     OpCall is_op_call expect_op_call "call",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
@@ -1584,6 +1592,22 @@ impl Cfg {
             position,
             intrinsic::OpMin,
             [(lhs, "lhs"), (rhs, "rhs")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_round(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpRound,
+            [(value, "value")],
         );
 
         (stmt, result.unwrap())

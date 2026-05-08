@@ -140,6 +140,7 @@ impl_collect_dependencies_statement! {
     OpBinary,
     OpMax,
     OpMin,
+    OpRound,
     OpCall,
     OpConvertToU32,
     OpConvertToI32,

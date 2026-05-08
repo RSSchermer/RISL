@@ -42,6 +42,7 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpMax(_) => view! { <OpMax cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpMin(_) => view! { <OpMin cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpRound(_) => view! { <OpRound cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 cfg statement/> }.into_any()
@@ -291,6 +292,18 @@ pub fn OpMin(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl Int
 
     view! {
         <Value cfg value=binding.into()/>" = min("<Value cfg value=lhs/>", "<Value cfg value=rhs/>")"
+    }
+}
+
+#[component]
+pub fn OpRound(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_round();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = round("<Value cfg value/>")"
     }
 }
 

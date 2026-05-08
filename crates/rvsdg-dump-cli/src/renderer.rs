@@ -389,6 +389,7 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpBinary(n) => self.write_op_binary(writer, node, n),
             SimpleNode::OpMax(_) => self.write_node_common(writer, node, "OpMax"),
             SimpleNode::OpMin(_) => self.write_node_common(writer, node, "OpMin"),
+            SimpleNode::OpRound(_) => self.write_node_common(writer, node, "OpRound"),
             SimpleNode::OpVector(n) => self.write_op_vector(writer, node, n),
             SimpleNode::OpMatrix(n) => self.write_op_matrix(writer, node, n),
             SimpleNode::OpCaseToBranchSelector(n) => {

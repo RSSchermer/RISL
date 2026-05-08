@@ -158,6 +158,12 @@ impl OpMin {
     gen_intrinsic_arg_getter!(rhs, 1);
 }
 
+pub type OpRound = IntrinsicOp<intrinsic::OpRound>;
+
+impl OpRound {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -278,6 +284,7 @@ pub enum ExpressionKind {
     OpBinary(OpBinary),
     OpMax(OpMax),
     OpMin(OpMin),
+    OpRound(OpRound),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -314,6 +321,7 @@ gen_expression_kind_from! {
     OpBinary: OpBinary,
     OpMax: OpMax,
     OpMin: OpMin,
+    OpRound: OpRound,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -401,6 +409,7 @@ impl ExpressionKind {
         OpBinary is_op_binary expect_op_binary "binary operation",
         OpMax is_op_max expect_op_max "max operation",
         OpMin is_op_min expect_op_min "min operation",
+        OpRound is_op_round expect_op_round "round operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",
@@ -1301,6 +1310,15 @@ impl Scf {
         rhs: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpMin, [lhs, rhs])
+    }
+
+    pub fn add_bind_op_round(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpRound, [value])
     }
 
     pub fn add_bind_op_vector(

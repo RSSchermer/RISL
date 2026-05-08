@@ -230,6 +230,9 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpMin(_) => {
             write_stmt_op_min(w, cfg, stmt)?;
         }
+        StatementData::OpRound(_) => {
+            write_stmt_op_round(w, cfg, stmt)?;
+        }
         StatementData::OpCall(_) => {
             write_stmt_op_call(w, cfg, stmt)?;
         }
@@ -447,6 +450,17 @@ fn write_stmt_op_min<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result
     write_value(w, data.lhs())?;
     write!(w, ", ")?;
     write_value(w, data.rhs())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_round<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_round();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = round(")?;
+    write_value(w, data.value())?;
     write!(w, ");")?;
 
     Ok(())

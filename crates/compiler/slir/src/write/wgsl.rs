@@ -944,6 +944,7 @@ impl WgslModuleWriter {
             ExpressionKind::OpBinary(op) => self.write_expr_op_binary(cx, op, inline_cx),
             ExpressionKind::OpMax(op) => self.write_fn_like_intrinsic(cx, op, "max"),
             ExpressionKind::OpMin(op) => self.write_fn_like_intrinsic(cx, op, "min"),
+            ExpressionKind::OpRound(op) => self.write_fn_like_intrinsic(cx, op, "round"),
             ExpressionKind::OpVector(op) => self.write_expr_op_vector(cx, op),
             ExpressionKind::OpMatrix(op) => self.write_expr_op_matrix(cx, op),
             ExpressionKind::OpConvertToU32(op) => self.write_fn_like_intrinsic(cx, op, "u32"),

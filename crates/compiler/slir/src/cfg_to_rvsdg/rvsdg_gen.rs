@@ -361,6 +361,7 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpBinary(op) => self.visit_intrinsic_op(op),
             StatementData::OpMax(op) => self.visit_intrinsic_op(op),
             StatementData::OpMin(op) => self.visit_intrinsic_op(op),
+            StatementData::OpRound(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToU32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToI32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToF32(op) => self.visit_intrinsic_op(op),

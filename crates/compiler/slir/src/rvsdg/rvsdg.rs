@@ -613,6 +613,7 @@ impl NodeData {
         OpBinary is_op_binary expect_op_binary "a `binary` operation",
         OpMax is_op_max expect_op_max "a `max` operation",
         OpMin is_op_min expect_op_min "a `min` operation",
+        OpRound is_op_round expect_op_round "a `round` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
         OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
@@ -1398,6 +1399,13 @@ impl OpMin {
     gen_intrinsic_value_output!();
 }
 
+pub type OpRound = IntrinsicNode<intrinsic::OpRound>;
+
+impl OpRound {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
 
 impl OpVector {
@@ -1918,6 +1926,7 @@ gen_simple_node! {
     OpBinary,
     OpMax,
     OpMin,
+    OpRound,
     OpVector,
     OpMatrix,
     OpCaseToBranchSelector,
@@ -3213,6 +3222,10 @@ impl Rvsdg {
         rhs_input: ValueInput,
     ) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpMin, [lhs_input, rhs_input], None)
+    }
+
+    pub fn add_op_round(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpRound, [input], None)
     }
 
     pub fn add_op_vector(
