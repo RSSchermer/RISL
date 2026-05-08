@@ -611,6 +611,7 @@ impl NodeData {
         OpGetSliceOffset is_op_get_slice_offset expect_op_get_slice_offset "a `get-slice-offset` operation",
         OpUnary is_op_unary expect_op_unary "a `unary` operation",
         OpBinary is_op_binary expect_op_binary "a `binary` operation",
+        OpMin is_op_min expect_op_min "a `min` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
         OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
@@ -1380,6 +1381,14 @@ impl OpBinary {
     gen_intrinsic_value_output!();
 }
 
+pub type OpMin = IntrinsicNode<intrinsic::OpMin>;
+
+impl OpMin {
+    gen_intrinsic_value_input!(lhs_input, 0);
+    gen_intrinsic_value_input!(rhs_input, 1);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
 
 impl OpVector {
@@ -1898,6 +1907,7 @@ gen_simple_node! {
     OpGetSliceOffset,
     OpUnary,
     OpBinary,
+    OpMin,
     OpVector,
     OpMatrix,
     OpCaseToBranchSelector,
@@ -3175,6 +3185,15 @@ impl Rvsdg {
             [lhs_input, rhs_input],
             None,
         )
+    }
+
+    pub fn add_op_min(
+        &mut self,
+        region: Region,
+        lhs_input: ValueInput,
+        rhs_input: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpMin, [lhs_input, rhs_input], None)
     }
 
     pub fn add_op_vector(

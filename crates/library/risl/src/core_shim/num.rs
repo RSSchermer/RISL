@@ -21,3 +21,9 @@ pub unsafe fn non_zero_new_unchecked<T: ZeroablePrimitive>(n: T) -> NonZero<T> {
 pub fn non_zero_get<T: ZeroablePrimitive>(this: NonZero<T>) -> T {
     unsafe { intrinsic::non_zero_get(this) }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::min"))]
+pub fn f32_min(this: f32, other: f32) -> f32 {
+    unsafe { intrinsic::min_f32(this, other) }
+}

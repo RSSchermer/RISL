@@ -29,6 +29,7 @@ enum SimpleNodeMetadata {
     OpGetSliceOffset,
     OpUnary(UnaryOperator),
     OpBinary(BinaryOperator),
+    OpMin,
     OpVector(Vector),
     OpMatrix(Matrix),
     OpCaseToBranchSelector(Vec<u32>),
@@ -67,6 +68,7 @@ impl SimpleNodeMetadata {
             SimpleNode::OpGetSliceOffset(_) => SimpleNodeMetadata::OpGetSliceOffset,
             SimpleNode::OpUnary(n) => SimpleNodeMetadata::OpUnary(n.intrinsic().operator),
             SimpleNode::OpBinary(n) => SimpleNodeMetadata::OpBinary(n.intrinsic().operator),
+            SimpleNode::OpMin(_) => SimpleNodeMetadata::OpMin,
             SimpleNode::OpVector(n) => SimpleNodeMetadata::OpVector(n.intrinsic().ty),
             SimpleNode::OpMatrix(n) => SimpleNodeMetadata::OpMatrix(n.intrinsic().ty),
             SimpleNode::OpCaseToBranchSelector(n) => {

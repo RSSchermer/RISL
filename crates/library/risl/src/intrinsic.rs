@@ -33,3 +33,4 @@ gen_intrinsic!(slice_range: fn slice_range_mut<T>(slice: &mut [T], start: usize,
 gen_intrinsic!(non_zero_new: fn non_zero_new<T: ZeroablePrimitive>(n: T) -> Option<NonZero<T>>);
 gen_intrinsic!(non_zero_new_unchecked: fn non_zero_new_unchecked<T: ZeroablePrimitive>(n: T) -> NonZero<T>);
 gen_intrinsic!(non_zero_get: fn non_zero_get<T: ZeroablePrimitive>(n: NonZero<T>) -> T);
+gen_intrinsic!(min_f32: fn min_f32(a: f32, b: f32) -> f32);

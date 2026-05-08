@@ -942,6 +942,7 @@ impl WgslModuleWriter {
             ExpressionKind::GlobalPtr(ptr) => self.write_expr_global_pointer(ptr, inline_cx),
             ExpressionKind::OpUnary(op) => self.write_expr_op_unary(cx, op),
             ExpressionKind::OpBinary(op) => self.write_expr_op_binary(cx, op, inline_cx),
+            ExpressionKind::OpMin(op) => self.write_fn_like_intrinsic(cx, op, "min"),
             ExpressionKind::OpVector(op) => self.write_expr_op_vector(cx, op),
             ExpressionKind::OpMatrix(op) => self.write_expr_op_matrix(cx, op),
             ExpressionKind::OpConvertToU32(op) => self.write_fn_like_intrinsic(cx, op, "u32"),

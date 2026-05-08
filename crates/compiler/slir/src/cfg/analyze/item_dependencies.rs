@@ -138,6 +138,7 @@ impl_collect_dependencies_statement! {
     OpOffsetSlice,
     OpUnary,
     OpBinary,
+    OpMin,
     OpCall,
     OpConvertToU32,
     OpConvertToI32,

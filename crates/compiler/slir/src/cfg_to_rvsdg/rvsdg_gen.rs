@@ -359,6 +359,7 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpOffsetSlice(op) => self.visit_intrinsic_op(op),
             StatementData::OpUnary(op) => self.visit_intrinsic_op(op),
             StatementData::OpBinary(op) => self.visit_intrinsic_op(op),
+            StatementData::OpMin(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToU32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToI32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToF32(op) => self.visit_intrinsic_op(op),

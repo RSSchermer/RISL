@@ -40,6 +40,10 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             <LocalBinding binding=op.rhs()/>
         }
         .into_any(),
+        ExpressionKind::OpMin(op) => view! {
+            "min("<LocalBinding binding=op.lhs()/>", "<LocalBinding binding=op.rhs()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpVector(op) => view! {
             {op.vector_ty().to_string()}"("{
                 op.elements().iter().copied().map(|binding| view! {

@@ -28,6 +28,7 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
             RislIntrinsic::NonZeroGet => define_non_zero_get(instance, cx),
+            RislIntrinsic::MinF32 => define_min_op(instance, cx),
         }
 
         None
@@ -49,6 +50,7 @@ pub enum RislIntrinsic {
     NonZeroNew,
     NonZeroNewUnchecked,
     NonZeroGet,
+    MinF32,
 }
 
 impl RislIntrinsic {
@@ -74,6 +76,7 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
         "#[rislc::intrinsic(non_zero_get)]" => RislIntrinsic::NonZeroGet,
+        "#[rislc::intrinsic(min_f32)]" => RislIntrinsic::MinF32,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
 }
@@ -140,6 +143,23 @@ fn define_mul(instance: Instance, cx: &CodegenContext) {
 
 fn define_div(instance: Instance, cx: &CodegenContext) {
     define_arith_op(instance, cx, BinaryOperator::Div);
+}
+
+fn define_min_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let lhs = body.argument_values()[0];
+    let rhs = body.argument_values()[1];
+
+    let (_, result) = cfg.add_stmt_op_min(bb, BlockPosition::Append, lhs.into(), rhs.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }
 
 fn define_slice_len(instance: Instance, cx: &CodegenContext) {

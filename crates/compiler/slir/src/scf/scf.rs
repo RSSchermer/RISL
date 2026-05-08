@@ -144,6 +144,13 @@ impl OpBinary {
     gen_intrinsic_arg_getter!(rhs, 1);
 }
 
+pub type OpMin = IntrinsicOp<intrinsic::OpMin>;
+
+impl OpMin {
+    gen_intrinsic_arg_getter!(lhs, 0);
+    gen_intrinsic_arg_getter!(rhs, 1);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -262,6 +269,7 @@ pub enum ExpressionKind {
     GlobalPtr(GlobalPtr),
     OpUnary(OpUnary),
     OpBinary(OpBinary),
+    OpMin(OpMin),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -296,6 +304,7 @@ gen_expression_kind_from! {
     GlobalPtr: GlobalPtr,
     OpUnary: OpUnary,
     OpBinary: OpBinary,
+    OpMin: OpMin,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -381,6 +390,7 @@ impl ExpressionKind {
         GlobalPtr is_global_ptr expect_global_ptr "global-pointer",
         OpUnary is_op_unary expect_op_unary "unary operation",
         OpBinary is_op_binary expect_op_binary "binary operation",
+        OpMin is_op_min expect_op_min "min operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",
@@ -1261,6 +1271,16 @@ impl Scf {
             intrinsic::OpBinary { operator },
             [lhs, rhs],
         )
+    }
+
+    pub fn add_bind_op_min(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        lhs: LocalBinding,
+        rhs: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpMin, [lhs, rhs])
     }
 
     pub fn add_bind_op_vector(

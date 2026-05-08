@@ -8,6 +8,7 @@
 
 mod adt;
 mod array;
+mod cmp;
 mod enum_result;
 mod iter;
 mod num;
