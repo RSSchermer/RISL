@@ -496,6 +496,20 @@ impl OpCeil {
     gen_intrinsic_result!();
 }
 
+pub type OpSqrt = IntrinsicOp<intrinsic::OpSqrt>;
+
+impl OpSqrt {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpInverseSqrt = IntrinsicOp<intrinsic::OpInverseSqrt>;
+
+impl OpInverseSqrt {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpBoolToBranchSelector = IntrinsicOp<intrinsic::OpBoolToBranchSelector>;
 
 impl OpBoolToBranchSelector {
@@ -616,6 +630,8 @@ gen_statement_data! {
     OpRound is_op_round expect_op_round "round",
     OpFloor is_op_floor expect_op_floor "floor",
     OpCeil is_op_ceil expect_op_ceil "ceil",
+    OpSqrt is_op_sqrt expect_op_sqrt "sqrt",
+    OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "inverse-sqrt",
     OpCall is_op_call expect_op_call "call",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
@@ -1655,6 +1671,38 @@ impl Cfg {
             bb,
             position,
             intrinsic::OpCeil,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_sqrt(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpSqrt,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_inverse_sqrt(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpInverseSqrt,
             [(value, "value")],
         );
 

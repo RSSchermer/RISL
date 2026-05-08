@@ -616,6 +616,8 @@ impl NodeData {
         OpRound is_op_round expect_op_round "a `round` operation",
         OpFloor is_op_floor expect_op_floor "a `floor` operation",
         OpCeil is_op_ceil expect_op_ceil "a `ceil` operation",
+        OpSqrt is_op_sqrt expect_op_sqrt "a `sqrt` operation",
+        OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "an `inverse-sqrt` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
         OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
@@ -1422,6 +1424,20 @@ impl OpCeil {
     gen_intrinsic_value_output!();
 }
 
+pub type OpSqrt = IntrinsicNode<intrinsic::OpSqrt>;
+
+impl OpSqrt {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpInverseSqrt = IntrinsicNode<intrinsic::OpInverseSqrt>;
+
+impl OpInverseSqrt {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
 
 impl OpVector {
@@ -1945,6 +1961,8 @@ gen_simple_node! {
     OpRound,
     OpFloor,
     OpCeil,
+    OpSqrt,
+    OpInverseSqrt,
     OpVector,
     OpMatrix,
     OpCaseToBranchSelector,
@@ -3252,6 +3270,14 @@ impl Rvsdg {
 
     pub fn add_op_ceil(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpCeil, [input], None)
+    }
+
+    pub fn add_op_sqrt(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpSqrt, [input], None)
+    }
+
+    pub fn add_op_inverse_sqrt(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpInverseSqrt, [input], None)
     }
 
     pub fn add_op_vector(

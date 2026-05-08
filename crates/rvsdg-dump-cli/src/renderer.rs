@@ -392,6 +392,8 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpRound(_) => self.write_node_common(writer, node, "OpRound"),
             SimpleNode::OpFloor(_) => self.write_node_common(writer, node, "OpFloor"),
             SimpleNode::OpCeil(_) => self.write_node_common(writer, node, "OpCeil"),
+            SimpleNode::OpSqrt(_) => self.write_node_common(writer, node, "OpSqrt"),
+            SimpleNode::OpInverseSqrt(_) => self.write_node_common(writer, node, "OpInverseSqrt"),
             SimpleNode::OpVector(n) => self.write_op_vector(writer, node, n),
             SimpleNode::OpMatrix(n) => self.write_op_matrix(writer, node, n),
             SimpleNode::OpCaseToBranchSelector(n) => {

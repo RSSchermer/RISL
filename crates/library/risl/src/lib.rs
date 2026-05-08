@@ -10,6 +10,7 @@
 extern crate core;
 
 pub mod mem;
+pub mod num;
 pub mod primitive;
 pub mod resource;
 pub mod smi;
@@ -25,6 +26,7 @@ pub use risl_macros::gpu;
 pub mod prelude {
     pub use super::gpu;
     pub use super::mem::{Storage, StorageMut, Uniform, Workgroup};
+    pub use super::num::F32Ext;
     pub use super::primitive::*;
     pub use super::resource::{Resource, resource};
     pub use super::shader::{compute, fragment, shader_io, shader_module, vertex};

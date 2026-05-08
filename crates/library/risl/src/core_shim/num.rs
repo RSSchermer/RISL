@@ -51,3 +51,9 @@ pub fn f32_floor(this: f32) -> f32 {
 pub fn f32_ceil(this: f32) -> f32 {
     unsafe { intrinsic::ceil_f32(this) }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::sqrt"))]
+pub fn f32_sqrt(this: f32) -> f32 {
+    unsafe { intrinsic::sqrt_f32(this) }
+}

@@ -348,6 +348,8 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpRound(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpFloor(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpCeil(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpSqrt(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpInverseSqrt(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpVector(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpMatrix(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpConvertToU32(op) => self.prepare_bind_intrinsic(node, op).apply(self),

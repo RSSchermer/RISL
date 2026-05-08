@@ -69,6 +69,8 @@ impl UseCounter {
             ExpressionKind::OpRound(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpFloor(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpCeil(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpSqrt(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpInverseSqrt(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpVector(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpMatrix(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpConvertToU32(op) => self.count_intrinsic_op_binding(op),

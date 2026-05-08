@@ -176,6 +176,18 @@ impl OpCeil {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpSqrt = IntrinsicOp<intrinsic::OpSqrt>;
+
+impl OpSqrt {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpInverseSqrt = IntrinsicOp<intrinsic::OpInverseSqrt>;
+
+impl OpInverseSqrt {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -299,6 +311,8 @@ pub enum ExpressionKind {
     OpRound(OpRound),
     OpFloor(OpFloor),
     OpCeil(OpCeil),
+    OpSqrt(OpSqrt),
+    OpInverseSqrt(OpInverseSqrt),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -338,6 +352,8 @@ gen_expression_kind_from! {
     OpRound: OpRound,
     OpFloor: OpFloor,
     OpCeil: OpCeil,
+    OpSqrt: OpSqrt,
+    OpInverseSqrt: OpInverseSqrt,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -428,6 +444,8 @@ impl ExpressionKind {
         OpRound is_op_round expect_op_round "round operation",
         OpFloor is_op_floor expect_op_floor "floor operation",
         OpCeil is_op_ceil expect_op_ceil "ceil operation",
+        OpSqrt is_op_sqrt expect_op_sqrt "sqrt operation",
+        OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "inverse-sqrt operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",
@@ -1355,6 +1373,24 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpCeil, [value])
+    }
+
+    pub fn add_bind_op_sqrt(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpSqrt, [value])
+    }
+
+    pub fn add_bind_op_inverse_sqrt(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpInverseSqrt, [value])
     }
 
     pub fn add_bind_op_vector(

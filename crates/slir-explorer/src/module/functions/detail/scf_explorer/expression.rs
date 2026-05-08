@@ -60,6 +60,14 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "ceil("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpSqrt(op) => view! {
+            "sqrt("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpInverseSqrt(op) => view! {
+            "inverse_sqrt("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpVector(op) => view! {
             {op.vector_ty().to_string()}"("{
                 op.elements().iter().copied().map(|binding| view! {

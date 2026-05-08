@@ -45,6 +45,10 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpRound(_) => view! { <OpRound cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpFloor(_) => view! { <OpFloor cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCeil(_) => view! { <OpCeil cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpSqrt(_) => view! { <OpSqrt cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpInverseSqrt(_) => {
+            view! { <OpInverseSqrt cfg statement/> }.into_any()
+        }
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 cfg statement/> }.into_any()
@@ -330,6 +334,30 @@ pub fn OpCeil(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl In
 
     view! {
         <Value cfg value=binding.into()/>" = ceil("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpSqrt(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_sqrt();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = sqrt("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpInverseSqrt(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_inverse_sqrt();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = inverse_sqrt("<Value cfg value/>")"
     }
 }
 
