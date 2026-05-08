@@ -1339,6 +1339,24 @@ impl Scf {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpRound, [value])
     }
 
+    pub fn add_bind_op_floor(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpFloor, [value])
+    }
+
+    pub fn add_bind_op_ceil(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpCeil, [value])
+    }
+
     pub fn add_bind_op_vector(
         &mut self,
         block: Block,
