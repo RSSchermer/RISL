@@ -482,6 +482,20 @@ impl OpRound {
     gen_intrinsic_result!();
 }
 
+pub type OpFloor = IntrinsicOp<intrinsic::OpFloor>;
+
+impl OpFloor {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpCeil = IntrinsicOp<intrinsic::OpCeil>;
+
+impl OpCeil {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpBoolToBranchSelector = IntrinsicOp<intrinsic::OpBoolToBranchSelector>;
 
 impl OpBoolToBranchSelector {
@@ -600,6 +614,8 @@ gen_statement_data! {
     OpMax is_op_max expect_op_max "max",
     OpMin is_op_min expect_op_min "min",
     OpRound is_op_round expect_op_round "round",
+    OpFloor is_op_floor expect_op_floor "floor",
+    OpCeil is_op_ceil expect_op_ceil "ceil",
     OpCall is_op_call expect_op_call "call",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
@@ -1607,6 +1623,38 @@ impl Cfg {
             bb,
             position,
             intrinsic::OpRound,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_floor(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpFloor,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_ceil(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpCeil,
             [(value, "value")],
         );
 

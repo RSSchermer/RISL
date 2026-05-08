@@ -233,6 +233,12 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpRound(_) => {
             write_stmt_op_round(w, cfg, stmt)?;
         }
+        StatementData::OpFloor(_) => {
+            write_stmt_op_floor(w, cfg, stmt)?;
+        }
+        StatementData::OpCeil(_) => {
+            write_stmt_op_ceil(w, cfg, stmt)?;
+        }
         StatementData::OpCall(_) => {
             write_stmt_op_call(w, cfg, stmt)?;
         }
@@ -460,6 +466,28 @@ fn write_stmt_op_round<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resu
 
     write_local_binding_label(w, data.result())?;
     write!(w, " = round(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_floor<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_floor();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = floor(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_ceil<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_ceil();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = ceil(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

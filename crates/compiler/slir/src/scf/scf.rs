@@ -164,6 +164,18 @@ impl OpRound {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpFloor = IntrinsicOp<intrinsic::OpFloor>;
+
+impl OpFloor {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpCeil = IntrinsicOp<intrinsic::OpCeil>;
+
+impl OpCeil {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -285,6 +297,8 @@ pub enum ExpressionKind {
     OpMax(OpMax),
     OpMin(OpMin),
     OpRound(OpRound),
+    OpFloor(OpFloor),
+    OpCeil(OpCeil),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -322,6 +336,8 @@ gen_expression_kind_from! {
     OpMax: OpMax,
     OpMin: OpMin,
     OpRound: OpRound,
+    OpFloor: OpFloor,
+    OpCeil: OpCeil,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -410,6 +426,8 @@ impl ExpressionKind {
         OpMax is_op_max expect_op_max "max operation",
         OpMin is_op_min expect_op_min "min operation",
         OpRound is_op_round expect_op_round "round operation",
+        OpFloor is_op_floor expect_op_floor "floor operation",
+        OpCeil is_op_ceil expect_op_ceil "ceil operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",

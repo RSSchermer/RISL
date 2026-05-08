@@ -36,3 +36,5 @@ gen_intrinsic!(non_zero_get: fn non_zero_get<T: ZeroablePrimitive>(n: NonZero<T>
 gen_intrinsic!(min_f32: fn min_f32(a: f32, b: f32) -> f32);
 gen_intrinsic!(max_f32: fn max_f32(a: f32, b: f32) -> f32);
 gen_intrinsic!(round_f32: fn round_f32(a: f32) -> f32);
+gen_intrinsic!(floor_f32: fn floor_f32(a: f32) -> f32);
+gen_intrinsic!(ceil_f32: fn ceil_f32(a: f32) -> f32);

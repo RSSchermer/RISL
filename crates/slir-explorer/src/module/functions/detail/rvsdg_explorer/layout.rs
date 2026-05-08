@@ -1010,6 +1010,8 @@ impl NodeLayout {
                 SimpleNode::OpMax(_) => NodeContent::PlainText("max".into()),
                 SimpleNode::OpMin(_) => NodeContent::PlainText("min".into()),
                 SimpleNode::OpRound(_) => NodeContent::PlainText("round".into()),
+                SimpleNode::OpFloor(_) => NodeContent::PlainText("floor".into()),
+                SimpleNode::OpCeil(_) => NodeContent::PlainText("ceil".into()),
                 SimpleNode::OpVector(_) => NodeContent::PlainText("vector".into()),
                 SimpleNode::OpMatrix(_) => NodeContent::PlainText("matrix".into()),
                 SimpleNode::OpCaseToBranchSelector(op) => {

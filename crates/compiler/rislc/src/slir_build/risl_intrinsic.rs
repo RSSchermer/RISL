@@ -31,6 +31,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::MinF32 => define_min_op(instance, cx),
             RislIntrinsic::MaxF32 => define_max_op(instance, cx),
             RislIntrinsic::RoundF32 => define_round_op(instance, cx),
+            RislIntrinsic::FloorF32 => define_floor_op(instance, cx),
+            RislIntrinsic::CeilF32 => define_ceil_op(instance, cx),
         }
 
         None
@@ -55,6 +57,8 @@ pub enum RislIntrinsic {
     MinF32,
     MaxF32,
     RoundF32,
+    FloorF32,
+    CeilF32,
 }
 
 impl RislIntrinsic {
@@ -83,6 +87,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(min_f32)]" => RislIntrinsic::MinF32,
         "#[rislc::intrinsic(max_f32)]" => RislIntrinsic::MaxF32,
         "#[rislc::intrinsic(round_f32)]" => RislIntrinsic::RoundF32,
+        "#[rislc::intrinsic(floor_f32)]" => RislIntrinsic::FloorF32,
+        "#[rislc::intrinsic(ceil_f32)]" => RislIntrinsic::CeilF32,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
 }
@@ -197,6 +203,38 @@ fn define_round_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_round(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_floor_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_floor(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_ceil_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_ceil(bb, BlockPosition::Append, value.into());
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

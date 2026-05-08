@@ -52,6 +52,14 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "round("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpFloor(op) => view! {
+            "floor("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpCeil(op) => view! {
+            "ceil("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpVector(op) => view! {
             {op.vector_ty().to_string()}"("{
                 op.elements().iter().copied().map(|binding| view! {

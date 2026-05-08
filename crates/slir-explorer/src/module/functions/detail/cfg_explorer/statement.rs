@@ -43,6 +43,8 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpMax(_) => view! { <OpMax cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpMin(_) => view! { <OpMin cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpRound(_) => view! { <OpRound cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpFloor(_) => view! { <OpFloor cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpCeil(_) => view! { <OpCeil cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 cfg statement/> }.into_any()
@@ -304,6 +306,30 @@ pub fn OpRound(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl I
 
     view! {
         <Value cfg value=binding.into()/>" = round("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpFloor(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_floor();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = floor("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpCeil(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_ceil();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = ceil("<Value cfg value/>")"
     }
 }
 

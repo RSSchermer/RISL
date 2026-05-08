@@ -32,6 +32,8 @@ enum SimpleNodeMetadata {
     OpMax,
     OpMin,
     OpRound,
+    OpFloor,
+    OpCeil,
     OpVector(Vector),
     OpMatrix(Matrix),
     OpCaseToBranchSelector(Vec<u32>),
@@ -73,6 +75,8 @@ impl SimpleNodeMetadata {
             SimpleNode::OpMax(_) => SimpleNodeMetadata::OpMax,
             SimpleNode::OpMin(_) => SimpleNodeMetadata::OpMin,
             SimpleNode::OpRound(_) => SimpleNodeMetadata::OpRound,
+            SimpleNode::OpFloor(_) => SimpleNodeMetadata::OpFloor,
+            SimpleNode::OpCeil(_) => SimpleNodeMetadata::OpCeil,
             SimpleNode::OpVector(n) => SimpleNodeMetadata::OpVector(n.intrinsic().ty),
             SimpleNode::OpMatrix(n) => SimpleNodeMetadata::OpMatrix(n.intrinsic().ty),
             SimpleNode::OpCaseToBranchSelector(n) => {

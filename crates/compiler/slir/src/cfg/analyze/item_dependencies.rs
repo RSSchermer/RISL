@@ -141,6 +141,8 @@ impl_collect_dependencies_statement! {
     OpMax,
     OpMin,
     OpRound,
+    OpFloor,
+    OpCeil,
     OpCall,
     OpConvertToU32,
     OpConvertToI32,
