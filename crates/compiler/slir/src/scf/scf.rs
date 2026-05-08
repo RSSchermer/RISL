@@ -144,6 +144,13 @@ impl OpBinary {
     gen_intrinsic_arg_getter!(rhs, 1);
 }
 
+pub type OpMax = IntrinsicOp<intrinsic::OpMax>;
+
+impl OpMax {
+    gen_intrinsic_arg_getter!(lhs, 0);
+    gen_intrinsic_arg_getter!(rhs, 1);
+}
+
 pub type OpMin = IntrinsicOp<intrinsic::OpMin>;
 
 impl OpMin {
@@ -269,6 +276,7 @@ pub enum ExpressionKind {
     GlobalPtr(GlobalPtr),
     OpUnary(OpUnary),
     OpBinary(OpBinary),
+    OpMax(OpMax),
     OpMin(OpMin),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
@@ -304,6 +312,7 @@ gen_expression_kind_from! {
     GlobalPtr: GlobalPtr,
     OpUnary: OpUnary,
     OpBinary: OpBinary,
+    OpMax: OpMax,
     OpMin: OpMin,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
@@ -390,6 +399,7 @@ impl ExpressionKind {
         GlobalPtr is_global_ptr expect_global_ptr "global-pointer",
         OpUnary is_op_unary expect_op_unary "unary operation",
         OpBinary is_op_binary expect_op_binary "binary operation",
+        OpMax is_op_max expect_op_max "max operation",
         OpMin is_op_min expect_op_min "min operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
@@ -1271,6 +1281,16 @@ impl Scf {
             intrinsic::OpBinary { operator },
             [lhs, rhs],
         )
+    }
+
+    pub fn add_bind_op_max(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        lhs: LocalBinding,
+        rhs: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpMax, [lhs, rhs])
     }
 
     pub fn add_bind_op_min(

@@ -40,6 +40,7 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         }
         slir::cfg::StatementData::OpUnary(_) => view! { <OpUnary cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpMax(_) => view! { <OpMax cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpMin(_) => view! { <OpMin cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
@@ -264,6 +265,19 @@ pub fn OpBinary(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl 
 
     view! {
         <Value cfg value=binding.into()/>" = "<Value cfg value=lhs/>{format!(" {} ", operator)}<Value cfg value=rhs/>
+    }
+}
+
+#[component]
+pub fn OpMax(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_max();
+    let lhs = stmt.lhs();
+    let rhs = stmt.rhs();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = max("<Value cfg value=lhs/>", "<Value cfg value=rhs/>")"
     }
 }
 

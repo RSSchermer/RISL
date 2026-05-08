@@ -224,6 +224,9 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpBinary(_) => {
             write_stmt_op_binary(w, cfg, stmt)?;
         }
+        StatementData::OpMax(_) => {
+            write_stmt_op_max(w, cfg, stmt)?;
+        }
         StatementData::OpMin(_) => {
             write_stmt_op_min(w, cfg, stmt)?;
         }
@@ -419,6 +422,19 @@ fn write_stmt_op_binary<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Res
     write!(w, " {} ", data.operator())?;
     write_value(w, data.rhs())?;
     write!(w, ";")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_max<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_max();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = max(")?;
+    write_value(w, data.lhs())?;
+    write!(w, ", ")?;
+    write_value(w, data.rhs())?;
+    write!(w, ");")?;
 
     Ok(())
 }

@@ -387,6 +387,7 @@ impl<'a> Renderer<'a> {
             }
             SimpleNode::OpUnary(n) => self.write_op_unary(writer, node, n),
             SimpleNode::OpBinary(n) => self.write_op_binary(writer, node, n),
+            SimpleNode::OpMax(_) => self.write_node_common(writer, node, "OpMax"),
             SimpleNode::OpMin(_) => self.write_node_common(writer, node, "OpMin"),
             SimpleNode::OpVector(n) => self.write_op_vector(writer, node, n),
             SimpleNode::OpMatrix(n) => self.write_op_matrix(writer, node, n),

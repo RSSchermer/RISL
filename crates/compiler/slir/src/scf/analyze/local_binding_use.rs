@@ -64,6 +64,7 @@ impl UseCounter {
             | ExpressionKind::GlobalPtr(_) => {}
             ExpressionKind::OpUnary(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpBinary(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpMax(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpMin(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpVector(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpMatrix(op) => self.count_intrinsic_op_binding(op),

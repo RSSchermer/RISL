@@ -27,3 +27,9 @@ pub fn non_zero_get<T: ZeroablePrimitive>(this: NonZero<T>) -> T {
 pub fn f32_min(this: f32, other: f32) -> f32 {
     unsafe { intrinsic::min_f32(this, other) }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::max"))]
+pub fn f32_max(this: f32, other: f32) -> f32 {
+    unsafe { intrinsic::max_f32(this, other) }
+}

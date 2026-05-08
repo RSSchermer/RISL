@@ -343,6 +343,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpExtractElement(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpUnary(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpBinary(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpMax(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpMin(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpVector(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpMatrix(op) => self.prepare_bind_intrinsic(node, op).apply(self),

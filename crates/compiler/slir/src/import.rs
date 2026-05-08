@@ -201,6 +201,9 @@ impl FunctionImporter {
             StatementData::OpBinary(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
+            StatementData::OpMax(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
             StatementData::OpMin(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }

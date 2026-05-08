@@ -40,6 +40,10 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             <LocalBinding binding=op.rhs()/>
         }
         .into_any(),
+        ExpressionKind::OpMax(op) => view! {
+            "max("<LocalBinding binding=op.lhs()/>", "<LocalBinding binding=op.rhs()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpMin(op) => view! {
             "min("<LocalBinding binding=op.lhs()/>", "<LocalBinding binding=op.rhs()/>")"
         }

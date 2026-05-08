@@ -611,6 +611,7 @@ impl NodeData {
         OpGetSliceOffset is_op_get_slice_offset expect_op_get_slice_offset "a `get-slice-offset` operation",
         OpUnary is_op_unary expect_op_unary "a `unary` operation",
         OpBinary is_op_binary expect_op_binary "a `binary` operation",
+        OpMax is_op_max expect_op_max "a `max` operation",
         OpMin is_op_min expect_op_min "a `min` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
@@ -1381,6 +1382,14 @@ impl OpBinary {
     gen_intrinsic_value_output!();
 }
 
+pub type OpMax = IntrinsicNode<intrinsic::OpMax>;
+
+impl OpMax {
+    gen_intrinsic_value_input!(lhs_input, 0);
+    gen_intrinsic_value_input!(rhs_input, 1);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpMin = IntrinsicNode<intrinsic::OpMin>;
 
 impl OpMin {
@@ -1907,6 +1916,7 @@ gen_simple_node! {
     OpGetSliceOffset,
     OpUnary,
     OpBinary,
+    OpMax,
     OpMin,
     OpVector,
     OpMatrix,
@@ -3185,6 +3195,15 @@ impl Rvsdg {
             [lhs_input, rhs_input],
             None,
         )
+    }
+
+    pub fn add_op_max(
+        &mut self,
+        region: Region,
+        lhs_input: ValueInput,
+        rhs_input: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpMax, [lhs_input, rhs_input], None)
     }
 
     pub fn add_op_min(
