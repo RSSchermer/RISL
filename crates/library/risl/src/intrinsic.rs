@@ -38,5 +38,7 @@ gen_intrinsic!(max_f32: fn max_f32(a: f32, b: f32) -> f32);
 gen_intrinsic!(round_f32: fn round_f32(a: f32) -> f32);
 gen_intrinsic!(floor_f32: fn floor_f32(a: f32) -> f32);
 gen_intrinsic!(ceil_f32: fn ceil_f32(a: f32) -> f32);
+gen_intrinsic!(fract_f32: fn fract_f32(a: f32) -> f32);
+gen_intrinsic!(trunc_f32: fn trunc_f32(a: f32) -> f32);
 gen_intrinsic!(sqrt_f32: fn sqrt_f32(a: f32) -> f32);
 gen_intrinsic!(inverse_sqrt_f32: fn inverse_sqrt_f32(a: f32) -> f32);

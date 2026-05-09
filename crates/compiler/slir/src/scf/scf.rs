@@ -176,6 +176,18 @@ impl OpCeil {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpFract = IntrinsicOp<intrinsic::OpFract>;
+
+impl OpFract {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpTrunc = IntrinsicOp<intrinsic::OpTrunc>;
+
+impl OpTrunc {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpSqrt = IntrinsicOp<intrinsic::OpSqrt>;
 
 impl OpSqrt {
@@ -311,6 +323,8 @@ pub enum ExpressionKind {
     OpRound(OpRound),
     OpFloor(OpFloor),
     OpCeil(OpCeil),
+    OpFract(OpFract),
+    OpTrunc(OpTrunc),
     OpSqrt(OpSqrt),
     OpInverseSqrt(OpInverseSqrt),
     OpVector(OpVector),
@@ -352,6 +366,8 @@ gen_expression_kind_from! {
     OpRound: OpRound,
     OpFloor: OpFloor,
     OpCeil: OpCeil,
+    OpFract: OpFract,
+    OpTrunc: OpTrunc,
     OpSqrt: OpSqrt,
     OpInverseSqrt: OpInverseSqrt,
     OpVector: OpVector,
@@ -1373,6 +1389,24 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpCeil, [value])
+    }
+
+    pub fn add_bind_op_fract(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpFract, [value])
+    }
+
+    pub fn add_bind_op_trunc(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpTrunc, [value])
     }
 
     pub fn add_bind_op_sqrt(

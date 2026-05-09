@@ -53,6 +53,25 @@ pub fn f32_ceil(this: f32) -> f32 {
 }
 
 #[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::fract"))]
+pub fn f32_fract(this: f32) -> f32 {
+    // Note: though we have a SLIR `fract` intrinsic, we don't use it to implement this function,
+    // as the WGSL-specified behavior for `fract` differs from the Rust behavior:
+    //
+    // WGSL: this - floor(this) (Example: -1.5 - (floor(-1.5)) = -1.5 + 2.0 = 0.5)
+    // Rust: this - trunc(this) (Example: -1.5 - (trunc(-1.5)) = -1.5 + 1.0 = -0.5)
+    //
+    // We want this function to match the Rust behavior.
+    this - f32_trunc(this)
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::trunc"))]
+pub fn f32_trunc(this: f32) -> f32 {
+    unsafe { intrinsic::trunc_f32(this) }
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::sqrt"))]
 pub fn f32_sqrt(this: f32) -> f32 {
     unsafe { intrinsic::sqrt_f32(this) }

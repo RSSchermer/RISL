@@ -239,6 +239,12 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpCeil(_) => {
             write_stmt_op_ceil(w, cfg, stmt)?;
         }
+        StatementData::OpFract(_) => {
+            write_stmt_op_fract(w, cfg, stmt)?;
+        }
+        StatementData::OpTrunc(_) => {
+            write_stmt_op_trunc(w, cfg, stmt)?;
+        }
         StatementData::OpSqrt(_) => {
             write_stmt_op_sqrt(w, cfg, stmt)?;
         }
@@ -494,6 +500,28 @@ fn write_stmt_op_ceil<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resul
 
     write_local_binding_label(w, data.result())?;
     write!(w, " = ceil(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_fract<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_fract();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = fract(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_trunc<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_trunc();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = trunc(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

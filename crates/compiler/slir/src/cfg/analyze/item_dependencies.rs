@@ -143,6 +143,8 @@ impl_collect_dependencies_statement! {
     OpRound,
     OpFloor,
     OpCeil,
+    OpFract,
+    OpTrunc,
     OpSqrt,
     OpInverseSqrt,
     OpCall,

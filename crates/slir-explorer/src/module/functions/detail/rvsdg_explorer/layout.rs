@@ -1012,6 +1012,8 @@ impl NodeLayout {
                 SimpleNode::OpRound(_) => NodeContent::PlainText("round".into()),
                 SimpleNode::OpFloor(_) => NodeContent::PlainText("floor".into()),
                 SimpleNode::OpCeil(_) => NodeContent::PlainText("ceil".into()),
+                SimpleNode::OpFract(_) => NodeContent::PlainText("fract".into()),
+                SimpleNode::OpTrunc(_) => NodeContent::PlainText("trunc".into()),
                 SimpleNode::OpSqrt(_) => NodeContent::PlainText("sqrt".into()),
                 SimpleNode::OpInverseSqrt(_) => NodeContent::PlainText("inv-sqrt".into()),
                 SimpleNode::OpVector(_) => NodeContent::PlainText("vector".into()),

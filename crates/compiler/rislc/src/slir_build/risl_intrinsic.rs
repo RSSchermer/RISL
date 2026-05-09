@@ -33,6 +33,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::RoundF32 => define_round_op(instance, cx),
             RislIntrinsic::FloorF32 => define_floor_op(instance, cx),
             RislIntrinsic::CeilF32 => define_ceil_op(instance, cx),
+            RislIntrinsic::FractF32 => define_fract_op(instance, cx),
+            RislIntrinsic::TruncF32 => define_trunc_op(instance, cx),
             RislIntrinsic::SqrtF32 => define_sqrt_op(instance, cx),
             RislIntrinsic::InverseSqrtF32 => define_inverse_sqrt_op(instance, cx),
         }
@@ -61,6 +63,8 @@ pub enum RislIntrinsic {
     RoundF32,
     FloorF32,
     CeilF32,
+    FractF32,
+    TruncF32,
     SqrtF32,
     InverseSqrtF32,
 }
@@ -93,6 +97,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(round_f32)]" => RislIntrinsic::RoundF32,
         "#[rislc::intrinsic(floor_f32)]" => RislIntrinsic::FloorF32,
         "#[rislc::intrinsic(ceil_f32)]" => RislIntrinsic::CeilF32,
+        "#[rislc::intrinsic(fract_f32)]" => RislIntrinsic::FractF32,
+        "#[rislc::intrinsic(trunc_f32)]" => RislIntrinsic::TruncF32,
         "#[rislc::intrinsic(sqrt_f32)]" => RislIntrinsic::SqrtF32,
         "#[rislc::intrinsic(inverse_sqrt_f32)]" => RislIntrinsic::InverseSqrtF32,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
@@ -241,6 +247,38 @@ fn define_ceil_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_ceil(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_fract_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_fract(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_trunc_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_trunc(bb, BlockPosition::Append, value.into());
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

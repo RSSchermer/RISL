@@ -616,6 +616,8 @@ impl NodeData {
         OpRound is_op_round expect_op_round "a `round` operation",
         OpFloor is_op_floor expect_op_floor "a `floor` operation",
         OpCeil is_op_ceil expect_op_ceil "a `ceil` operation",
+        OpFract is_op_fract expect_op_fract "a `fract` operation",
+        OpTrunc is_op_trunc expect_op_trunc "a `trunc` operation",
         OpSqrt is_op_sqrt expect_op_sqrt "a `sqrt` operation",
         OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "an `inverse-sqrt` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
@@ -1424,6 +1426,20 @@ impl OpCeil {
     gen_intrinsic_value_output!();
 }
 
+pub type OpFract = IntrinsicNode<intrinsic::OpFract>;
+
+impl OpFract {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpTrunc = IntrinsicNode<intrinsic::OpTrunc>;
+
+impl OpTrunc {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpSqrt = IntrinsicNode<intrinsic::OpSqrt>;
 
 impl OpSqrt {
@@ -1961,6 +1977,8 @@ gen_simple_node! {
     OpRound,
     OpFloor,
     OpCeil,
+    OpFract,
+    OpTrunc,
     OpSqrt,
     OpInverseSqrt,
     OpVector,
@@ -3270,6 +3288,14 @@ impl Rvsdg {
 
     pub fn add_op_ceil(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpCeil, [input], None)
+    }
+
+    pub fn add_op_fract(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpFract, [input], None)
+    }
+
+    pub fn add_op_trunc(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpTrunc, [input], None)
     }
 
     pub fn add_op_sqrt(&mut self, region: Region, input: ValueInput) -> Node {
