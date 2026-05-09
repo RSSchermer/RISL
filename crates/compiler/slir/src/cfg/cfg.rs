@@ -552,6 +552,90 @@ impl OpLog2 {
     gen_intrinsic_result!();
 }
 
+pub type OpCos = IntrinsicOp<intrinsic::OpCos>;
+
+impl OpCos {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpAcos = IntrinsicOp<intrinsic::OpAcos>;
+
+impl OpAcos {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpCosh = IntrinsicOp<intrinsic::OpCosh>;
+
+impl OpCosh {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpAcosh = IntrinsicOp<intrinsic::OpAcosh>;
+
+impl OpAcosh {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpSin = IntrinsicOp<intrinsic::OpSin>;
+
+impl OpSin {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpAsin = IntrinsicOp<intrinsic::OpAsin>;
+
+impl OpAsin {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpSinh = IntrinsicOp<intrinsic::OpSinh>;
+
+impl OpSinh {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpAsinh = IntrinsicOp<intrinsic::OpAsinh>;
+
+impl OpAsinh {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpTan = IntrinsicOp<intrinsic::OpTan>;
+
+impl OpTan {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpAtan = IntrinsicOp<intrinsic::OpAtan>;
+
+impl OpAtan {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpTanh = IntrinsicOp<intrinsic::OpTanh>;
+
+impl OpTanh {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpAtanh = IntrinsicOp<intrinsic::OpAtanh>;
+
+impl OpAtanh {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpBoolToBranchSelector = IntrinsicOp<intrinsic::OpBoolToBranchSelector>;
 
 impl OpBoolToBranchSelector {
@@ -680,6 +764,18 @@ gen_statement_data! {
     OpExp2 is_op_exp2 expect_op_exp2 "exp2",
     OpLog is_op_log expect_op_log "log",
     OpLog2 is_op_log2 expect_op_log2 "log2",
+    OpCos is_op_cos expect_op_cos "cos",
+    OpAcos is_op_acos expect_op_acos "acos",
+    OpCosh is_op_cosh expect_op_cosh "cosh",
+    OpAcosh is_op_acosh expect_op_acosh "acosh",
+    OpSin is_op_sin expect_op_sin "sin",
+    OpAsin is_op_asin expect_op_asin "asin",
+    OpSinh is_op_sinh expect_op_sinh "sinh",
+    OpAsinh is_op_asinh expect_op_asinh "asinh",
+    OpTan is_op_tan expect_op_tan "tan",
+    OpAtan is_op_atan expect_op_atan "atan",
+    OpTanh is_op_tanh expect_op_tanh "tanh",
+    OpAtanh is_op_atanh expect_op_atanh "atanh",
     OpCall is_op_call expect_op_call "call",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
@@ -1839,6 +1935,186 @@ impl Cfg {
             bb,
             position,
             intrinsic::OpLog2,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_cos(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) =
+            self.add_stmt_intrinsic_op_internal(bb, position, intrinsic::OpCos, [(value, "value")]);
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_acos(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpAcos,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_cosh(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpCosh,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_acosh(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpAcosh,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_sin(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) =
+            self.add_stmt_intrinsic_op_internal(bb, position, intrinsic::OpSin, [(value, "value")]);
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_asin(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpAsin,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_sinh(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpSinh,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_asinh(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpAsinh,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_tan(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) =
+            self.add_stmt_intrinsic_op_internal(bb, position, intrinsic::OpTan, [(value, "value")]);
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_atan(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpAtan,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_tanh(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpTanh,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_atanh(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpAtanh,
             [(value, "value")],
         );
 

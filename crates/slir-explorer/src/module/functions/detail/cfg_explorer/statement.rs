@@ -55,6 +55,18 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpExp2(_) => view! { <OpExp2 cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpLog(_) => view! { <OpLog cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpLog2(_) => view! { <OpLog2 cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpCos(_) => view! { <OpCos cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpAcos(_) => view! { <OpAcos cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpCosh(_) => view! { <OpCosh cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpAcosh(_) => view! { <OpAcosh cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpSin(_) => view! { <OpSin cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpAsin(_) => view! { <OpAsin cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpSinh(_) => view! { <OpSinh cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpAsinh(_) => view! { <OpAsinh cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpTan(_) => view! { <OpTan cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpAtan(_) => view! { <OpAtan cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpTanh(_) => view! { <OpTanh cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpAtanh(_) => view! { <OpAtanh cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 cfg statement/> }.into_any()
@@ -436,6 +448,150 @@ pub fn OpLog2(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl In
 
     view! {
         <Value cfg value=binding.into()/>" = log2("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpCos(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_cos();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = cos("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpAcos(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_acos();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = acos("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpCosh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_cosh();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = cosh("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpAcosh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_acosh();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = acosh("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpSin(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_sin();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = sin("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpAsin(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_asin();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = asin("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpSinh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_sinh();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = sinh("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpAsinh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_asinh();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = asinh("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpTan(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_tan();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = tan("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpAtan(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_atan();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = atan("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpTanh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_tanh();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = tanh("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpAtanh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_atanh();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = atanh("<Value cfg value/>")"
     }
 }
 

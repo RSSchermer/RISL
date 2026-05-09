@@ -100,3 +100,75 @@ pub fn f32_ln(this: f32) -> f32 {
 pub fn f32_log2(this: f32) -> f32 {
     unsafe { intrinsic::log2_f32(this) }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::cos"))]
+pub fn f32_cos(this: f32) -> f32 {
+    unsafe { intrinsic::cos_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::acos"))]
+pub fn f32_acos(this: f32) -> f32 {
+    unsafe { intrinsic::acos_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::cosh"))]
+pub fn f32_cosh(this: f32) -> f32 {
+    unsafe { intrinsic::cosh_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::acosh"))]
+pub fn f32_acosh(this: f32) -> f32 {
+    unsafe { intrinsic::acosh_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::sin"))]
+pub fn f32_sin(this: f32) -> f32 {
+    unsafe { intrinsic::sin_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::asin"))]
+pub fn f32_asin(this: f32) -> f32 {
+    unsafe { intrinsic::asin_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::sinh"))]
+pub fn f32_sinh(this: f32) -> f32 {
+    unsafe { intrinsic::sinh_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::asinh"))]
+pub fn f32_asinh(this: f32) -> f32 {
+    unsafe { intrinsic::asinh_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::tan"))]
+pub fn f32_tan(this: f32) -> f32 {
+    unsafe { intrinsic::tan_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::atan"))]
+pub fn f32_atan(this: f32) -> f32 {
+    unsafe { intrinsic::atan_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::tanh"))]
+pub fn f32_tanh(this: f32) -> f32 {
+    unsafe { intrinsic::tanh_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::atanh"))]
+pub fn f32_atanh(this: f32) -> f32 {
+    unsafe { intrinsic::atanh_f32(this) }
+}

@@ -624,6 +624,18 @@ impl NodeData {
         OpExp2 is_op_exp2 expect_op_exp2 "an `exp2` operation",
         OpLog is_op_log expect_op_log "a `log` operation",
         OpLog2 is_op_log2 expect_op_log2 "a `log2` operation",
+        OpCos is_op_cos expect_op_cos "a `cos` operation",
+        OpAcos is_op_acos expect_op_acos "an `acos` operation",
+        OpCosh is_op_cosh expect_op_cosh "a `cosh` operation",
+        OpAcosh is_op_acosh expect_op_acosh "an `acosh` operation",
+        OpSin is_op_sin expect_op_sin "a `sin` operation",
+        OpAsin is_op_asin expect_op_asin "an `asin` operation",
+        OpSinh is_op_sinh expect_op_sinh "a `sinh` operation",
+        OpAsinh is_op_asinh expect_op_asinh "an `asinh` operation",
+        OpTan is_op_tan expect_op_tan "a `tan` operation",
+        OpAtan is_op_atan expect_op_atan "an `atan` operation",
+        OpTanh is_op_tanh expect_op_tanh "a `tanh` operation",
+        OpAtanh is_op_atanh expect_op_atanh "an `atanh` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
         OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
@@ -1486,6 +1498,90 @@ impl OpLog2 {
     gen_intrinsic_value_output!();
 }
 
+pub type OpCos = IntrinsicNode<intrinsic::OpCos>;
+
+impl OpCos {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpAcos = IntrinsicNode<intrinsic::OpAcos>;
+
+impl OpAcos {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpCosh = IntrinsicNode<intrinsic::OpCosh>;
+
+impl OpCosh {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpAcosh = IntrinsicNode<intrinsic::OpAcosh>;
+
+impl OpAcosh {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpSin = IntrinsicNode<intrinsic::OpSin>;
+
+impl OpSin {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpAsin = IntrinsicNode<intrinsic::OpAsin>;
+
+impl OpAsin {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpSinh = IntrinsicNode<intrinsic::OpSinh>;
+
+impl OpSinh {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpAsinh = IntrinsicNode<intrinsic::OpAsinh>;
+
+impl OpAsinh {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpTan = IntrinsicNode<intrinsic::OpTan>;
+
+impl OpTan {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpAtan = IntrinsicNode<intrinsic::OpAtan>;
+
+impl OpAtan {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpTanh = IntrinsicNode<intrinsic::OpTanh>;
+
+impl OpTanh {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpAtanh = IntrinsicNode<intrinsic::OpAtanh>;
+
+impl OpAtanh {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
 
 impl OpVector {
@@ -2017,6 +2113,18 @@ gen_simple_node! {
     OpExp2,
     OpLog,
     OpLog2,
+    OpCos,
+    OpAcos,
+    OpCosh,
+    OpAcosh,
+    OpSin,
+    OpAsin,
+    OpSinh,
+    OpAsinh,
+    OpTan,
+    OpAtan,
+    OpTanh,
+    OpAtanh,
     OpVector,
     OpMatrix,
     OpCaseToBranchSelector,
@@ -3356,6 +3464,54 @@ impl Rvsdg {
 
     pub fn add_op_log2(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpLog2, [input], None)
+    }
+
+    pub fn add_op_cos(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpCos, [input], None)
+    }
+
+    pub fn add_op_acos(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAcos, [input], None)
+    }
+
+    pub fn add_op_cosh(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpCosh, [input], None)
+    }
+
+    pub fn add_op_acosh(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAcosh, [input], None)
+    }
+
+    pub fn add_op_sin(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpSin, [input], None)
+    }
+
+    pub fn add_op_asin(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAsin, [input], None)
+    }
+
+    pub fn add_op_sinh(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpSinh, [input], None)
+    }
+
+    pub fn add_op_asinh(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAsinh, [input], None)
+    }
+
+    pub fn add_op_tan(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpTan, [input], None)
+    }
+
+    pub fn add_op_atan(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAtan, [input], None)
+    }
+
+    pub fn add_op_tanh(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpTanh, [input], None)
+    }
+
+    pub fn add_op_atanh(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpAtanh, [input], None)
     }
 
     pub fn add_op_vector(

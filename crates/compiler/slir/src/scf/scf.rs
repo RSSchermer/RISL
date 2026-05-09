@@ -224,6 +224,78 @@ impl OpLog2 {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpCos = IntrinsicOp<intrinsic::OpCos>;
+
+impl OpCos {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpAcos = IntrinsicOp<intrinsic::OpAcos>;
+
+impl OpAcos {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpCosh = IntrinsicOp<intrinsic::OpCosh>;
+
+impl OpCosh {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpAcosh = IntrinsicOp<intrinsic::OpAcosh>;
+
+impl OpAcosh {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpSin = IntrinsicOp<intrinsic::OpSin>;
+
+impl OpSin {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpAsin = IntrinsicOp<intrinsic::OpAsin>;
+
+impl OpAsin {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpSinh = IntrinsicOp<intrinsic::OpSinh>;
+
+impl OpSinh {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpAsinh = IntrinsicOp<intrinsic::OpAsinh>;
+
+impl OpAsinh {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpTan = IntrinsicOp<intrinsic::OpTan>;
+
+impl OpTan {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpAtan = IntrinsicOp<intrinsic::OpAtan>;
+
+impl OpAtan {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpTanh = IntrinsicOp<intrinsic::OpTanh>;
+
+impl OpTanh {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpAtanh = IntrinsicOp<intrinsic::OpAtanh>;
+
+impl OpAtanh {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -355,6 +427,18 @@ pub enum ExpressionKind {
     OpExp2(OpExp2),
     OpLog(OpLog),
     OpLog2(OpLog2),
+    OpCos(OpCos),
+    OpAcos(OpAcos),
+    OpCosh(OpCosh),
+    OpAcosh(OpAcosh),
+    OpSin(OpSin),
+    OpAsin(OpAsin),
+    OpSinh(OpSinh),
+    OpAsinh(OpAsinh),
+    OpTan(OpTan),
+    OpAtan(OpAtan),
+    OpTanh(OpTanh),
+    OpAtanh(OpAtanh),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -402,6 +486,18 @@ gen_expression_kind_from! {
     OpExp2: OpExp2,
     OpLog: OpLog,
     OpLog2: OpLog2,
+    OpCos: OpCos,
+    OpAcos: OpAcos,
+    OpCosh: OpCosh,
+    OpAcosh: OpAcosh,
+    OpSin: OpSin,
+    OpAsin: OpAsin,
+    OpSinh: OpSinh,
+    OpAsinh: OpAsinh,
+    OpTan: OpTan,
+    OpAtan: OpAtan,
+    OpTanh: OpTanh,
+    OpAtanh: OpAtanh,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -1499,6 +1595,114 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpLog2, [value])
+    }
+
+    pub fn add_bind_op_cos(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpCos, [value])
+    }
+
+    pub fn add_bind_op_acos(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpAcos, [value])
+    }
+
+    pub fn add_bind_op_cosh(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpCosh, [value])
+    }
+
+    pub fn add_bind_op_acosh(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpAcosh, [value])
+    }
+
+    pub fn add_bind_op_sin(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpSin, [value])
+    }
+
+    pub fn add_bind_op_asin(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpAsin, [value])
+    }
+
+    pub fn add_bind_op_sinh(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpSinh, [value])
+    }
+
+    pub fn add_bind_op_asinh(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpAsinh, [value])
+    }
+
+    pub fn add_bind_op_tan(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpTan, [value])
+    }
+
+    pub fn add_bind_op_atan(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpAtan, [value])
+    }
+
+    pub fn add_bind_op_tanh(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpTanh, [value])
+    }
+
+    pub fn add_bind_op_atanh(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpAtanh, [value])
     }
 
     pub fn add_bind_op_vector(

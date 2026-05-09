@@ -41,6 +41,18 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::Exp2F32 => define_exp2_op(instance, cx),
             RislIntrinsic::LnF32 => define_ln_op(instance, cx),
             RislIntrinsic::Log2F32 => define_log2_op(instance, cx),
+            RislIntrinsic::CosF32 => define_cos_op(instance, cx),
+            RislIntrinsic::AcosF32 => define_acos_op(instance, cx),
+            RislIntrinsic::CoshF32 => define_cosh_op(instance, cx),
+            RislIntrinsic::AcoshF32 => define_acosh_op(instance, cx),
+            RislIntrinsic::SinF32 => define_sin_op(instance, cx),
+            RislIntrinsic::AsinF32 => define_asin_op(instance, cx),
+            RislIntrinsic::SinhF32 => define_sinh_op(instance, cx),
+            RislIntrinsic::AsinhF32 => define_asinh_op(instance, cx),
+            RislIntrinsic::TanF32 => define_tan_op(instance, cx),
+            RislIntrinsic::AtanF32 => define_atan_op(instance, cx),
+            RislIntrinsic::TanhF32 => define_tanh_op(instance, cx),
+            RislIntrinsic::AtanhF32 => define_atanh_op(instance, cx),
         }
 
         None
@@ -75,6 +87,18 @@ pub enum RislIntrinsic {
     Exp2F32,
     LnF32,
     Log2F32,
+    CosF32,
+    AcosF32,
+    CoshF32,
+    AcoshF32,
+    SinF32,
+    AsinF32,
+    SinhF32,
+    AsinhF32,
+    TanF32,
+    AtanF32,
+    TanhF32,
+    AtanhF32,
 }
 
 impl RislIntrinsic {
@@ -113,6 +137,18 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(exp2_f32)]" => RislIntrinsic::Exp2F32,
         "#[rislc::intrinsic(ln_f32)]" => RislIntrinsic::LnF32,
         "#[rislc::intrinsic(log2_f32)]" => RislIntrinsic::Log2F32,
+        "#[rislc::intrinsic(cos_f32)]" => RislIntrinsic::CosF32,
+        "#[rislc::intrinsic(acos_f32)]" => RislIntrinsic::AcosF32,
+        "#[rislc::intrinsic(cosh_f32)]" => RislIntrinsic::CoshF32,
+        "#[rislc::intrinsic(acosh_f32)]" => RislIntrinsic::AcoshF32,
+        "#[rislc::intrinsic(sin_f32)]" => RislIntrinsic::SinF32,
+        "#[rislc::intrinsic(asin_f32)]" => RislIntrinsic::AsinF32,
+        "#[rislc::intrinsic(sinh_f32)]" => RislIntrinsic::SinhF32,
+        "#[rislc::intrinsic(asinh_f32)]" => RislIntrinsic::AsinhF32,
+        "#[rislc::intrinsic(tan_f32)]" => RislIntrinsic::TanF32,
+        "#[rislc::intrinsic(atan_f32)]" => RislIntrinsic::AtanF32,
+        "#[rislc::intrinsic(tanh_f32)]" => RislIntrinsic::TanhF32,
+        "#[rislc::intrinsic(atanh_f32)]" => RislIntrinsic::AtanhF32,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
 }
@@ -387,6 +423,198 @@ fn define_log2_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_log2(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_cos_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_cos(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_acos_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_acos(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_cosh_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_cosh(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_acosh_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_acosh(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_sin_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_sin(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_asin_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_asin(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_sinh_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_sinh(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_asinh_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_asinh(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_tan_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_tan(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_atan_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_atan(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_tanh_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_tanh(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_atanh_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_atanh(bb, BlockPosition::Append, value.into());
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

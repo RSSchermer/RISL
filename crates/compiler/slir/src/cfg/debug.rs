@@ -263,6 +263,42 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpLog2(_) => {
             write_stmt_op_log2(w, cfg, stmt)?;
         }
+        StatementData::OpCos(_) => {
+            write_stmt_op_cos(w, cfg, stmt)?;
+        }
+        StatementData::OpAcos(_) => {
+            write_stmt_op_acos(w, cfg, stmt)?;
+        }
+        StatementData::OpCosh(_) => {
+            write_stmt_op_cosh(w, cfg, stmt)?;
+        }
+        StatementData::OpAcosh(_) => {
+            write_stmt_op_acosh(w, cfg, stmt)?;
+        }
+        StatementData::OpSin(_) => {
+            write_stmt_op_sin(w, cfg, stmt)?;
+        }
+        StatementData::OpAsin(_) => {
+            write_stmt_op_asin(w, cfg, stmt)?;
+        }
+        StatementData::OpSinh(_) => {
+            write_stmt_op_sinh(w, cfg, stmt)?;
+        }
+        StatementData::OpAsinh(_) => {
+            write_stmt_op_asinh(w, cfg, stmt)?;
+        }
+        StatementData::OpTan(_) => {
+            write_stmt_op_tan(w, cfg, stmt)?;
+        }
+        StatementData::OpAtan(_) => {
+            write_stmt_op_atan(w, cfg, stmt)?;
+        }
+        StatementData::OpTanh(_) => {
+            write_stmt_op_tanh(w, cfg, stmt)?;
+        }
+        StatementData::OpAtanh(_) => {
+            write_stmt_op_atanh(w, cfg, stmt)?;
+        }
         StatementData::OpCall(_) => {
             write_stmt_op_call(w, cfg, stmt)?;
         }
@@ -600,6 +636,138 @@ fn write_stmt_op_log2<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resul
 
     write_local_binding_label(w, data.result())?;
     write!(w, " = log2(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_cos<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_cos();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = cos(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_acos<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_acos();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = acos(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_cosh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_cosh();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = cosh(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_acosh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_acosh();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = acosh(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_sin<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_sin();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = sin(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_asin<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_asin();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = asin(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_sinh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_sinh();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = sinh(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_asinh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_asinh();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = asinh(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_tan<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_tan();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = tan(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_atan<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_atan();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = atan(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_tanh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_tanh();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = tanh(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_atanh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_atanh();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = atanh(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

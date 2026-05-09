@@ -92,6 +92,54 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "log2("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpCos(op) => view! {
+            "cos("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpAcos(op) => view! {
+            "acos("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpCosh(op) => view! {
+            "cosh("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpAcosh(op) => view! {
+            "acosh("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpSin(op) => view! {
+            "sin("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpAsin(op) => view! {
+            "asin("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpSinh(op) => view! {
+            "sinh("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpAsinh(op) => view! {
+            "asinh("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpTan(op) => view! {
+            "tan("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpAtan(op) => view! {
+            "atan("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpTanh(op) => view! {
+            "tanh("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpAtanh(op) => view! {
+            "atanh("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpVector(op) => view! {
             {op.vector_ty().to_string()}"("{
                 op.elements().iter().copied().map(|binding| view! {
