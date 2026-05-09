@@ -394,6 +394,7 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpCeil(_) => self.write_node_common(writer, node, "OpCeil"),
             SimpleNode::OpClamp(_) => self.write_node_common(writer, node, "OpClamp"),
             SimpleNode::OpFract(_) => self.write_node_common(writer, node, "OpFract"),
+            SimpleNode::OpFusedMulAdd(_) => self.write_node_common(writer, node, "OpFusedMulAdd"),
             SimpleNode::OpTrunc(_) => self.write_node_common(writer, node, "OpTrunc"),
             SimpleNode::OpSqrt(_) => self.write_node_common(writer, node, "OpSqrt"),
             SimpleNode::OpInverseSqrt(_) => self.write_node_common(writer, node, "OpInverseSqrt"),

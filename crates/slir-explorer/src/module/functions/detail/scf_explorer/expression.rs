@@ -68,6 +68,10 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "fract("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpFusedMulAdd(op) => view! {
+            "fused-mul-add("<LocalBinding binding=op.a()/>", "<LocalBinding binding=op.b()/>", "<LocalBinding binding=op.c()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpTrunc(op) => view! {
             "trunc("<LocalBinding binding=op.value()/>")"
         }

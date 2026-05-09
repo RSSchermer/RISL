@@ -71,6 +71,7 @@ impl UseCounter {
             ExpressionKind::OpCeil(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpClamp(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpFract(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpFusedMulAdd(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpTrunc(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpSqrt(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpInverseSqrt(op) => self.count_intrinsic_op_binding(op),

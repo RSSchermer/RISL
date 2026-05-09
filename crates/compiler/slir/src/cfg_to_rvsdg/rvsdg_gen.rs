@@ -366,6 +366,7 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpCeil(op) => self.visit_intrinsic_op(op),
             StatementData::OpClamp(op) => self.visit_intrinsic_op(op),
             StatementData::OpFract(op) => self.visit_intrinsic_op(op),
+            StatementData::OpFusedMulAdd(op) => self.visit_intrinsic_op(op),
             StatementData::OpTrunc(op) => self.visit_intrinsic_op(op),
             StatementData::OpSqrt(op) => self.visit_intrinsic_op(op),
             StatementData::OpInverseSqrt(op) => self.visit_intrinsic_op(op),

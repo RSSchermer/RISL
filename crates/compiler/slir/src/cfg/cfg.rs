@@ -512,6 +512,15 @@ impl OpFract {
     gen_intrinsic_result!();
 }
 
+pub type OpFusedMulAdd = IntrinsicOp<intrinsic::OpFusedMulAdd>;
+
+impl OpFusedMulAdd {
+    gen_intrinsic_arg!(0, a);
+    gen_intrinsic_arg!(1, b);
+    gen_intrinsic_arg!(2, c);
+    gen_intrinsic_result!();
+}
+
 pub type OpTrunc = IntrinsicOp<intrinsic::OpTrunc>;
 
 impl OpTrunc {
@@ -767,6 +776,7 @@ gen_statement_data! {
     OpCeil is_op_ceil expect_op_ceil "ceil",
     OpClamp is_op_clamp expect_op_clamp "clamp",
     OpFract is_op_fract expect_op_fract "fract",
+    OpFusedMulAdd is_op_fused_mul_add expect_op_fused_mul_add "fused-mul-add",
     OpTrunc is_op_trunc expect_op_trunc "trunc",
     OpSqrt is_op_sqrt expect_op_sqrt "sqrt",
     OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "inverse-sqrt",
@@ -1860,6 +1870,24 @@ impl Cfg {
             position,
             intrinsic::OpFract,
             [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_fused_mul_add(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        a: Value,
+        b: Value,
+        c: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpFusedMulAdd,
+            [(a, "a"), (b, "b"), (c, "c")],
         );
 
         (stmt, result.unwrap())

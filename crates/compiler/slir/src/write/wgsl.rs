@@ -949,6 +949,7 @@ impl WgslModuleWriter {
             ExpressionKind::OpCeil(op) => self.write_fn_like_intrinsic(cx, op, "ceil"),
             ExpressionKind::OpClamp(op) => self.write_fn_like_intrinsic(cx, op, "clamp"),
             ExpressionKind::OpFract(op) => self.write_fn_like_intrinsic(cx, op, "fract"),
+            ExpressionKind::OpFusedMulAdd(op) => self.write_fn_like_intrinsic(cx, op, "fma"),
             ExpressionKind::OpTrunc(op) => self.write_fn_like_intrinsic(cx, op, "trunc"),
             ExpressionKind::OpSqrt(op) => self.write_fn_like_intrinsic(cx, op, "sqrt"),
             ExpressionKind::OpInverseSqrt(op) => {

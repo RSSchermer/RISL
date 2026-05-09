@@ -245,6 +245,9 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpFract(_) => {
             write_stmt_op_fract(w, cfg, stmt)?;
         }
+        StatementData::OpFusedMulAdd(_) => {
+            write_stmt_op_fused_mul_add(w, cfg, stmt)?;
+        }
         StatementData::OpTrunc(_) => {
             write_stmt_op_trunc(w, cfg, stmt)?;
         }
@@ -578,6 +581,21 @@ fn write_stmt_op_fract<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resu
     write_local_binding_label(w, data.result())?;
     write!(w, " = fract(")?;
     write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_fused_mul_add<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_fused_mul_add();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = fused-mul-add(")?;
+    write_value(w, data.a())?;
+    write!(w, ", ")?;
+    write_value(w, data.b())?;
+    write!(w, ", ")?;
+    write_value(w, data.c())?;
     write!(w, ");")?;
 
     Ok(())

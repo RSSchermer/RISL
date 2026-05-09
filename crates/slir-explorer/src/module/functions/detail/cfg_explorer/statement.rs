@@ -49,6 +49,9 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpCeil(_) => view! { <OpCeil cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpClamp(_) => view! { <OpClamp cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpFract(_) => view! { <OpFract cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpFusedMulAdd(_) => {
+            view! { <OpFusedMulAdd cfg statement/> }.into_any()
+        }
         slir::cfg::StatementData::OpTrunc(_) => view! { <OpTrunc cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpSqrt(_) => view! { <OpSqrt cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpInverseSqrt(_) => {
@@ -381,6 +384,20 @@ pub fn OpFract(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl I
 
     view! {
         <Value cfg value=binding.into()/>" = fract("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpFusedMulAdd(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_fused_mul_add();
+    let a = stmt.a();
+    let b = stmt.b();
+    let c = stmt.c();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = fused-mul-add("<Value cfg value=a/>", "<Value cfg value=b/>", "<Value cfg value=c/>")"
     }
 }
 

@@ -145,6 +145,7 @@ impl_collect_dependencies_statement! {
     OpCeil,
     OpClamp,
     OpFract,
+    OpFusedMulAdd,
     OpTrunc,
     OpSqrt,
     OpInverseSqrt,

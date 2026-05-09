@@ -190,6 +190,14 @@ impl OpFract {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpFusedMulAdd = IntrinsicOp<intrinsic::OpFusedMulAdd>;
+
+impl OpFusedMulAdd {
+    gen_intrinsic_arg_getter!(a, 0);
+    gen_intrinsic_arg_getter!(b, 1);
+    gen_intrinsic_arg_getter!(c, 2);
+}
+
 pub type OpTrunc = IntrinsicOp<intrinsic::OpTrunc>;
 
 impl OpTrunc {
@@ -429,6 +437,7 @@ pub enum ExpressionKind {
     OpCeil(OpCeil),
     OpClamp(OpClamp),
     OpFract(OpFract),
+    OpFusedMulAdd(OpFusedMulAdd),
     OpTrunc(OpTrunc),
     OpSqrt(OpSqrt),
     OpInverseSqrt(OpInverseSqrt),
@@ -489,6 +498,7 @@ gen_expression_kind_from! {
     OpCeil: OpCeil,
     OpClamp: OpClamp,
     OpFract: OpFract,
+    OpFusedMulAdd: OpFusedMulAdd,
     OpTrunc: OpTrunc,
     OpSqrt: OpSqrt,
     OpInverseSqrt: OpInverseSqrt,
@@ -600,6 +610,7 @@ impl ExpressionKind {
         OpCeil is_op_ceil expect_op_ceil "ceil operation",
         OpClamp is_op_clamp expect_op_clamp "clamp operation",
         OpFract is_op_fract expect_op_fract "fract operation",
+        OpFusedMulAdd is_op_fused_mul_add expect_op_fused_mul_add "fused-mul-add operation",
         OpTrunc is_op_trunc expect_op_trunc "trunc operation",
         OpSqrt is_op_sqrt expect_op_sqrt "sqrt operation",
         OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "inverse-sqrt operation",
@@ -1554,6 +1565,17 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpFract, [value])
+    }
+
+    pub fn add_bind_op_fused_mul_add(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        a: LocalBinding,
+        b: LocalBinding,
+        c: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpFusedMulAdd, [a, b, c])
     }
 
     pub fn add_bind_op_trunc(

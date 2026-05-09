@@ -617,6 +617,7 @@ impl NodeData {
         OpFloor is_op_floor expect_op_floor "a `floor` operation",
         OpCeil is_op_ceil expect_op_ceil "a `ceil` operation",
         OpFract is_op_fract expect_op_fract "a `fract` operation",
+        OpFusedMulAdd is_op_fused_mul_add expect_op_fused_mul_add "a `fused-mul-add` operation",
         OpTrunc is_op_trunc expect_op_trunc "a `trunc` operation",
         OpSqrt is_op_sqrt expect_op_sqrt "a `sqrt` operation",
         OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "an `inverse-sqrt` operation",
@@ -1458,6 +1459,15 @@ impl OpFract {
     gen_intrinsic_value_output!();
 }
 
+pub type OpFusedMulAdd = IntrinsicNode<intrinsic::OpFusedMulAdd>;
+
+impl OpFusedMulAdd {
+    gen_intrinsic_value_input!(a_input, 0);
+    gen_intrinsic_value_input!(b_input, 1);
+    gen_intrinsic_value_input!(c_input, 2);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpTrunc = IntrinsicNode<intrinsic::OpTrunc>;
 
 impl OpTrunc {
@@ -2116,6 +2126,7 @@ gen_simple_node! {
     OpCeil,
     OpClamp,
     OpFract,
+    OpFusedMulAdd,
     OpTrunc,
     OpSqrt,
     OpInverseSqrt,
@@ -3456,6 +3467,16 @@ impl Rvsdg {
 
     pub fn add_op_fract(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpFract, [input], None)
+    }
+
+    pub fn add_op_fused_mul_add(
+        &mut self,
+        region: Region,
+        a: ValueInput,
+        b: ValueInput,
+        c: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpFusedMulAdd, [a, b, c], None)
     }
 
     pub fn add_op_trunc(&mut self, region: Region, input: ValueInput) -> Node {

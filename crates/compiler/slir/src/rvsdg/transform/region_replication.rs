@@ -221,6 +221,9 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(OpFract(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),
+            Simple(OpFusedMulAdd(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
             Simple(OpTrunc(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),

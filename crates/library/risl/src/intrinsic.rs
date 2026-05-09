@@ -44,6 +44,7 @@ gen_intrinsic!(clamp_i32: fn clamp_i32(a: i32, min: i32, max: i32) -> i32);
 gen_intrinsic!(clamp_usize: fn clamp_usize(a: usize, min: usize, max: usize) -> usize);
 gen_intrinsic!(clamp_isize: fn clamp_isize(a: isize, min: isize, max: isize) -> isize);
 gen_intrinsic!(fract_f32: fn fract_f32(a: f32) -> f32);
+gen_intrinsic!(mul_add_f32: fn mul_add_f32(a: f32, b: f32, c: f32) -> f32);
 gen_intrinsic!(trunc_f32: fn trunc_f32(a: f32) -> f32);
 gen_intrinsic!(sqrt_f32: fn sqrt_f32(a: f32) -> f32);
 gen_intrinsic!(inverse_sqrt_f32: fn inverse_sqrt_f32(a: f32) -> f32);
