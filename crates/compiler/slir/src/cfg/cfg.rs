@@ -585,6 +585,23 @@ impl OpPowf {
     gen_intrinsic_result!();
 }
 
+pub type OpStep = IntrinsicOp<intrinsic::OpStep>;
+
+impl OpStep {
+    gen_intrinsic_arg!(0, edge);
+    gen_intrinsic_arg!(1, x);
+    gen_intrinsic_result!();
+}
+
+pub type OpSmoothStep = IntrinsicOp<intrinsic::OpSmoothStep>;
+
+impl OpSmoothStep {
+    gen_intrinsic_arg!(0, edge0);
+    gen_intrinsic_arg!(1, edge1);
+    gen_intrinsic_arg!(2, x);
+    gen_intrinsic_result!();
+}
+
 pub type OpCos = IntrinsicOp<intrinsic::OpCos>;
 
 impl OpCos {
@@ -815,6 +832,8 @@ gen_statement_data! {
     OpLog is_op_log expect_op_log "log",
     OpLog2 is_op_log2 expect_op_log2 "log2",
     OpPowf is_op_powf expect_op_powf "powf",
+    OpStep is_op_step expect_op_step "step",
+    OpSmoothStep is_op_smooth_step expect_op_smooth_step "smoothstep",
     OpCos is_op_cos expect_op_cos "cos",
     OpAcos is_op_acos expect_op_acos "acos",
     OpCosh is_op_cosh expect_op_cosh "cosh",
@@ -2058,6 +2077,41 @@ impl Cfg {
             position,
             intrinsic::OpPowf,
             [(base, "base"), (exp, "exp")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_step(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        edge: Value,
+        x: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpStep,
+            [(edge, "edge"), (x, "x")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_smoothstep(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        edge0: Value,
+        edge1: Value,
+        x: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpSmoothStep,
+            [(edge0, "edge0"), (edge1, "edge1"), (x, "x")],
         );
 
         (stmt, result.unwrap())

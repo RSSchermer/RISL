@@ -961,6 +961,8 @@ impl WgslModuleWriter {
             ExpressionKind::OpLog(op) => self.write_fn_like_intrinsic(cx, op, "log"),
             ExpressionKind::OpLog2(op) => self.write_fn_like_intrinsic(cx, op, "log2"),
             ExpressionKind::OpPowf(op) => self.write_fn_like_intrinsic(cx, op, "pow"),
+            ExpressionKind::OpStep(op) => self.write_fn_like_intrinsic(cx, op, "step"),
+            ExpressionKind::OpSmoothStep(op) => self.write_fn_like_intrinsic(cx, op, "smoothstep"),
             ExpressionKind::OpCos(op) => self.write_fn_like_intrinsic(cx, op, "cos"),
             ExpressionKind::OpAcos(op) => self.write_fn_like_intrinsic(cx, op, "acos"),
             ExpressionKind::OpCosh(op) => self.write_fn_like_intrinsic(cx, op, "cosh"),

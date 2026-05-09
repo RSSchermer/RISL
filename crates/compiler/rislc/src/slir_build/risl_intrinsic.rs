@@ -49,6 +49,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::LnF32 => define_ln_op(instance, cx),
             RislIntrinsic::Log2F32 => define_log2_op(instance, cx),
             RislIntrinsic::PowfF32 => define_powf_op(instance, cx),
+            RislIntrinsic::StepF32 => define_step_op(instance, cx),
+            RislIntrinsic::SmoothStepF32 => define_smoothstep_op(instance, cx),
             RislIntrinsic::CosF32 => define_cos_op(instance, cx),
             RislIntrinsic::AcosF32 => define_acos_op(instance, cx),
             RislIntrinsic::CoshF32 => define_cosh_op(instance, cx),
@@ -105,6 +107,8 @@ pub enum RislIntrinsic {
     LnF32,
     Log2F32,
     PowfF32,
+    StepF32,
+    SmoothStepF32,
     CosF32,
     AcosF32,
     CoshF32,
@@ -165,6 +169,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(ln_f32)]" => RislIntrinsic::LnF32,
         "#[rislc::intrinsic(log2_f32)]" => RislIntrinsic::Log2F32,
         "#[rislc::intrinsic(powf_f32)]" => RislIntrinsic::PowfF32,
+        "#[rislc::intrinsic(step_f32)]" => RislIntrinsic::StepF32,
+        "#[rislc::intrinsic(smoothstep_f32)]" => RislIntrinsic::SmoothStepF32,
         "#[rislc::intrinsic(cos_f32)]" => RislIntrinsic::CosF32,
         "#[rislc::intrinsic(acos_f32)]" => RislIntrinsic::AcosF32,
         "#[rislc::intrinsic(cosh_f32)]" => RislIntrinsic::CoshF32,
@@ -529,6 +535,47 @@ fn define_powf_op(instance: Instance, cx: &CodegenContext) {
     let exp = body.argument_values()[1];
 
     let (_, result) = cfg.add_stmt_op_powf(bb, BlockPosition::Append, base.into(), exp.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_step_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let edge = body.argument_values()[0];
+    let x = body.argument_values()[1];
+
+    let (_, result) = cfg.add_stmt_op_step(bb, BlockPosition::Append, edge.into(), x.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_smoothstep_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let edge0 = body.argument_values()[0];
+    let edge1 = body.argument_values()[1];
+    let x = body.argument_values()[2];
+
+    let (_, result) = cfg.add_stmt_op_smoothstep(
+        bb,
+        BlockPosition::Append,
+        edge0.into(),
+        edge1.into(),
+        x.into(),
+    );
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

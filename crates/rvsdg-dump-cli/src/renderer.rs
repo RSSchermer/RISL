@@ -404,6 +404,8 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpLog(_) => self.write_node_common(writer, node, "OpLog"),
             SimpleNode::OpLog2(_) => self.write_node_common(writer, node, "OpLog2"),
             SimpleNode::OpPowf(_) => self.write_node_common(writer, node, "OpPowf"),
+            SimpleNode::OpStep(_) => self.write_node_common(writer, node, "OpStep"),
+            SimpleNode::OpSmoothStep(_) => self.write_node_common(writer, node, "OpSmoothStep"),
             SimpleNode::OpCos(_) => self.write_node_common(writer, node, "OpCos"),
             SimpleNode::OpAcos(_) => self.write_node_common(writer, node, "OpAcos"),
             SimpleNode::OpCosh(_) => self.write_node_common(writer, node, "OpCosh"),

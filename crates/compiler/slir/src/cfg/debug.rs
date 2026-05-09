@@ -275,6 +275,12 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpPowf(_) => {
             write_stmt_op_powf(w, cfg, stmt)?;
         }
+        StatementData::OpStep(_) => {
+            write_stmt_op_step(w, cfg, stmt)?;
+        }
+        StatementData::OpSmoothStep(_) => {
+            write_stmt_op_smoothstep(w, cfg, stmt)?;
+        }
         StatementData::OpCos(_) => {
             write_stmt_op_cos(w, cfg, stmt)?;
         }
@@ -709,6 +715,34 @@ fn write_stmt_op_powf<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resul
     write_value(w, data.base())?;
     write!(w, ", ")?;
     write_value(w, data.exp())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_step<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_step();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = step(")?;
+    write_value(w, data.edge())?;
+    write!(w, ", ")?;
+    write_value(w, data.x())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_smoothstep<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_smooth_step();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = smoothstep(")?;
+    write_value(w, data.edge0())?;
+    write!(w, ", ")?;
+    write_value(w, data.edge1())?;
+    write!(w, ", ")?;
+    write_value(w, data.x())?;
     write!(w, ");")?;
 
     Ok(())

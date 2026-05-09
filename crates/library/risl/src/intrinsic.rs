@@ -54,6 +54,8 @@ gen_intrinsic!(exp2_f32: fn exp2_f32(a: f32) -> f32);
 gen_intrinsic!(ln_f32: fn ln_f32(a: f32) -> f32);
 gen_intrinsic!(log2_f32: fn log2_f32(a: f32) -> f32);
 gen_intrinsic!(powf_f32: fn powf_f32(a: f32, b: f32) -> f32);
+gen_intrinsic!(step_f32: fn step_f32(edge: f32, x: f32) -> f32);
+gen_intrinsic!(smoothstep_f32: fn smoothstep_f32(edge0: f32, edge1: f32, x: f32) -> f32);
 gen_intrinsic!(cos_f32: fn cos_f32(a: f32) -> f32);
 gen_intrinsic!(acos_f32: fn acos_f32(a: f32) -> f32);
 gen_intrinsic!(cosh_f32: fn cosh_f32(a: f32) -> f32);

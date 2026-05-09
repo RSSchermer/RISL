@@ -108,6 +108,14 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "powf("<LocalBinding binding=op.base()/>", "<LocalBinding binding=op.exp()/>")"
         }
         .into_any(),
+        ExpressionKind::OpStep(op) => view! {
+            "step("<LocalBinding binding=op.edge()/>", "<LocalBinding binding=op.x()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpSmoothStep(op) => view! {
+            "smoothstep("<LocalBinding binding=op.edge0()/>", "<LocalBinding binding=op.edge1()/>", "<LocalBinding binding=op.x()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpCos(op) => view! {
             "cos("<LocalBinding binding=op.value()/>")"
         }

@@ -63,6 +63,10 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpLog(_) => view! { <OpLog cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpLog2(_) => view! { <OpLog2 cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpPowf(_) => view! { <OpPowf cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpStep(_) => view! { <OpStep cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpSmoothStep(_) => {
+            view! { <OpSmoothStep cfg statement/> }.into_any()
+        }
         slir::cfg::StatementData::OpCos(_) => view! { <OpCos cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpAcos(_) => view! { <OpAcos cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCosh(_) => view! { <OpCosh cfg statement/> }.into_any(),
@@ -515,6 +519,33 @@ pub fn OpPowf(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl In
 
     view! {
         <Value cfg value=binding.into()/>" = powf("<Value cfg value=base/>", "<Value cfg value=exp/>")"
+    }
+}
+
+#[component]
+pub fn OpStep(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_step();
+    let edge = stmt.edge();
+    let x = stmt.x();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = step("<Value cfg value=edge/>", "<Value cfg value=x/>")"
+    }
+}
+
+#[component]
+pub fn OpSmoothStep(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_smooth_step();
+    let edge0 = stmt.edge0();
+    let edge1 = stmt.edge1();
+    let x = stmt.x();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = smoothstep("<Value cfg value=edge0/>", "<Value cfg value=edge1/>", "<Value cfg value=x/>")"
     }
 }
 

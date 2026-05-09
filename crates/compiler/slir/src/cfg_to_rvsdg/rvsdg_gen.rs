@@ -376,6 +376,8 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpLog(op) => self.visit_intrinsic_op(op),
             StatementData::OpLog2(op) => self.visit_intrinsic_op(op),
             StatementData::OpPowf(op) => self.visit_intrinsic_op(op),
+            StatementData::OpStep(op) => self.visit_intrinsic_op(op),
+            StatementData::OpSmoothStep(op) => self.visit_intrinsic_op(op),
             StatementData::OpCos(op) => self.visit_intrinsic_op(op),
             StatementData::OpAcos(op) => self.visit_intrinsic_op(op),
             StatementData::OpCosh(op) => self.visit_intrinsic_op(op),

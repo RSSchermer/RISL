@@ -251,6 +251,12 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(OpPowf(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),
+            Simple(OpStep(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
+            Simple(OpSmoothStep(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
             Simple(OpCos(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),

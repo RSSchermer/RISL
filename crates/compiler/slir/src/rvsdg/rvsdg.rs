@@ -626,6 +626,8 @@ impl NodeData {
         OpLog is_op_log expect_op_log "a `log` operation",
         OpLog2 is_op_log2 expect_op_log2 "a `log2` operation",
         OpPowf is_op_powf expect_op_powf "a `powf` operation",
+        OpStep is_op_step expect_op_step "a `step` operation",
+        OpSmoothStep is_op_smooth_step expect_op_smooth_step "a `smoothstep` operation",
         OpCos is_op_cos expect_op_cos "a `cos` operation",
         OpAcos is_op_acos expect_op_acos "an `acos` operation",
         OpCosh is_op_cosh expect_op_cosh "a `cosh` operation",
@@ -1533,6 +1535,23 @@ impl OpPowf {
     gen_intrinsic_value_output!();
 }
 
+pub type OpStep = IntrinsicNode<intrinsic::OpStep>;
+
+impl OpStep {
+    gen_intrinsic_value_input!(edge_input, 0);
+    gen_intrinsic_value_input!(x_input, 1);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpSmoothStep = IntrinsicNode<intrinsic::OpSmoothStep>;
+
+impl OpSmoothStep {
+    gen_intrinsic_value_input!(edge0_input, 0);
+    gen_intrinsic_value_input!(edge1_input, 1);
+    gen_intrinsic_value_input!(x_input, 2);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpCos = IntrinsicNode<intrinsic::OpCos>;
 
 impl OpCos {
@@ -2166,6 +2185,8 @@ gen_simple_node! {
     OpLog,
     OpLog2,
     OpPowf,
+    OpStep,
+    OpSmoothStep,
     OpCos,
     OpAcos,
     OpCosh,
@@ -3543,6 +3564,20 @@ impl Rvsdg {
 
     pub fn add_op_powf(&mut self, region: Region, base: ValueInput, exp: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpPowf, [base, exp], None)
+    }
+
+    pub fn add_op_step(&mut self, region: Region, edge: ValueInput, x: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpStep, [edge, x], None)
+    }
+
+    pub fn add_op_smoothstep(
+        &mut self,
+        region: Region,
+        edge0: ValueInput,
+        edge1: ValueInput,
+        x: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpSmoothStep, [edge0, edge1, x], None)
     }
 
     pub fn add_op_cos(&mut self, region: Region, input: ValueInput) -> Node {

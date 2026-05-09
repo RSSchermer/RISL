@@ -252,6 +252,12 @@ impl FunctionImporter {
             StatementData::OpPowf(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
+            StatementData::OpStep(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
+            StatementData::OpSmoothStep(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
             StatementData::OpCos(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }

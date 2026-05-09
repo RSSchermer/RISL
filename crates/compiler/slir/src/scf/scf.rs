@@ -253,6 +253,21 @@ impl OpPowf {
     gen_intrinsic_arg_getter!(exp, 1);
 }
 
+pub type OpStep = IntrinsicOp<intrinsic::OpStep>;
+
+impl OpStep {
+    gen_intrinsic_arg_getter!(edge, 0);
+    gen_intrinsic_arg_getter!(x, 1);
+}
+
+pub type OpSmoothStep = IntrinsicOp<intrinsic::OpSmoothStep>;
+
+impl OpSmoothStep {
+    gen_intrinsic_arg_getter!(edge0, 0);
+    gen_intrinsic_arg_getter!(edge1, 1);
+    gen_intrinsic_arg_getter!(x, 2);
+}
+
 pub type OpCos = IntrinsicOp<intrinsic::OpCos>;
 
 impl OpCos {
@@ -472,6 +487,8 @@ pub enum ExpressionKind {
     OpLog(OpLog),
     OpLog2(OpLog2),
     OpPowf(OpPowf),
+    OpStep(OpStep),
+    OpSmoothStep(OpSmoothStep),
     OpCos(OpCos),
     OpAcos(OpAcos),
     OpCosh(OpCosh),
@@ -537,6 +554,8 @@ gen_expression_kind_from! {
     OpLog: OpLog,
     OpLog2: OpLog2,
     OpPowf: OpPowf,
+    OpStep: OpStep,
+    OpSmoothStep: OpSmoothStep,
     OpCos: OpCos,
     OpAcos: OpAcos,
     OpCosh: OpCosh,
@@ -653,6 +672,8 @@ impl ExpressionKind {
         OpLog is_op_log expect_op_log "log operation",
         OpLog2 is_op_log2 expect_op_log2 "log2 operation",
         OpPowf is_op_powf expect_op_powf "powf operation",
+        OpStep is_op_step expect_op_step "step operation",
+        OpSmoothStep is_op_smooth_step expect_op_smooth_step "smoothstep operation",
         OpCos is_op_cos expect_op_cos "cos operation",
         OpAcos is_op_acos expect_op_acos "acos operation",
         OpCosh is_op_cosh expect_op_cosh "cosh operation",
@@ -1707,6 +1728,27 @@ impl Scf {
         exp: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpPowf, [base, exp])
+    }
+
+    pub fn add_bind_op_step(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        edge: LocalBinding,
+        x: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpStep, [edge, x])
+    }
+
+    pub fn add_bind_op_smoothstep(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        edge0: LocalBinding,
+        edge1: LocalBinding,
+        x: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpSmoothStep, [edge0, edge1, x])
     }
 
     pub fn add_bind_op_cos(
