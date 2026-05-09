@@ -972,6 +972,8 @@ impl WgslModuleWriter {
             ExpressionKind::OpAtan(op) => self.write_fn_like_intrinsic(cx, op, "atan"),
             ExpressionKind::OpTanh(op) => self.write_fn_like_intrinsic(cx, op, "tanh"),
             ExpressionKind::OpAtanh(op) => self.write_fn_like_intrinsic(cx, op, "atanh"),
+            ExpressionKind::OpToRadians(op) => self.write_fn_like_intrinsic(cx, op, "radians"),
+            ExpressionKind::OpToDegrees(op) => self.write_fn_like_intrinsic(cx, op, "degrees"),
             ExpressionKind::OpVector(op) => self.write_expr_op_vector(cx, op),
             ExpressionKind::OpMatrix(op) => self.write_expr_op_matrix(cx, op),
             ExpressionKind::OpConvertToU32(op) => self.write_fn_like_intrinsic(cx, op, "u32"),

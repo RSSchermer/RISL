@@ -166,6 +166,8 @@ impl_collect_dependencies_statement! {
     OpAtan,
     OpTanh,
     OpAtanh,
+    OpToRadians,
+    OpToDegrees,
     OpCall,
     OpConvertToU32,
     OpConvertToI32,

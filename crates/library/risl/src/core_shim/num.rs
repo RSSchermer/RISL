@@ -184,3 +184,15 @@ pub fn f32_tanh(this: f32) -> f32 {
 pub fn f32_atanh(this: f32) -> f32 {
     unsafe { intrinsic::atanh_f32(this) }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::to_radians"))]
+pub fn f32_to_radians(this: f32) -> f32 {
+    unsafe { intrinsic::to_radians_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::to_degrees"))]
+pub fn f32_to_degrees(this: f32) -> f32 {
+    unsafe { intrinsic::to_degrees_f32(this) }
+}

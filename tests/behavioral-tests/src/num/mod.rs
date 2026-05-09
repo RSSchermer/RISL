@@ -25,5 +25,7 @@ mod f32_sinh;
 mod f32_sqrt;
 mod f32_tan;
 mod f32_tanh;
+mod f32_to_degrees;
+mod f32_to_radians;
 mod f32_trunc;
 mod non_zero;

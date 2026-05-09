@@ -318,6 +318,18 @@ impl OpAtanh {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpToRadians = IntrinsicOp<intrinsic::OpToRadians>;
+
+impl OpToRadians {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpToDegrees = IntrinsicOp<intrinsic::OpToDegrees>;
+
+impl OpToDegrees {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -464,6 +476,8 @@ pub enum ExpressionKind {
     OpAtan(OpAtan),
     OpTanh(OpTanh),
     OpAtanh(OpAtanh),
+    OpToRadians(OpToRadians),
+    OpToDegrees(OpToDegrees),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -526,6 +540,8 @@ gen_expression_kind_from! {
     OpAtan: OpAtan,
     OpTanh: OpTanh,
     OpAtanh: OpAtanh,
+    OpToRadians: OpToRadians,
+    OpToDegrees: OpToDegrees,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -627,6 +643,9 @@ impl ExpressionKind {
         OpExp2 is_op_exp2 expect_op_exp2 "exp2 operation",
         OpLog is_op_log expect_op_log "log operation",
         OpLog2 is_op_log2 expect_op_log2 "log2 operation",
+        OpAtanh is_op_atanh expect_op_atanh "atanh operation",
+        OpToRadians is_op_to_radians expect_op_to_radians "to-radians operation",
+        OpToDegrees is_op_to_degrees expect_op_to_degrees "to-degrees operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",
@@ -1765,6 +1784,24 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpAtanh, [value])
+    }
+
+    pub fn add_bind_op_to_radians(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpToRadians, [value])
+    }
+
+    pub fn add_bind_op_to_degrees(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpToDegrees, [value])
     }
 
     pub fn add_bind_op_vector(

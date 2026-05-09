@@ -1608,6 +1608,20 @@ impl OpAtanh {
     gen_intrinsic_value_output!();
 }
 
+pub type OpToRadians = IntrinsicNode<intrinsic::OpToRadians>;
+
+impl OpToRadians {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpToDegrees = IntrinsicNode<intrinsic::OpToDegrees>;
+
+impl OpToDegrees {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
 
 impl OpVector {
@@ -2154,6 +2168,8 @@ gen_simple_node! {
     OpAtan,
     OpTanh,
     OpAtanh,
+    OpToRadians,
+    OpToDegrees,
     OpVector,
     OpMatrix,
     OpCaseToBranchSelector,

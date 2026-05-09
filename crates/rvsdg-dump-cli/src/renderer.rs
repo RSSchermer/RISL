@@ -415,6 +415,8 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpAtan(_) => self.write_node_common(writer, node, "OpAtan"),
             SimpleNode::OpTanh(_) => self.write_node_common(writer, node, "OpTanh"),
             SimpleNode::OpAtanh(_) => self.write_node_common(writer, node, "OpAtanh"),
+            SimpleNode::OpToRadians(_) => self.write_node_common(writer, node, "OpToRadians"),
+            SimpleNode::OpToDegrees(_) => self.write_node_common(writer, node, "OpToDegrees"),
             SimpleNode::OpVector(n) => self.write_op_vector(writer, node, n),
             SimpleNode::OpMatrix(n) => self.write_op_matrix(writer, node, n),
             SimpleNode::OpCaseToBranchSelector(n) => {

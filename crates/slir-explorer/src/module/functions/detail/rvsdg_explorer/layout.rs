@@ -1035,6 +1035,8 @@ impl NodeLayout {
                 SimpleNode::OpAtan(_) => NodeContent::PlainText("atan".into()),
                 SimpleNode::OpTanh(_) => NodeContent::PlainText("tanh".into()),
                 SimpleNode::OpAtanh(_) => NodeContent::PlainText("atanh".into()),
+                SimpleNode::OpToRadians(_) => NodeContent::PlainText("to_radians".into()),
+                SimpleNode::OpToDegrees(_) => NodeContent::PlainText("to_degrees".into()),
                 SimpleNode::OpVector(_) => NodeContent::PlainText("vector".into()),
                 SimpleNode::OpMatrix(_) => NodeContent::PlainText("matrix".into()),
                 SimpleNode::OpCaseToBranchSelector(op) => {

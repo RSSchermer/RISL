@@ -60,6 +60,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::AtanF32 => define_atan_op(instance, cx),
             RislIntrinsic::TanhF32 => define_tanh_op(instance, cx),
             RislIntrinsic::AtanhF32 => define_atanh_op(instance, cx),
+            RislIntrinsic::ToRadiansF32 => define_to_radians_op(instance, cx),
+            RislIntrinsic::ToDegreesF32 => define_to_degrees_op(instance, cx),
         }
 
         None
@@ -113,6 +115,8 @@ pub enum RislIntrinsic {
     AtanF32,
     TanhF32,
     AtanhF32,
+    ToRadiansF32,
+    ToDegreesF32,
 }
 
 impl RislIntrinsic {
@@ -170,6 +174,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(atan_f32)]" => RislIntrinsic::AtanF32,
         "#[rislc::intrinsic(tanh_f32)]" => RislIntrinsic::TanhF32,
         "#[rislc::intrinsic(atanh_f32)]" => RislIntrinsic::AtanhF32,
+        "#[rislc::intrinsic(to_radians_f32)]" => RislIntrinsic::ToRadiansF32,
+        "#[rislc::intrinsic(to_degrees_f32)]" => RislIntrinsic::ToDegreesF32,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
 }
@@ -695,6 +701,38 @@ fn define_atanh_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_atanh(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_to_radians_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_to_radians(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_to_degrees_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_to_degrees(bb, BlockPosition::Append, value.into());
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

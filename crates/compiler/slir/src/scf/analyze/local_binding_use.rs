@@ -92,6 +92,8 @@ impl UseCounter {
             ExpressionKind::OpAtan(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpTanh(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpAtanh(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpToRadians(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpToDegrees(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpVector(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpMatrix(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpConvertToU32(op) => self.count_intrinsic_op_binding(op),

@@ -74,6 +74,12 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpAtan(_) => view! { <OpAtan cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpTanh(_) => view! { <OpTanh cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpAtanh(_) => view! { <OpAtanh cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpToRadians(_) => {
+            view! { <OpToRadians cfg statement/> }.into_any()
+        }
+        slir::cfg::StatementData::OpToDegrees(_) => {
+            view! { <OpToDegrees cfg statement/> }.into_any()
+        }
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 cfg statement/> }.into_any()
@@ -639,6 +645,30 @@ pub fn OpAtanh(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl I
 
     view! {
         <Value cfg value=binding.into()/>" = atanh("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpToRadians(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_to_radians();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = to_radians("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpToDegrees(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_to_degrees();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = to_degrees("<Value cfg value/>")"
     }
 }
 

@@ -371,6 +371,8 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpAtan(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpTanh(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpAtanh(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpToRadians(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpToDegrees(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpVector(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpMatrix(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpConvertToU32(op) => self.prepare_bind_intrinsic(node, op).apply(self),

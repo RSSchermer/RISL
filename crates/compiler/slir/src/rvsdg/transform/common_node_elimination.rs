@@ -57,6 +57,8 @@ enum SimpleNodeMetadata {
     OpAtan,
     OpTanh,
     OpAtanh,
+    OpToRadians,
+    OpToDegrees,
     OpVector(Vector),
     OpMatrix(Matrix),
     OpCaseToBranchSelector(Vec<u32>),
@@ -123,6 +125,8 @@ impl SimpleNodeMetadata {
             SimpleNode::OpAtan(_) => SimpleNodeMetadata::OpAtan,
             SimpleNode::OpTanh(_) => SimpleNodeMetadata::OpTanh,
             SimpleNode::OpAtanh(_) => SimpleNodeMetadata::OpAtanh,
+            SimpleNode::OpToRadians(_) => SimpleNodeMetadata::OpToRadians,
+            SimpleNode::OpToDegrees(_) => SimpleNodeMetadata::OpToDegrees,
             SimpleNode::OpVector(n) => SimpleNodeMetadata::OpVector(n.intrinsic().ty),
             SimpleNode::OpMatrix(n) => SimpleNodeMetadata::OpMatrix(n.intrinsic().ty),
             SimpleNode::OpCaseToBranchSelector(n) => {

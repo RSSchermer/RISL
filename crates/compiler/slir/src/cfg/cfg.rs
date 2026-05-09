@@ -661,6 +661,20 @@ impl OpAtanh {
     gen_intrinsic_result!();
 }
 
+pub type OpToRadians = IntrinsicOp<intrinsic::OpToRadians>;
+
+impl OpToRadians {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpToDegrees = IntrinsicOp<intrinsic::OpToDegrees>;
+
+impl OpToDegrees {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpBoolToBranchSelector = IntrinsicOp<intrinsic::OpBoolToBranchSelector>;
 
 impl OpBoolToBranchSelector {
@@ -804,6 +818,8 @@ gen_statement_data! {
     OpAtan is_op_atan expect_op_atan "atan",
     OpTanh is_op_tanh expect_op_tanh "tanh",
     OpAtanh is_op_atanh expect_op_atanh "atanh",
+    OpToRadians is_op_to_radians expect_op_to_radians "to-radians",
+    OpToDegrees is_op_to_degrees expect_op_to_degrees "to-degrees",
     OpCall is_op_call expect_op_call "call",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
@@ -2195,6 +2211,38 @@ impl Cfg {
             bb,
             position,
             intrinsic::OpAtanh,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_to_radians(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpToRadians,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_to_degrees(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpToDegrees,
             [(value, "value")],
         );
 

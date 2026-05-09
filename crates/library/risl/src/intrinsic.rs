@@ -65,3 +65,5 @@ gen_intrinsic!(tan_f32: fn tan_f32(a: f32) -> f32);
 gen_intrinsic!(atan_f32: fn atan_f32(a: f32) -> f32);
 gen_intrinsic!(tanh_f32: fn tanh_f32(a: f32) -> f32);
 gen_intrinsic!(atanh_f32: fn atanh_f32(a: f32) -> f32);
+gen_intrinsic!(to_radians_f32: fn to_radians_f32(a: f32) -> f32);
+gen_intrinsic!(to_degrees_f32: fn to_degrees_f32(a: f32) -> f32);

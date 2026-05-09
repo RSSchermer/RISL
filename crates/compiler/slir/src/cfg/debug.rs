@@ -308,6 +308,12 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpAtanh(_) => {
             write_stmt_op_atanh(w, cfg, stmt)?;
         }
+        StatementData::OpToRadians(_) => {
+            write_stmt_op_to_radians(w, cfg, stmt)?;
+        }
+        StatementData::OpToDegrees(_) => {
+            write_stmt_op_to_degrees(w, cfg, stmt)?;
+        }
         StatementData::OpCall(_) => {
             write_stmt_op_call(w, cfg, stmt)?;
         }
@@ -818,6 +824,28 @@ fn write_stmt_op_atanh<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resu
 
     write_local_binding_label(w, data.result())?;
     write!(w, " = atanh(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_to_radians<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_to_radians();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = to_radians(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_to_degrees<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_to_degrees();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = to_degrees(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

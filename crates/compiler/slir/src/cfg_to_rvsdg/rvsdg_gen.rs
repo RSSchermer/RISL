@@ -387,6 +387,8 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpAtan(op) => self.visit_intrinsic_op(op),
             StatementData::OpTanh(op) => self.visit_intrinsic_op(op),
             StatementData::OpAtanh(op) => self.visit_intrinsic_op(op),
+            StatementData::OpToRadians(op) => self.visit_intrinsic_op(op),
+            StatementData::OpToDegrees(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToU32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToI32(op) => self.visit_intrinsic_op(op),
             StatementData::OpConvertToF32(op) => self.visit_intrinsic_op(op),
