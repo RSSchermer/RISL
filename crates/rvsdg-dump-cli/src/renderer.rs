@@ -396,6 +396,10 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpTrunc(_) => self.write_node_common(writer, node, "OpTrunc"),
             SimpleNode::OpSqrt(_) => self.write_node_common(writer, node, "OpSqrt"),
             SimpleNode::OpInverseSqrt(_) => self.write_node_common(writer, node, "OpInverseSqrt"),
+            SimpleNode::OpExp(_) => self.write_node_common(writer, node, "OpExp"),
+            SimpleNode::OpExp2(_) => self.write_node_common(writer, node, "OpExp2"),
+            SimpleNode::OpLog(_) => self.write_node_common(writer, node, "OpLog"),
+            SimpleNode::OpLog2(_) => self.write_node_common(writer, node, "OpLog2"),
             SimpleNode::OpVector(n) => self.write_op_vector(writer, node, n),
             SimpleNode::OpMatrix(n) => self.write_op_matrix(writer, node, n),
             SimpleNode::OpCaseToBranchSelector(n) => {

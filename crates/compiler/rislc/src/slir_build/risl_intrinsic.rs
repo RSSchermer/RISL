@@ -37,6 +37,10 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::TruncF32 => define_trunc_op(instance, cx),
             RislIntrinsic::SqrtF32 => define_sqrt_op(instance, cx),
             RislIntrinsic::InverseSqrtF32 => define_inverse_sqrt_op(instance, cx),
+            RislIntrinsic::ExpF32 => define_exp_op(instance, cx),
+            RislIntrinsic::Exp2F32 => define_exp2_op(instance, cx),
+            RislIntrinsic::LnF32 => define_ln_op(instance, cx),
+            RislIntrinsic::Log2F32 => define_log2_op(instance, cx),
         }
 
         None
@@ -67,6 +71,10 @@ pub enum RislIntrinsic {
     TruncF32,
     SqrtF32,
     InverseSqrtF32,
+    ExpF32,
+    Exp2F32,
+    LnF32,
+    Log2F32,
 }
 
 impl RislIntrinsic {
@@ -101,6 +109,10 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(trunc_f32)]" => RislIntrinsic::TruncF32,
         "#[rislc::intrinsic(sqrt_f32)]" => RislIntrinsic::SqrtF32,
         "#[rislc::intrinsic(inverse_sqrt_f32)]" => RislIntrinsic::InverseSqrtF32,
+        "#[rislc::intrinsic(exp_f32)]" => RislIntrinsic::ExpF32,
+        "#[rislc::intrinsic(exp2_f32)]" => RislIntrinsic::Exp2F32,
+        "#[rislc::intrinsic(ln_f32)]" => RislIntrinsic::LnF32,
+        "#[rislc::intrinsic(log2_f32)]" => RislIntrinsic::Log2F32,
         _ => bug!("unsupported rislc intrinsic: {}", attr.as_str()),
     }
 }
@@ -311,6 +323,70 @@ fn define_inverse_sqrt_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_inverse_sqrt(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_exp_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_exp(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_exp2_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_exp2(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_ln_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_log(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_log2_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_log2(bb, BlockPosition::Append, value.into());
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

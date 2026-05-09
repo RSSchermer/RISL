@@ -1016,6 +1016,10 @@ impl NodeLayout {
                 SimpleNode::OpTrunc(_) => NodeContent::PlainText("trunc".into()),
                 SimpleNode::OpSqrt(_) => NodeContent::PlainText("sqrt".into()),
                 SimpleNode::OpInverseSqrt(_) => NodeContent::PlainText("inv-sqrt".into()),
+                SimpleNode::OpExp(_) => NodeContent::PlainText("exp".into()),
+                SimpleNode::OpExp2(_) => NodeContent::PlainText("exp2".into()),
+                SimpleNode::OpLog(_) => NodeContent::PlainText("log".into()),
+                SimpleNode::OpLog2(_) => NodeContent::PlainText("log2".into()),
                 SimpleNode::OpVector(_) => NodeContent::PlainText("vector".into()),
                 SimpleNode::OpMatrix(_) => NodeContent::PlainText("matrix".into()),
                 SimpleNode::OpCaseToBranchSelector(op) => {

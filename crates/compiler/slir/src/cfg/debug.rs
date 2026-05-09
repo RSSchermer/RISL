@@ -251,6 +251,18 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpInverseSqrt(_) => {
             write_stmt_op_inverse_sqrt(w, cfg, stmt)?;
         }
+        StatementData::OpExp(_) => {
+            write_stmt_op_exp(w, cfg, stmt)?;
+        }
+        StatementData::OpExp2(_) => {
+            write_stmt_op_exp2(w, cfg, stmt)?;
+        }
+        StatementData::OpLog(_) => {
+            write_stmt_op_log(w, cfg, stmt)?;
+        }
+        StatementData::OpLog2(_) => {
+            write_stmt_op_log2(w, cfg, stmt)?;
+        }
         StatementData::OpCall(_) => {
             write_stmt_op_call(w, cfg, stmt)?;
         }
@@ -544,6 +556,50 @@ fn write_stmt_op_inverse_sqrt<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) 
 
     write_local_binding_label(w, data.result())?;
     write!(w, " = inverse_sqrt(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_exp<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_exp();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = exp(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_exp2<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_exp2();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = exp2(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_log<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_log();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = log(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_log2<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_log2();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = log2(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

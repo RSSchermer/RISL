@@ -42,3 +42,7 @@ gen_intrinsic!(fract_f32: fn fract_f32(a: f32) -> f32);
 gen_intrinsic!(trunc_f32: fn trunc_f32(a: f32) -> f32);
 gen_intrinsic!(sqrt_f32: fn sqrt_f32(a: f32) -> f32);
 gen_intrinsic!(inverse_sqrt_f32: fn inverse_sqrt_f32(a: f32) -> f32);
+gen_intrinsic!(exp_f32: fn exp_f32(a: f32) -> f32);
+gen_intrinsic!(exp2_f32: fn exp2_f32(a: f32) -> f32);
+gen_intrinsic!(ln_f32: fn ln_f32(a: f32) -> f32);
+gen_intrinsic!(log2_f32: fn log2_f32(a: f32) -> f32);

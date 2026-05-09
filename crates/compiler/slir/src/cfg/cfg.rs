@@ -524,6 +524,34 @@ impl OpInverseSqrt {
     gen_intrinsic_result!();
 }
 
+pub type OpExp = IntrinsicOp<intrinsic::OpExp>;
+
+impl OpExp {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpExp2 = IntrinsicOp<intrinsic::OpExp2>;
+
+impl OpExp2 {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpLog = IntrinsicOp<intrinsic::OpLog>;
+
+impl OpLog {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
+pub type OpLog2 = IntrinsicOp<intrinsic::OpLog2>;
+
+impl OpLog2 {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpBoolToBranchSelector = IntrinsicOp<intrinsic::OpBoolToBranchSelector>;
 
 impl OpBoolToBranchSelector {
@@ -648,6 +676,10 @@ gen_statement_data! {
     OpTrunc is_op_trunc expect_op_trunc "trunc",
     OpSqrt is_op_sqrt expect_op_sqrt "sqrt",
     OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "inverse-sqrt",
+    OpExp is_op_exp expect_op_exp "exp",
+    OpExp2 is_op_exp2 expect_op_exp2 "exp2",
+    OpLog is_op_log expect_op_log "log",
+    OpLog2 is_op_log2 expect_op_log2 "log2",
     OpCall is_op_call expect_op_call "call",
     OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32",
     OpConvertToI32 is_op_convert_to_i32 expect_op_convert_to_i32 "convert-to-i32",
@@ -1751,6 +1783,62 @@ impl Cfg {
             bb,
             position,
             intrinsic::OpInverseSqrt,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_exp(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) =
+            self.add_stmt_intrinsic_op_internal(bb, position, intrinsic::OpExp, [(value, "value")]);
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_exp2(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpExp2,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_log(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) =
+            self.add_stmt_intrinsic_op_internal(bb, position, intrinsic::OpLog, [(value, "value")]);
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_log2(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpLog2,
             [(value, "value")],
         );
 

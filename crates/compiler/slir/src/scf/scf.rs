@@ -200,6 +200,30 @@ impl OpInverseSqrt {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpExp = IntrinsicOp<intrinsic::OpExp>;
+
+impl OpExp {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpExp2 = IntrinsicOp<intrinsic::OpExp2>;
+
+impl OpExp2 {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpLog = IntrinsicOp<intrinsic::OpLog>;
+
+impl OpLog {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
+pub type OpLog2 = IntrinsicOp<intrinsic::OpLog2>;
+
+impl OpLog2 {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpVector = IntrinsicOp<intrinsic::OpVector>;
 
 impl OpVector {
@@ -327,6 +351,10 @@ pub enum ExpressionKind {
     OpTrunc(OpTrunc),
     OpSqrt(OpSqrt),
     OpInverseSqrt(OpInverseSqrt),
+    OpExp(OpExp),
+    OpExp2(OpExp2),
+    OpLog(OpLog),
+    OpLog2(OpLog2),
     OpVector(OpVector),
     OpMatrix(OpMatrix),
     OpConvertToU32(OpConvertToU32),
@@ -370,6 +398,10 @@ gen_expression_kind_from! {
     OpTrunc: OpTrunc,
     OpSqrt: OpSqrt,
     OpInverseSqrt: OpInverseSqrt,
+    OpExp: OpExp,
+    OpExp2: OpExp2,
+    OpLog: OpLog,
+    OpLog2: OpLog2,
     OpVector: OpVector,
     OpMatrix: OpMatrix,
     OpConvertToU32: OpConvertToU32,
@@ -460,8 +492,14 @@ impl ExpressionKind {
         OpRound is_op_round expect_op_round "round operation",
         OpFloor is_op_floor expect_op_floor "floor operation",
         OpCeil is_op_ceil expect_op_ceil "ceil operation",
+        OpFract is_op_fract expect_op_fract "fract operation",
+        OpTrunc is_op_trunc expect_op_trunc "trunc operation",
         OpSqrt is_op_sqrt expect_op_sqrt "sqrt operation",
         OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "inverse-sqrt operation",
+        OpExp is_op_exp expect_op_exp "exp operation",
+        OpExp2 is_op_exp2 expect_op_exp2 "exp2 operation",
+        OpLog is_op_log expect_op_log "log operation",
+        OpLog2 is_op_log2 expect_op_log2 "log2 operation",
         OpVector is_op_vector expect_op_vector "vector operation",
         OpMatrix is_op_matrix expect_op_matrix "matrix operation",
         OpConvertToU32 is_op_convert_to_u32 expect_op_convert_to_u32 "convert-to-u32 operation",
@@ -1425,6 +1463,42 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpInverseSqrt, [value])
+    }
+
+    pub fn add_bind_op_exp(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpExp, [value])
+    }
+
+    pub fn add_bind_op_exp2(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpExp2, [value])
+    }
+
+    pub fn add_bind_op_log(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpLog, [value])
+    }
+
+    pub fn add_bind_op_log2(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpLog2, [value])
     }
 
     pub fn add_bind_op_vector(

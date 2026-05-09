@@ -1,7 +1,11 @@
 mod f32_ceil;
+mod f32_exp;
+mod f32_exp2;
 mod f32_floor;
 mod f32_fract;
 mod f32_inverse_sqrt;
+mod f32_ln;
+mod f32_log2;
 mod f32_max;
 mod f32_min;
 mod f32_round;

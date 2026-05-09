@@ -51,6 +51,10 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpInverseSqrt(_) => {
             view! { <OpInverseSqrt cfg statement/> }.into_any()
         }
+        slir::cfg::StatementData::OpExp(_) => view! { <OpExp cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpExp2(_) => view! { <OpExp2 cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpLog(_) => view! { <OpLog cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpLog2(_) => view! { <OpLog2 cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCall(_) => view! { <OpCall cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpConvertToU32(_) => {
             view! { <OpConvertToU32 cfg statement/> }.into_any()
@@ -384,6 +388,54 @@ pub fn OpInverseSqrt(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> 
 
     view! {
         <Value cfg value=binding.into()/>" = inverse_sqrt("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpExp(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_exp();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = exp("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpExp2(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_exp2();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = exp2("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpLog(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_log();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = log("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpLog2(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_log2();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = log2("<Value cfg value/>")"
     }
 }
 

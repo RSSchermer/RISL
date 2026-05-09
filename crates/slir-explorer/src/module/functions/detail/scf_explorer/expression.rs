@@ -76,6 +76,22 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "inverse_sqrt("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpExp(op) => view! {
+            "exp("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpExp2(op) => view! {
+            "exp2("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpLog(op) => view! {
+            "log("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
+        ExpressionKind::OpLog2(op) => view! {
+            "log2("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpVector(op) => view! {
             {op.vector_ty().to_string()}"("{
                 op.elements().iter().copied().map(|binding| view! {

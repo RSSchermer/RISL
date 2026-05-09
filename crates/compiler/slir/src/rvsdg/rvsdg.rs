@@ -620,6 +620,10 @@ impl NodeData {
         OpTrunc is_op_trunc expect_op_trunc "a `trunc` operation",
         OpSqrt is_op_sqrt expect_op_sqrt "a `sqrt` operation",
         OpInverseSqrt is_op_inverse_sqrt expect_op_inverse_sqrt "an `inverse-sqrt` operation",
+        OpExp is_op_exp expect_op_exp "an `exp` operation",
+        OpExp2 is_op_exp2 expect_op_exp2 "an `exp2` operation",
+        OpLog is_op_log expect_op_log "a `log` operation",
+        OpLog2 is_op_log2 expect_op_log2 "a `log2` operation",
         OpVector is_op_vector expect_op_vector "a `vector` operation",
         OpMatrix is_op_matrix expect_op_matrix "a `matrix` operation",
         OpCaseToBranchSelector is_op_case_to_branch_selector expect_op_case_to_branch_selector "an `op-case-to-branch-selector` operation",
@@ -1454,6 +1458,34 @@ impl OpInverseSqrt {
     gen_intrinsic_value_output!();
 }
 
+pub type OpExp = IntrinsicNode<intrinsic::OpExp>;
+
+impl OpExp {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpExp2 = IntrinsicNode<intrinsic::OpExp2>;
+
+impl OpExp2 {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpLog = IntrinsicNode<intrinsic::OpLog>;
+
+impl OpLog {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpLog2 = IntrinsicNode<intrinsic::OpLog2>;
+
+impl OpLog2 {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpVector = IntrinsicNode<intrinsic::OpVector>;
 
 impl OpVector {
@@ -1981,6 +2013,10 @@ gen_simple_node! {
     OpTrunc,
     OpSqrt,
     OpInverseSqrt,
+    OpExp,
+    OpExp2,
+    OpLog,
+    OpLog2,
     OpVector,
     OpMatrix,
     OpCaseToBranchSelector,
@@ -3304,6 +3340,22 @@ impl Rvsdg {
 
     pub fn add_op_inverse_sqrt(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpInverseSqrt, [input], None)
+    }
+
+    pub fn add_op_exp(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpExp, [input], None)
+    }
+
+    pub fn add_op_exp2(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpExp2, [input], None)
+    }
+
+    pub fn add_op_log(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpLog, [input], None)
+    }
+
+    pub fn add_op_log2(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpLog2, [input], None)
     }
 
     pub fn add_op_vector(

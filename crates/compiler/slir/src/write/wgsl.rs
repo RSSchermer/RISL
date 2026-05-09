@@ -953,6 +953,10 @@ impl WgslModuleWriter {
             ExpressionKind::OpInverseSqrt(op) => {
                 self.write_fn_like_intrinsic(cx, op, "inverseSqrt")
             }
+            ExpressionKind::OpExp(op) => self.write_fn_like_intrinsic(cx, op, "exp"),
+            ExpressionKind::OpExp2(op) => self.write_fn_like_intrinsic(cx, op, "exp2"),
+            ExpressionKind::OpLog(op) => self.write_fn_like_intrinsic(cx, op, "log"),
+            ExpressionKind::OpLog2(op) => self.write_fn_like_intrinsic(cx, op, "log2"),
             ExpressionKind::OpVector(op) => self.write_expr_op_vector(cx, op),
             ExpressionKind::OpMatrix(op) => self.write_expr_op_matrix(cx, op),
             ExpressionKind::OpConvertToU32(op) => self.write_fn_like_intrinsic(cx, op, "u32"),

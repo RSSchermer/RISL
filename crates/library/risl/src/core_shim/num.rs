@@ -76,3 +76,27 @@ pub fn f32_trunc(this: f32) -> f32 {
 pub fn f32_sqrt(this: f32) -> f32 {
     unsafe { intrinsic::sqrt_f32(this) }
 }
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::exp"))]
+pub fn f32_exp(this: f32) -> f32 {
+    unsafe { intrinsic::exp_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::exp2"))]
+pub fn f32_exp2(this: f32) -> f32 {
+    unsafe { intrinsic::exp2_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::ln"))]
+pub fn f32_ln(this: f32) -> f32 {
+    unsafe { intrinsic::ln_f32(this) }
+}
+
+#[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::log2"))]
+pub fn f32_log2(this: f32) -> f32 {
+    unsafe { intrinsic::log2_f32(this) }
+}
