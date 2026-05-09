@@ -28,10 +28,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
     assert_eq!(runner.run(0.6).await?, 1.0);
     assert_eq!(runner.run(-0.4).await?, 0.0);
     assert_eq!(runner.run(-0.6).await?, -1.0);
-
-    // Test halfway cases to see what it does (WGSL is ties-to-even)
-    // 0.5 -> 0.0
-    // 1.5 -> 2.0
     assert_eq!(runner.run(0.5).await?, 0.0);
     assert_eq!(runner.run(1.5).await?, 2.0);
     assert_eq!(runner.run(2.5).await?, 2.0);
