@@ -1010,6 +1010,7 @@ impl NodeLayout {
                 SimpleNode::OpMax(_) => NodeContent::PlainText("max".into()),
                 SimpleNode::OpMin(_) => NodeContent::PlainText("min".into()),
                 SimpleNode::OpRoundToEven(_) => NodeContent::PlainText("round-to-even".into()),
+                SimpleNode::OpSaturate(_) => NodeContent::PlainText("saturate".into()),
                 SimpleNode::OpFloor(_) => NodeContent::PlainText("floor".into()),
                 SimpleNode::OpCeil(_) => NodeContent::PlainText("ceil".into()),
                 SimpleNode::OpClamp(_) => NodeContent::PlainText("clamp".into()),

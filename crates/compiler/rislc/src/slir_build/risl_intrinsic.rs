@@ -31,6 +31,7 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::MinF32 => define_min_op(instance, cx),
             RislIntrinsic::MaxF32 => define_max_op(instance, cx),
             RislIntrinsic::RoundTiesEvenF32 => define_round_ties_even_op(instance, cx),
+            RislIntrinsic::SaturateF32 => define_saturate_op(instance, cx),
             RislIntrinsic::FloorF32 => define_floor_op(instance, cx),
             RislIntrinsic::CeilF32 => define_ceil_op(instance, cx),
             RislIntrinsic::ClampF32
@@ -83,6 +84,7 @@ pub enum RislIntrinsic {
     MinF32,
     MaxF32,
     RoundTiesEvenF32,
+    SaturateF32,
     FloorF32,
     CeilF32,
     ClampF32,
@@ -139,6 +141,7 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(min_f32)]" => RislIntrinsic::MinF32,
         "#[rislc::intrinsic(max_f32)]" => RislIntrinsic::MaxF32,
         "#[rislc::intrinsic(round_ties_even_f32)]" => RislIntrinsic::RoundTiesEvenF32,
+        "#[rislc::intrinsic(saturate_f32)]" => RislIntrinsic::SaturateF32,
         "#[rislc::intrinsic(floor_f32)]" => RislIntrinsic::FloorF32,
         "#[rislc::intrinsic(ceil_f32)]" => RislIntrinsic::CeilF32,
         "#[rislc::intrinsic(clamp_f32)]" => RislIntrinsic::ClampF32,
@@ -313,6 +316,22 @@ fn define_ceil_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_ceil(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_saturate_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+
+    let (_, result) = cfg.add_stmt_op_saturate(bb, BlockPosition::Append, value.into());
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

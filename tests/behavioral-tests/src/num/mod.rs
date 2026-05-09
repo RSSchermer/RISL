@@ -19,6 +19,7 @@ mod f32_max;
 mod f32_min;
 mod f32_mul_add;
 mod f32_round_ties_even;
+mod f32_saturate;
 mod f32_sin;
 mod f32_sinh;
 mod f32_sqrt;

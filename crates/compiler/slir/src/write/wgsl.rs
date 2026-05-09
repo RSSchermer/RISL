@@ -945,6 +945,7 @@ impl WgslModuleWriter {
             ExpressionKind::OpMax(op) => self.write_fn_like_intrinsic(cx, op, "max"),
             ExpressionKind::OpMin(op) => self.write_fn_like_intrinsic(cx, op, "min"),
             ExpressionKind::OpRoundToEven(op) => self.write_fn_like_intrinsic(cx, op, "round"),
+            ExpressionKind::OpSaturate(op) => self.write_fn_like_intrinsic(cx, op, "saturate"),
             ExpressionKind::OpFloor(op) => self.write_fn_like_intrinsic(cx, op, "floor"),
             ExpressionKind::OpCeil(op) => self.write_fn_like_intrinsic(cx, op, "ceil"),
             ExpressionKind::OpClamp(op) => self.write_fn_like_intrinsic(cx, op, "clamp"),

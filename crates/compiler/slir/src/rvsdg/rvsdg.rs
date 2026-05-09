@@ -1443,6 +1443,13 @@ impl OpCeil {
     gen_intrinsic_value_output!();
 }
 
+pub type OpSaturate = IntrinsicNode<intrinsic::OpSaturate>;
+
+impl OpSaturate {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpClamp = IntrinsicNode<intrinsic::OpClamp>;
 
 impl OpClamp {
@@ -2122,6 +2129,7 @@ gen_simple_node! {
     OpMax,
     OpMin,
     OpRoundToEven,
+    OpSaturate,
     OpFloor,
     OpCeil,
     OpClamp,

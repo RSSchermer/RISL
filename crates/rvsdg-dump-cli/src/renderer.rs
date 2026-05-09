@@ -390,6 +390,7 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpMax(_) => self.write_node_common(writer, node, "OpMax"),
             SimpleNode::OpMin(_) => self.write_node_common(writer, node, "OpMin"),
             SimpleNode::OpRoundToEven(_) => self.write_node_common(writer, node, "OpRoundToEven"),
+            SimpleNode::OpSaturate(_) => self.write_node_common(writer, node, "OpSaturate"),
             SimpleNode::OpFloor(_) => self.write_node_common(writer, node, "OpFloor"),
             SimpleNode::OpCeil(_) => self.write_node_common(writer, node, "OpCeil"),
             SimpleNode::OpClamp(_) => self.write_node_common(writer, node, "OpClamp"),

@@ -52,6 +52,10 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "round-to-even("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpSaturate(op) => view! {
+            "saturate("<LocalBinding binding=op.value()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpFloor(op) => view! {
             "floor("<LocalBinding binding=op.value()/>")"
         }

@@ -496,6 +496,13 @@ impl OpCeil {
     gen_intrinsic_result!();
 }
 
+pub type OpSaturate = IntrinsicOp<intrinsic::OpSaturate>;
+
+impl OpSaturate {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_result!();
+}
+
 pub type OpClamp = IntrinsicOp<intrinsic::OpClamp>;
 
 impl OpClamp {
@@ -772,6 +779,7 @@ gen_statement_data! {
     OpMax is_op_max expect_op_max "max",
     OpMin is_op_min expect_op_min "min",
     OpRoundToEven is_op_round_to_even expect_op_round_to_even "round-to-even",
+    OpSaturate is_op_saturate expect_op_saturate "saturate",
     OpFloor is_op_floor expect_op_floor "floor",
     OpCeil is_op_ceil expect_op_ceil "ceil",
     OpClamp is_op_clamp expect_op_clamp "clamp",
@@ -1835,6 +1843,22 @@ impl Cfg {
             bb,
             position,
             intrinsic::OpCeil,
+            [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_saturate(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpSaturate,
             [(value, "value")],
         );
 

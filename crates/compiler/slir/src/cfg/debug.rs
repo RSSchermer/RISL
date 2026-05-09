@@ -239,6 +239,9 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpCeil(_) => {
             write_stmt_op_ceil(w, cfg, stmt)?;
         }
+        StatementData::OpSaturate(_) => {
+            write_stmt_op_saturate(w, cfg, stmt)?;
+        }
         StatementData::OpClamp(_) => {
             write_stmt_op_clamp(w, cfg, stmt)?;
         }
@@ -554,6 +557,17 @@ fn write_stmt_op_ceil<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resul
 
     write_local_binding_label(w, data.result())?;
     write!(w, " = ceil(")?;
+    write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_saturate<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_saturate();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = saturate(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

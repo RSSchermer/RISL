@@ -362,6 +362,7 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpMax(op) => self.visit_intrinsic_op(op),
             StatementData::OpMin(op) => self.visit_intrinsic_op(op),
             StatementData::OpRoundToEven(op) => self.visit_intrinsic_op(op),
+            StatementData::OpSaturate(op) => self.visit_intrinsic_op(op),
             StatementData::OpFloor(op) => self.visit_intrinsic_op(op),
             StatementData::OpCeil(op) => self.visit_intrinsic_op(op),
             StatementData::OpClamp(op) => self.visit_intrinsic_op(op),

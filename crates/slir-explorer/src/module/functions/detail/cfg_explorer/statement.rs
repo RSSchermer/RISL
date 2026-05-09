@@ -45,6 +45,7 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpRoundToEven(_) => {
             view! { <OpRoundToEven cfg statement/> }.into_any()
         }
+        slir::cfg::StatementData::OpSaturate(_) => view! { <OpSaturate cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpFloor(_) => view! { <OpFloor cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCeil(_) => view! { <OpCeil cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpClamp(_) => view! { <OpClamp cfg statement/> }.into_any(),
@@ -358,6 +359,18 @@ pub fn OpCeil(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl In
 
     view! {
         <Value cfg value=binding.into()/>" = ceil("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpSaturate(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_saturate();
+    let value = stmt.value();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = saturate("<Value cfg value/>")"
     }
 }
 

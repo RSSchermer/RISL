@@ -141,6 +141,7 @@ impl_collect_dependencies_statement! {
     OpMax,
     OpMin,
     OpRoundToEven,
+    OpSaturate,
     OpFloor,
     OpCeil,
     OpClamp,

@@ -176,6 +176,12 @@ impl OpCeil {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpSaturate = IntrinsicOp<intrinsic::OpSaturate>;
+
+impl OpSaturate {
+    gen_intrinsic_arg_getter!(value, 0);
+}
+
 pub type OpClamp = IntrinsicOp<intrinsic::OpClamp>;
 
 impl OpClamp {
@@ -433,6 +439,7 @@ pub enum ExpressionKind {
     OpMax(OpMax),
     OpMin(OpMin),
     OpRoundToEven(OpRoundToEven),
+    OpSaturate(OpSaturate),
     OpFloor(OpFloor),
     OpCeil(OpCeil),
     OpClamp(OpClamp),
@@ -494,6 +501,7 @@ gen_expression_kind_from! {
     OpMax: OpMax,
     OpMin: OpMin,
     OpRoundToEven: OpRoundToEven,
+    OpSaturate: OpSaturate,
     OpFloor: OpFloor,
     OpCeil: OpCeil,
     OpClamp: OpClamp,
@@ -606,6 +614,7 @@ impl ExpressionKind {
         OpMax is_op_max expect_op_max "max operation",
         OpMin is_op_min expect_op_min "min operation",
         OpRoundToEven is_op_round_to_even expect_op_round_to_even "round operation",
+        OpSaturate is_op_saturate expect_op_saturate "saturate operation",
         OpFloor is_op_floor expect_op_floor "floor operation",
         OpCeil is_op_ceil expect_op_ceil "ceil operation",
         OpClamp is_op_clamp expect_op_clamp "clamp operation",
@@ -1545,6 +1554,15 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpCeil, [value])
+    }
+
+    pub fn add_bind_op_saturate(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        value: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpSaturate, [value])
     }
 
     pub fn add_bind_op_clamp(
