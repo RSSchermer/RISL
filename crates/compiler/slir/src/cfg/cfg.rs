@@ -577,6 +577,14 @@ impl OpLog2 {
     gen_intrinsic_result!();
 }
 
+pub type OpPowf = IntrinsicOp<intrinsic::OpPowf>;
+
+impl OpPowf {
+    gen_intrinsic_arg!(0, base);
+    gen_intrinsic_arg!(1, exp);
+    gen_intrinsic_result!();
+}
+
 pub type OpCos = IntrinsicOp<intrinsic::OpCos>;
 
 impl OpCos {
@@ -806,6 +814,7 @@ gen_statement_data! {
     OpExp2 is_op_exp2 expect_op_exp2 "exp2",
     OpLog is_op_log expect_op_log "log",
     OpLog2 is_op_log2 expect_op_log2 "log2",
+    OpPowf is_op_powf expect_op_powf "powf",
     OpCos is_op_cos expect_op_cos "cos",
     OpAcos is_op_acos expect_op_acos "acos",
     OpCosh is_op_cosh expect_op_cosh "cosh",
@@ -2032,6 +2041,23 @@ impl Cfg {
             position,
             intrinsic::OpLog2,
             [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_powf(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        base: Value,
+        exp: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpPowf,
+            [(base, "base"), (exp, "exp")],
         );
 
         (stmt, result.unwrap())

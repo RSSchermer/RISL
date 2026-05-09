@@ -359,6 +359,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpExp2(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpLog(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpLog2(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpPowf(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpCos(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpAcos(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpCosh(op) => self.prepare_bind_intrinsic(node, op).apply(self),

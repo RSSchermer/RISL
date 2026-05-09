@@ -104,6 +104,10 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "log2("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpPowf(op) => view! {
+            "powf("<LocalBinding binding=op.base()/>", "<LocalBinding binding=op.exp()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpCos(op) => view! {
             "cos("<LocalBinding binding=op.value()/>")"
         }

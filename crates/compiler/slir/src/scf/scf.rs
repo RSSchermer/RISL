@@ -246,6 +246,13 @@ impl OpLog2 {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
+pub type OpPowf = IntrinsicOp<intrinsic::OpPowf>;
+
+impl OpPowf {
+    gen_intrinsic_arg_getter!(base, 0);
+    gen_intrinsic_arg_getter!(exp, 1);
+}
+
 pub type OpCos = IntrinsicOp<intrinsic::OpCos>;
 
 impl OpCos {
@@ -464,6 +471,7 @@ pub enum ExpressionKind {
     OpExp2(OpExp2),
     OpLog(OpLog),
     OpLog2(OpLog2),
+    OpPowf(OpPowf),
     OpCos(OpCos),
     OpAcos(OpAcos),
     OpCosh(OpCosh),
@@ -528,6 +536,7 @@ gen_expression_kind_from! {
     OpExp2: OpExp2,
     OpLog: OpLog,
     OpLog2: OpLog2,
+    OpPowf: OpPowf,
     OpCos: OpCos,
     OpAcos: OpAcos,
     OpCosh: OpCosh,
@@ -643,6 +652,18 @@ impl ExpressionKind {
         OpExp2 is_op_exp2 expect_op_exp2 "exp2 operation",
         OpLog is_op_log expect_op_log "log operation",
         OpLog2 is_op_log2 expect_op_log2 "log2 operation",
+        OpPowf is_op_powf expect_op_powf "powf operation",
+        OpCos is_op_cos expect_op_cos "cos operation",
+        OpAcos is_op_acos expect_op_acos "acos operation",
+        OpCosh is_op_cosh expect_op_cosh "cosh operation",
+        OpAcosh is_op_acosh expect_op_acosh "acosh operation",
+        OpSin is_op_sin expect_op_sin "sin operation",
+        OpAsin is_op_asin expect_op_asin "asin operation",
+        OpSinh is_op_sinh expect_op_sinh "sinh operation",
+        OpAsinh is_op_asinh expect_op_asinh "asinh operation",
+        OpTan is_op_tan expect_op_tan "tan operation",
+        OpAtan is_op_atan expect_op_atan "atan operation",
+        OpTanh is_op_tanh expect_op_tanh "tanh operation",
         OpAtanh is_op_atanh expect_op_atanh "atanh operation",
         OpToRadians is_op_to_radians expect_op_to_radians "to-radians operation",
         OpToDegrees is_op_to_degrees expect_op_to_degrees "to-degrees operation",
@@ -1676,6 +1697,16 @@ impl Scf {
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpLog2, [value])
+    }
+
+    pub fn add_bind_op_powf(
+        &mut self,
+        block: Block,
+        position: BlockPosition,
+        base: LocalBinding,
+        exp: LocalBinding,
+    ) -> (Statement, LocalBinding) {
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpPowf, [base, exp])
     }
 
     pub fn add_bind_op_cos(

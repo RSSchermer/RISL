@@ -960,6 +960,7 @@ impl WgslModuleWriter {
             ExpressionKind::OpExp2(op) => self.write_fn_like_intrinsic(cx, op, "exp2"),
             ExpressionKind::OpLog(op) => self.write_fn_like_intrinsic(cx, op, "log"),
             ExpressionKind::OpLog2(op) => self.write_fn_like_intrinsic(cx, op, "log2"),
+            ExpressionKind::OpPowf(op) => self.write_fn_like_intrinsic(cx, op, "pow"),
             ExpressionKind::OpCos(op) => self.write_fn_like_intrinsic(cx, op, "cos"),
             ExpressionKind::OpAcos(op) => self.write_fn_like_intrinsic(cx, op, "acos"),
             ExpressionKind::OpCosh(op) => self.write_fn_like_intrinsic(cx, op, "cosh"),

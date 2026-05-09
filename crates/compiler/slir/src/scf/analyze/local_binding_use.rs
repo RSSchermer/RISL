@@ -80,6 +80,7 @@ impl UseCounter {
             ExpressionKind::OpExp2(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpLog(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpLog2(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpPowf(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpCos(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpAcos(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpCosh(op) => self.count_intrinsic_op_binding(op),

@@ -53,6 +53,7 @@ gen_intrinsic!(exp_f32: fn exp_f32(a: f32) -> f32);
 gen_intrinsic!(exp2_f32: fn exp2_f32(a: f32) -> f32);
 gen_intrinsic!(ln_f32: fn ln_f32(a: f32) -> f32);
 gen_intrinsic!(log2_f32: fn log2_f32(a: f32) -> f32);
+gen_intrinsic!(powf_f32: fn powf_f32(a: f32, b: f32) -> f32);
 gen_intrinsic!(cos_f32: fn cos_f32(a: f32) -> f32);
 gen_intrinsic!(acos_f32: fn acos_f32(a: f32) -> f32);
 gen_intrinsic!(cosh_f32: fn cosh_f32(a: f32) -> f32);

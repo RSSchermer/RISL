@@ -403,6 +403,7 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpExp2(_) => self.write_node_common(writer, node, "OpExp2"),
             SimpleNode::OpLog(_) => self.write_node_common(writer, node, "OpLog"),
             SimpleNode::OpLog2(_) => self.write_node_common(writer, node, "OpLog2"),
+            SimpleNode::OpPowf(_) => self.write_node_common(writer, node, "OpPowf"),
             SimpleNode::OpCos(_) => self.write_node_common(writer, node, "OpCos"),
             SimpleNode::OpAcos(_) => self.write_node_common(writer, node, "OpAcos"),
             SimpleNode::OpCosh(_) => self.write_node_common(writer, node, "OpCosh"),

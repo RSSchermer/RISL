@@ -625,6 +625,7 @@ impl NodeData {
         OpExp2 is_op_exp2 expect_op_exp2 "an `exp2` operation",
         OpLog is_op_log expect_op_log "a `log` operation",
         OpLog2 is_op_log2 expect_op_log2 "a `log2` operation",
+        OpPowf is_op_powf expect_op_powf "a `powf` operation",
         OpCos is_op_cos expect_op_cos "a `cos` operation",
         OpAcos is_op_acos expect_op_acos "an `acos` operation",
         OpCosh is_op_cosh expect_op_cosh "a `cosh` operation",
@@ -1524,6 +1525,14 @@ impl OpLog2 {
     gen_intrinsic_value_output!();
 }
 
+pub type OpPowf = IntrinsicNode<intrinsic::OpPowf>;
+
+impl OpPowf {
+    gen_intrinsic_value_input!(base_input, 0);
+    gen_intrinsic_value_input!(exp_input, 1);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpCos = IntrinsicNode<intrinsic::OpCos>;
 
 impl OpCos {
@@ -2156,6 +2165,7 @@ gen_simple_node! {
     OpExp2,
     OpLog,
     OpLog2,
+    OpPowf,
     OpCos,
     OpAcos,
     OpCosh,
@@ -3529,6 +3539,10 @@ impl Rvsdg {
 
     pub fn add_op_log2(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpLog2, [input], None)
+    }
+
+    pub fn add_op_powf(&mut self, region: Region, base: ValueInput, exp: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpPowf, [base, exp], None)
     }
 
     pub fn add_op_cos(&mut self, region: Region, input: ValueInput) -> Node {

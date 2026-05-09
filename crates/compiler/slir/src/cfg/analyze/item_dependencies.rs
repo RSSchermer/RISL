@@ -154,6 +154,7 @@ impl_collect_dependencies_statement! {
     OpExp2,
     OpLog,
     OpLog2,
+    OpPowf,
     OpCos,
     OpAcos,
     OpCosh,

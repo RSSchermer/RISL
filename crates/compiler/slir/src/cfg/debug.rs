@@ -272,6 +272,9 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpLog2(_) => {
             write_stmt_op_log2(w, cfg, stmt)?;
         }
+        StatementData::OpPowf(_) => {
+            write_stmt_op_powf(w, cfg, stmt)?;
+        }
         StatementData::OpCos(_) => {
             write_stmt_op_cos(w, cfg, stmt)?;
         }
@@ -693,6 +696,19 @@ fn write_stmt_op_log2<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resul
     write_local_binding_label(w, data.result())?;
     write!(w, " = log2(")?;
     write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_powf<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_powf();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = powf(")?;
+    write_value(w, data.base())?;
+    write!(w, ", ")?;
+    write_value(w, data.exp())?;
     write!(w, ");")?;
 
     Ok(())

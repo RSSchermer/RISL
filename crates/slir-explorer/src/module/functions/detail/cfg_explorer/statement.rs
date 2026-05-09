@@ -62,6 +62,7 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpExp2(_) => view! { <OpExp2 cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpLog(_) => view! { <OpLog cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpLog2(_) => view! { <OpLog2 cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpPowf(_) => view! { <OpPowf cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCos(_) => view! { <OpCos cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpAcos(_) => view! { <OpAcos cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCosh(_) => view! { <OpCosh cfg statement/> }.into_any(),
@@ -501,6 +502,19 @@ pub fn OpLog2(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl In
 
     view! {
         <Value cfg value=binding.into()/>" = log2("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpPowf(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_powf();
+    let base = stmt.base();
+    let exp = stmt.exp();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = powf("<Value cfg value=base/>", "<Value cfg value=exp/>")"
     }
 }
 

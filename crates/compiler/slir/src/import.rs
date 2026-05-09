@@ -249,6 +249,9 @@ impl FunctionImporter {
             StatementData::OpLog2(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
+            StatementData::OpPowf(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
             StatementData::OpCos(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }

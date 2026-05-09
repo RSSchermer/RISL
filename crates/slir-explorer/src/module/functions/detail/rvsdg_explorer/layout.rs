@@ -1023,6 +1023,7 @@ impl NodeLayout {
                 SimpleNode::OpExp2(_) => NodeContent::PlainText("exp2".into()),
                 SimpleNode::OpLog(_) => NodeContent::PlainText("log".into()),
                 SimpleNode::OpLog2(_) => NodeContent::PlainText("log2".into()),
+                SimpleNode::OpPowf(_) => NodeContent::PlainText("powf".into()),
                 SimpleNode::OpCos(_) => NodeContent::PlainText("cos".into()),
                 SimpleNode::OpAcos(_) => NodeContent::PlainText("acos".into()),
                 SimpleNode::OpCosh(_) => NodeContent::PlainText("cosh".into()),

@@ -114,6 +114,12 @@ pub fn f32_log2(this: f32) -> f32 {
 }
 
 #[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::powf"))]
+pub fn f32_powf(this: f32, n: f32) -> f32 {
+    unsafe { intrinsic::powf_f32(this, n) }
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::cos"))]
 pub fn f32_cos(this: f32) -> f32 {
     unsafe { intrinsic::cos_f32(this) }
