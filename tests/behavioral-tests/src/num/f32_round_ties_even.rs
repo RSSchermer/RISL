@@ -1,4 +1,4 @@
-#![cfg(feature = "test_num_f32_round")]
+#![cfg(feature = "test_num_f32_round_ties_even")]
 
 use std::error::Error;
 
@@ -13,7 +13,7 @@ test_runner! {
     },
     result: f32,
     shader: {
-        let res = f32::round(*A);
+        let res = (*A).round_ties_even();
 
         unsafe {
             *RESULT.as_mut_unchecked() = res;

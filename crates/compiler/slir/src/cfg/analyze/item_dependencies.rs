@@ -140,7 +140,7 @@ impl_collect_dependencies_statement! {
     OpBinary,
     OpMax,
     OpMin,
-    OpRound,
+    OpRoundToEven,
     OpFloor,
     OpCeil,
     OpClamp,

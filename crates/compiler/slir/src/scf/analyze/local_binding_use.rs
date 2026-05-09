@@ -66,7 +66,7 @@ impl UseCounter {
             ExpressionKind::OpBinary(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpMax(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpMin(op) => self.count_intrinsic_op_binding(op),
-            ExpressionKind::OpRound(op) => self.count_intrinsic_op_binding(op),
+            ExpressionKind::OpRoundToEven(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpFloor(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpCeil(op) => self.count_intrinsic_op_binding(op),
             ExpressionKind::OpClamp(op) => self.count_intrinsic_op_binding(op),

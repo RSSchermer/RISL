@@ -345,7 +345,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             OpBinary(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpMax(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpMin(op) => self.prepare_bind_intrinsic(node, op).apply(self),
-            OpRound(op) => self.prepare_bind_intrinsic(node, op).apply(self),
+            OpRoundToEven(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpFloor(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpCeil(op) => self.prepare_bind_intrinsic(node, op).apply(self),
             OpClamp(op) => self.prepare_bind_intrinsic(node, op).apply(self),

@@ -613,7 +613,7 @@ impl NodeData {
         OpBinary is_op_binary expect_op_binary "a `binary` operation",
         OpMax is_op_max expect_op_max "a `max` operation",
         OpMin is_op_min expect_op_min "a `min` operation",
-        OpRound is_op_round expect_op_round "a `round` operation",
+        OpRoundToEven is_op_round_to_even expect_op_round_to_even "a `round` operation",
         OpFloor is_op_floor expect_op_floor "a `floor` operation",
         OpCeil is_op_ceil expect_op_ceil "a `ceil` operation",
         OpFract is_op_fract expect_op_fract "a `fract` operation",
@@ -1421,9 +1421,9 @@ impl OpMin {
     gen_intrinsic_value_output!();
 }
 
-pub type OpRound = IntrinsicNode<intrinsic::OpRound>;
+pub type OpRoundToEven = IntrinsicNode<intrinsic::OpRoundToEven>;
 
-impl OpRound {
+impl OpRoundToEven {
     gen_intrinsic_value_input!(value_input, 0);
     gen_intrinsic_value_output!();
 }
@@ -2111,7 +2111,7 @@ gen_simple_node! {
     OpBinary,
     OpMax,
     OpMin,
-    OpRound,
+    OpRoundToEven,
     OpFloor,
     OpCeil,
     OpClamp,
@@ -3432,8 +3432,8 @@ impl Rvsdg {
         self.add_intrinsic_op(region, intrinsic::OpMin, [lhs_input, rhs_input], None)
     }
 
-    pub fn add_op_round(&mut self, region: Region, input: ValueInput) -> Node {
-        self.add_intrinsic_op(region, intrinsic::OpRound, [input], None)
+    pub fn add_op_round_to_even(&mut self, region: Region, input: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpRoundToEven, [input], None)
     }
 
     pub fn add_op_floor(&mut self, region: Region, input: ValueInput) -> Node {

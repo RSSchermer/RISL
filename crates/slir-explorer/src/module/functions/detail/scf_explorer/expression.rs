@@ -48,8 +48,8 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "min("<LocalBinding binding=op.lhs()/>", "<LocalBinding binding=op.rhs()/>")"
         }
         .into_any(),
-        ExpressionKind::OpRound(op) => view! {
-            "round("<LocalBinding binding=op.value()/>")"
+        ExpressionKind::OpRoundToEven(op) => view! {
+            "round-to-even("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
         ExpressionKind::OpFloor(op) => view! {

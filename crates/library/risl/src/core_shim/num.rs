@@ -35,9 +35,9 @@ pub fn f32_max(this: f32, other: f32) -> f32 {
 }
 
 #[gpu]
-#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::round"))]
-pub fn f32_round(this: f32) -> f32 {
-    unsafe { intrinsic::round_f32(this) }
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::round_ties_even"))]
+pub fn f32_round_ties_even(this: f32) -> f32 {
+    unsafe { intrinsic::round_ties_even_f32(this) }
 }
 
 #[gpu]

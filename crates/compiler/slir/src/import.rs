@@ -207,7 +207,7 @@ impl FunctionImporter {
             StatementData::OpMin(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
-            StatementData::OpRound(op) => {
+            StatementData::OpRoundToEven(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
             StatementData::OpFloor(op) => {

@@ -4,9 +4,9 @@ use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{ScalarKind, Type, TypeKind, TypeRegistry};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct OpRound;
+pub struct OpRoundToEven;
 
-impl Intrinsic for OpRound {
+impl Intrinsic for OpRoundToEven {
     fn process_args(
         &self,
         ty_registry: &TypeRegistry,

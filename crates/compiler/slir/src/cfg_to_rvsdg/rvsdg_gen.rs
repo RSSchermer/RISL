@@ -361,7 +361,7 @@ impl<'a> RegionBuilder<'a> {
             StatementData::OpBinary(op) => self.visit_intrinsic_op(op),
             StatementData::OpMax(op) => self.visit_intrinsic_op(op),
             StatementData::OpMin(op) => self.visit_intrinsic_op(op),
-            StatementData::OpRound(op) => self.visit_intrinsic_op(op),
+            StatementData::OpRoundToEven(op) => self.visit_intrinsic_op(op),
             StatementData::OpFloor(op) => self.visit_intrinsic_op(op),
             StatementData::OpCeil(op) => self.visit_intrinsic_op(op),
             StatementData::OpClamp(op) => self.visit_intrinsic_op(op),

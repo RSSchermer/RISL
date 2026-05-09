@@ -17,7 +17,7 @@ mod f32_ln;
 mod f32_log2;
 mod f32_max;
 mod f32_min;
-mod f32_round;
+mod f32_round_ties_even;
 mod f32_sin;
 mod f32_sinh;
 mod f32_sqrt;

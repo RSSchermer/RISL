@@ -475,9 +475,9 @@ impl OpMin {
     gen_intrinsic_result!();
 }
 
-pub type OpRound = IntrinsicOp<intrinsic::OpRound>;
+pub type OpRoundToEven = IntrinsicOp<intrinsic::OpRoundToEven>;
 
-impl OpRound {
+impl OpRoundToEven {
     gen_intrinsic_arg!(0, value);
     gen_intrinsic_result!();
 }
@@ -762,7 +762,7 @@ gen_statement_data! {
     OpBinary is_op_binary expect_op_binary "binary",
     OpMax is_op_max expect_op_max "max",
     OpMin is_op_min expect_op_min "min",
-    OpRound is_op_round expect_op_round "round",
+    OpRoundToEven is_op_round_to_even expect_op_round_to_even "round-to-even",
     OpFloor is_op_floor expect_op_floor "floor",
     OpCeil is_op_ceil expect_op_ceil "ceil",
     OpClamp is_op_clamp expect_op_clamp "clamp",
@@ -1783,7 +1783,7 @@ impl Cfg {
         (stmt, result.unwrap())
     }
 
-    pub fn add_stmt_op_round(
+    pub fn add_stmt_op_round_to_even(
         &mut self,
         bb: BasicBlock,
         position: BlockPosition,
@@ -1792,7 +1792,7 @@ impl Cfg {
         let (stmt, result) = self.add_stmt_intrinsic_op_internal(
             bb,
             position,
-            intrinsic::OpRound,
+            intrinsic::OpRoundToEven,
             [(value, "value")],
         );
 

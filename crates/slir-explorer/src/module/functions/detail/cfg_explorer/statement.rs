@@ -42,7 +42,9 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpBinary(_) => view! { <OpBinary cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpMax(_) => view! { <OpMax cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpMin(_) => view! { <OpMin cfg statement/> }.into_any(),
-        slir::cfg::StatementData::OpRound(_) => view! { <OpRound cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpRoundToEven(_) => {
+            view! { <OpRoundToEven cfg statement/> }.into_any()
+        }
         slir::cfg::StatementData::OpFloor(_) => view! { <OpFloor cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCeil(_) => view! { <OpCeil cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpClamp(_) => view! { <OpClamp cfg statement/> }.into_any(),
@@ -321,14 +323,14 @@ pub fn OpMin(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl Int
 }
 
 #[component]
-pub fn OpRound(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+pub fn OpRoundToEven(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
     let cfg_value = cfg.read_value();
-    let stmt = cfg_value[statement].expect_op_round();
+    let stmt = cfg_value[statement].expect_op_round_to_even();
     let value = stmt.value();
     let binding = stmt.result();
 
     view! {
-        <Value cfg value=binding.into()/>" = round("<Value cfg value/>")"
+        <Value cfg value=binding.into()/>" = round-to-even("<Value cfg value/>")"
     }
 }
 

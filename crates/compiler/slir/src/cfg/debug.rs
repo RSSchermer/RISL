@@ -230,8 +230,8 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpMin(_) => {
             write_stmt_op_min(w, cfg, stmt)?;
         }
-        StatementData::OpRound(_) => {
-            write_stmt_op_round(w, cfg, stmt)?;
+        StatementData::OpRoundToEven(_) => {
+            write_stmt_op_round_to_even(w, cfg, stmt)?;
         }
         StatementData::OpFloor(_) => {
             write_stmt_op_floor(w, cfg, stmt)?;
@@ -524,11 +524,11 @@ fn write_stmt_op_min<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result
     Ok(())
 }
 
-fn write_stmt_op_round<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
-    let data = _cfg[stmt].expect_op_round();
+fn write_stmt_op_round_to_even<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_round_to_even();
 
     write_local_binding_label(w, data.result())?;
-    write!(w, " = round(")?;
+    write!(w, " = round-to-even(")?;
     write_value(w, data.value())?;
     write!(w, ");")?;
 

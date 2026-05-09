@@ -158,9 +158,9 @@ impl OpMin {
     gen_intrinsic_arg_getter!(rhs, 1);
 }
 
-pub type OpRound = IntrinsicOp<intrinsic::OpRound>;
+pub type OpRoundToEven = IntrinsicOp<intrinsic::OpRoundToEven>;
 
-impl OpRound {
+impl OpRoundToEven {
     gen_intrinsic_arg_getter!(value, 0);
 }
 
@@ -424,7 +424,7 @@ pub enum ExpressionKind {
     OpBinary(OpBinary),
     OpMax(OpMax),
     OpMin(OpMin),
-    OpRound(OpRound),
+    OpRoundToEven(OpRoundToEven),
     OpFloor(OpFloor),
     OpCeil(OpCeil),
     OpClamp(OpClamp),
@@ -484,7 +484,7 @@ gen_expression_kind_from! {
     OpBinary: OpBinary,
     OpMax: OpMax,
     OpMin: OpMin,
-    OpRound: OpRound,
+    OpRoundToEven: OpRoundToEven,
     OpFloor: OpFloor,
     OpCeil: OpCeil,
     OpClamp: OpClamp,
@@ -595,7 +595,7 @@ impl ExpressionKind {
         OpBinary is_op_binary expect_op_binary "binary operation",
         OpMax is_op_max expect_op_max "max operation",
         OpMin is_op_min expect_op_min "min operation",
-        OpRound is_op_round expect_op_round "round operation",
+        OpRoundToEven is_op_round_to_even expect_op_round_to_even "round operation",
         OpFloor is_op_floor expect_op_floor "floor operation",
         OpCeil is_op_ceil expect_op_ceil "ceil operation",
         OpClamp is_op_clamp expect_op_clamp "clamp operation",
@@ -1509,13 +1509,13 @@ impl Scf {
         self.add_bind_intrinsic_op(block, position, intrinsic::OpMin, [lhs, rhs])
     }
 
-    pub fn add_bind_op_round(
+    pub fn add_bind_op_round_to_even(
         &mut self,
         block: Block,
         position: BlockPosition,
         value: LocalBinding,
     ) -> (Statement, LocalBinding) {
-        self.add_bind_intrinsic_op(block, position, intrinsic::OpRound, [value])
+        self.add_bind_intrinsic_op(block, position, intrinsic::OpRoundToEven, [value])
     }
 
     pub fn add_bind_op_floor(
