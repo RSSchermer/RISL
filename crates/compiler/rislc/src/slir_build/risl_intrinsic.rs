@@ -33,6 +33,11 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::RoundF32 => define_round_op(instance, cx),
             RislIntrinsic::FloorF32 => define_floor_op(instance, cx),
             RislIntrinsic::CeilF32 => define_ceil_op(instance, cx),
+            RislIntrinsic::ClampF32
+            | RislIntrinsic::ClampU32
+            | RislIntrinsic::ClampI32
+            | RislIntrinsic::ClampUsize
+            | RislIntrinsic::ClampIsize => define_clamp_op(instance, cx),
             RislIntrinsic::FractF32 => define_fract_op(instance, cx),
             RislIntrinsic::TruncF32 => define_trunc_op(instance, cx),
             RislIntrinsic::SqrtF32 => define_sqrt_op(instance, cx),
@@ -79,6 +84,11 @@ pub enum RislIntrinsic {
     RoundF32,
     FloorF32,
     CeilF32,
+    ClampF32,
+    ClampU32,
+    ClampI32,
+    ClampUsize,
+    ClampIsize,
     FractF32,
     TruncF32,
     SqrtF32,
@@ -129,6 +139,11 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(round_f32)]" => RislIntrinsic::RoundF32,
         "#[rislc::intrinsic(floor_f32)]" => RislIntrinsic::FloorF32,
         "#[rislc::intrinsic(ceil_f32)]" => RislIntrinsic::CeilF32,
+        "#[rislc::intrinsic(clamp_f32)]" => RislIntrinsic::ClampF32,
+        "#[rislc::intrinsic(clamp_u32)]" => RislIntrinsic::ClampU32,
+        "#[rislc::intrinsic(clamp_i32)]" => RislIntrinsic::ClampI32,
+        "#[rislc::intrinsic(clamp_usize)]" => RislIntrinsic::ClampUsize,
+        "#[rislc::intrinsic(clamp_isize)]" => RislIntrinsic::ClampIsize,
         "#[rislc::intrinsic(fract_f32)]" => RislIntrinsic::FractF32,
         "#[rislc::intrinsic(trunc_f32)]" => RislIntrinsic::TruncF32,
         "#[rislc::intrinsic(sqrt_f32)]" => RislIntrinsic::SqrtF32,
@@ -295,6 +310,30 @@ fn define_ceil_op(instance: Instance, cx: &CodegenContext) {
     let value = body.argument_values()[0];
 
     let (_, result) = cfg.add_stmt_op_ceil(bb, BlockPosition::Append, value.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(result.into()));
+}
+
+fn define_clamp_op(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    let value = body.argument_values()[0];
+    let min = body.argument_values()[1];
+    let max = body.argument_values()[2];
+
+    let (_, result) = cfg.add_stmt_op_clamp(
+        bb,
+        BlockPosition::Append,
+        value.into(),
+        min.into(),
+        max.into(),
+    );
 
     cfg.set_terminator(bb, Terminator::return_value(result.into()));
 }

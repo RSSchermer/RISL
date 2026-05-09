@@ -60,6 +60,10 @@ pub fn Expression(expr_binding: slir::scf::Statement) -> impl IntoView {
             "ceil("<LocalBinding binding=op.value()/>")"
         }
         .into_any(),
+        ExpressionKind::OpClamp(op) => view! {
+            "clamp("<LocalBinding binding=op.value()/>", "<LocalBinding binding=op.min()/>", "<LocalBinding binding=op.max()/>")"
+        }
+        .into_any(),
         ExpressionKind::OpFract(op) => view! {
             "fract("<LocalBinding binding=op.value()/>")"
         }

@@ -19,7 +19,8 @@ pub mod workgroup;
 #[doc(hidden)]
 pub mod core_shim;
 
-mod intrinsic;
+#[doc(hidden)]
+pub mod intrinsic;
 
 pub use risl_macros::gpu;
 

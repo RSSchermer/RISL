@@ -1,7 +1,7 @@
 use risl_macros::gpu;
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<[U; N]> for [T; N]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<[U; N]> for [T; N]
 where
     T: PartialEq<U>,
 {
@@ -27,7 +27,7 @@ where
 }
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<[U]> for [T; N]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<[U]> for [T; N]
 where
     T: PartialEq<U>,
 {
@@ -49,7 +49,7 @@ where
 }
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<[U; N]> for [T]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<[U; N]> for [T]
 where
     T: PartialEq<U>,
 {
@@ -71,7 +71,7 @@ where
 }
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<&[U]> for [T; N]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<&[U]> for [T; N]
 where
     T: PartialEq<U>,
 {
@@ -97,7 +97,7 @@ where
 }
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<[U; N]> for &[T]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<[U; N]> for &[T]
 where
     T: PartialEq<U>,
 {
@@ -123,7 +123,7 @@ where
 }
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<&mut [U]> for [T; N]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<&mut [U]> for [T; N]
 where
     T: PartialEq<U>,
 {
@@ -149,7 +149,7 @@ where
 }
 
 #[gpu]
-impl<T, U, const N: usize> crate::core_shim::cmp::PartialEq<[U; N]> for &mut [T]
+impl<T, U, const N: usize> crate::core_shim::cmp::eq::PartialEq<[U; N]> for &mut [T]
 where
     T: PartialEq<U>,
 {
@@ -175,4 +175,4 @@ where
 }
 
 #[gpu]
-impl<T: Eq, const N: usize> crate::core_shim::cmp::Eq for [T; N] {}
+impl<T: Eq, const N: usize> crate::core_shim::cmp::eq::Eq for [T; N] {}

@@ -216,6 +216,9 @@ impl FunctionImporter {
             StatementData::OpCeil(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }
+            StatementData::OpClamp(op) => {
+                self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
+            }
             StatementData::OpFract(op) => {
                 self.import_stmt_intrinsic_op(src_mod, (dst_mod, dst_cfg), dst_bb, op)
             }

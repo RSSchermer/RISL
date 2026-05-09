@@ -239,6 +239,9 @@ fn write_statement<W: Write>(w: &mut W, cfg: &Cfg, stmt: Statement) -> Result {
         StatementData::OpCeil(_) => {
             write_stmt_op_ceil(w, cfg, stmt)?;
         }
+        StatementData::OpClamp(_) => {
+            write_stmt_op_clamp(w, cfg, stmt)?;
+        }
         StatementData::OpFract(_) => {
             write_stmt_op_fract(w, cfg, stmt)?;
         }
@@ -549,6 +552,21 @@ fn write_stmt_op_ceil<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Resul
     write_local_binding_label(w, data.result())?;
     write!(w, " = ceil(")?;
     write_value(w, data.value())?;
+    write!(w, ");")?;
+
+    Ok(())
+}
+
+fn write_stmt_op_clamp<W: Write>(w: &mut W, _cfg: &Cfg, stmt: Statement) -> Result {
+    let data = _cfg[stmt].expect_op_clamp();
+
+    write_local_binding_label(w, data.result())?;
+    write!(w, " = clamp(")?;
+    write_value(w, data.value())?;
+    write!(w, ", ")?;
+    write_value(w, data.min())?;
+    write!(w, ", ")?;
+    write_value(w, data.max())?;
     write!(w, ");")?;
 
     Ok(())

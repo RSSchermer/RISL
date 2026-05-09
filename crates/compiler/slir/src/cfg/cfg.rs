@@ -496,6 +496,15 @@ impl OpCeil {
     gen_intrinsic_result!();
 }
 
+pub type OpClamp = IntrinsicOp<intrinsic::OpClamp>;
+
+impl OpClamp {
+    gen_intrinsic_arg!(0, value);
+    gen_intrinsic_arg!(1, min);
+    gen_intrinsic_arg!(2, max);
+    gen_intrinsic_result!();
+}
+
 pub type OpFract = IntrinsicOp<intrinsic::OpFract>;
 
 impl OpFract {
@@ -756,6 +765,7 @@ gen_statement_data! {
     OpRound is_op_round expect_op_round "round",
     OpFloor is_op_floor expect_op_floor "floor",
     OpCeil is_op_ceil expect_op_ceil "ceil",
+    OpClamp is_op_clamp expect_op_clamp "clamp",
     OpFract is_op_fract expect_op_fract "fract",
     OpTrunc is_op_trunc expect_op_trunc "trunc",
     OpSqrt is_op_sqrt expect_op_sqrt "sqrt",
@@ -1816,6 +1826,24 @@ impl Cfg {
             position,
             intrinsic::OpCeil,
             [(value, "value")],
+        );
+
+        (stmt, result.unwrap())
+    }
+
+    pub fn add_stmt_op_clamp(
+        &mut self,
+        bb: BasicBlock,
+        position: BlockPosition,
+        value: Value,
+        min: Value,
+        max: Value,
+    ) -> (Statement, LocalBinding) {
+        let (stmt, result) = self.add_stmt_intrinsic_op_internal(
+            bb,
+            position,
+            intrinsic::OpClamp,
+            [(value, "value"), (min, "min"), (max, "max")],
         );
 
         (stmt, result.unwrap())

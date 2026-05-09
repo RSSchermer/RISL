@@ -215,6 +215,9 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(OpCeil(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),
+            Simple(OpClamp(op)) => self
+                .prepare_replicate_intrinsic_node(op)
+                .apply(&mut self.rvsdg),
             Simple(OpFract(op)) => self
                 .prepare_replicate_intrinsic_node(op)
                 .apply(&mut self.rvsdg),

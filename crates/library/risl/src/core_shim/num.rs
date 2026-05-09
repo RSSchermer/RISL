@@ -53,6 +53,12 @@ pub fn f32_ceil(this: f32) -> f32 {
 }
 
 #[gpu]
+#[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::clamp"))]
+pub fn f32_clamp(this: f32, min: f32, max: f32) -> f32 {
+    unsafe { intrinsic::clamp_f32(this, min, max) }
+}
+
+#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::f32::<impl f32>::fract"))]
 pub fn f32_fract(this: f32) -> f32 {
     // Note: though we have a SLIR `fract` intrinsic, we don't use it to implement this function,

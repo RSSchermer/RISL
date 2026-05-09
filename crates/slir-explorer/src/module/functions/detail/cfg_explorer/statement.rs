@@ -45,6 +45,7 @@ pub fn Statement(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl
         slir::cfg::StatementData::OpRound(_) => view! { <OpRound cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpFloor(_) => view! { <OpFloor cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpCeil(_) => view! { <OpCeil cfg statement/> }.into_any(),
+        slir::cfg::StatementData::OpClamp(_) => view! { <OpClamp cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpFract(_) => view! { <OpFract cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpTrunc(_) => view! { <OpTrunc cfg statement/> }.into_any(),
         slir::cfg::StatementData::OpSqrt(_) => view! { <OpSqrt cfg statement/> }.into_any(),
@@ -352,6 +353,20 @@ pub fn OpCeil(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl In
 
     view! {
         <Value cfg value=binding.into()/>" = ceil("<Value cfg value/>")"
+    }
+}
+
+#[component]
+pub fn OpClamp(cfg: StoredValue<Cfg>, statement: slir::cfg::Statement) -> impl IntoView {
+    let cfg_value = cfg.read_value();
+    let stmt = cfg_value[statement].expect_op_clamp();
+    let value = stmt.value();
+    let min = stmt.min();
+    let max = stmt.max();
+    let binding = stmt.result();
+
+    view! {
+        <Value cfg value=binding.into()/>" = clamp("<Value cfg value/>", "<Value cfg value=min/>", "<Value cfg value=max/>")"
     }
 }
 

@@ -11,6 +11,7 @@ mod op_bool_to_branch_selector;
 mod op_branch_selector_to_case;
 mod op_case_to_branch_selector;
 mod op_ceil;
+mod op_clamp;
 mod op_convert_to_bool;
 mod op_convert_to_f32;
 mod op_convert_to_i32;
@@ -62,6 +63,7 @@ pub use self::op_bool_to_branch_selector::*;
 pub use self::op_branch_selector_to_case::*;
 pub use self::op_case_to_branch_selector::*;
 pub use self::op_ceil::*;
+pub use self::op_clamp::*;
 pub use self::op_convert_to_bool::*;
 pub use self::op_convert_to_f32::*;
 pub use self::op_convert_to_i32::*;
@@ -155,6 +157,44 @@ macro_rules! expect_two_args {
 }
 
 pub(crate) use expect_two_args;
+
+macro_rules! expect_three_args {
+    ($intrinsic:literal, $args:expr) => {{
+        let mut args = $args.into_iter();
+
+        let Some(arg_0) = args.next() else {
+            return Err(format!(
+                "intrinsic `{}` expects exactly three arguments, found none",
+                $intrinsic
+            ));
+        };
+
+        let Some(arg_1) = args.next() else {
+            return Err(format!(
+                "intrinsic `{}` expects exactly three arguments, found one",
+                $intrinsic
+            ));
+        };
+
+        let Some(arg_2) = args.next() else {
+            return Err(format!(
+                "intrinsic `{}` expects exactly three arguments, found two",
+                $intrinsic
+            ));
+        };
+
+        if args.next().is_some() {
+            return Err(format!(
+                "intrinsic `{}` expects exactly three arguments, found more",
+                $intrinsic
+            ));
+        }
+
+        (arg_0, arg_1, arg_2)
+    }};
+}
+
+pub(crate) use expect_three_args;
 
 pub trait Intrinsic {
     fn process_args(

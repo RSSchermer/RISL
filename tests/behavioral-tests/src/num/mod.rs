@@ -5,6 +5,7 @@ mod f32_asinh;
 mod f32_atan;
 mod f32_atanh;
 mod f32_ceil;
+mod f32_clamp;
 mod f32_cos;
 mod f32_cosh;
 mod f32_exp;

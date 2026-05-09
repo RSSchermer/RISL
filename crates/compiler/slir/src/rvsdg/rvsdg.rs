@@ -1442,6 +1442,15 @@ impl OpCeil {
     gen_intrinsic_value_output!();
 }
 
+pub type OpClamp = IntrinsicNode<intrinsic::OpClamp>;
+
+impl OpClamp {
+    gen_intrinsic_value_input!(value_input, 0);
+    gen_intrinsic_value_input!(min_input, 1);
+    gen_intrinsic_value_input!(max_input, 2);
+    gen_intrinsic_value_output!();
+}
+
 pub type OpFract = IntrinsicNode<intrinsic::OpFract>;
 
 impl OpFract {
@@ -2105,6 +2114,7 @@ gen_simple_node! {
     OpRound,
     OpFloor,
     OpCeil,
+    OpClamp,
     OpFract,
     OpTrunc,
     OpSqrt,
@@ -3432,6 +3442,16 @@ impl Rvsdg {
 
     pub fn add_op_ceil(&mut self, region: Region, input: ValueInput) -> Node {
         self.add_intrinsic_op(region, intrinsic::OpCeil, [input], None)
+    }
+
+    pub fn add_op_clamp(
+        &mut self,
+        region: Region,
+        value: ValueInput,
+        min: ValueInput,
+        max: ValueInput,
+    ) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpClamp, [value, min, max], None)
     }
 
     pub fn add_op_fract(&mut self, region: Region, input: ValueInput) -> Node {
