@@ -209,25 +209,6 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
     }
 
     pub fn ty_and_layout_resolve(&self, layout: &TyAndLayout) -> slir::ty::Type {
-        let ty = self
-            .rcx
-            .shim_def_lookup()
-            .maybe_shimmed_ty(self.rcx.tcx(), layout.ty);
-
-        if let Some(ty) = self
-            .rcx
-            .shim_def_lookup()
-            .maybe_shimmed_ty(self.rcx.tcx(), layout.ty)
-        {
-            let layout = TyAndLayout::expect_from_ty(ty);
-
-            self.ty_and_layout_resolve_impl(&layout)
-        } else {
-            self.ty_and_layout_resolve_impl(layout)
-        }
-    }
-
-    fn ty_and_layout_resolve_impl(&self, layout: &TyAndLayout) -> slir::ty::Type {
         // Note: this cannot be inlined into the if-let expression, because then the borrow guard would
         // not drop in time, which would result in an "already borrowed" error.
         let ty = self.ty_to_slir.borrow().get(layout).copied();
@@ -249,6 +230,10 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         }
 
         if let Some(ty) = self.try_register_as_rislc_mem_resource_ty(&layout) {
+            return ty;
+        }
+
+        if let Some(ty) = self.try_register_as_slice_iter_ty(&layout) {
             return ty;
         }
 
@@ -315,6 +300,65 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         None
     }
 
+    fn try_register_as_slice_iter_ty(&self, layout: &TyAndLayout) -> Option<slir::ty::Type> {
+        let ty = layout.ty;
+
+        let TyKind::RigidTy(RigidTy::Adt(def, generics)) = ty.kind() else {
+            return None;
+        };
+
+        let slice_iter_names = [
+            "std::slice::Iter",
+            "core::slice::Iter",
+            "std::slice::IterMut",
+            "core::slice::IterMut",
+        ];
+
+        if !slice_iter_names.contains(&def.def_id().name().as_str()) {
+            return None;
+        }
+
+        let Some(GenericArgKind::Type(element_ty)) = generics.0.get(1) else {
+            panic!("slice iter's second generic must be a type parameter");
+        };
+
+        let element_layout = TyAndLayout::expect_from_ty(*element_ty);
+        let stride = element_layout.layout.size.bytes() as u64;
+        let element_ty = self.ty_and_layout_resolve(&TyAndLayout::expect_from_ty(*element_ty));
+
+        let module = self.module.borrow();
+
+        let slice_ty = module
+            .ty
+            .register(slir::ty::TypeKind::Slice { element_ty, stride });
+        let slice_ptr_ty = module.ty.register(slir::ty::TypeKind::Ptr(slice_ty));
+
+        let fields = vec![
+            // The `slice_ptr` field
+            slir::ty::StructField {
+                offset: 0,
+                ty: slice_ptr_ty,
+                io_binding: None,
+            },
+            // The `start` field.
+            slir::ty::StructField {
+                offset: 16,
+                ty: slir::ty::TY_U32,
+                io_binding: None,
+            },
+            // The `end` field.
+            slir::ty::StructField {
+                offset: 20,
+                ty: slir::ty::TY_U32,
+                io_binding: None,
+            },
+        ];
+
+        let ty = module.ty.register(slir::ty::Struct { fields }.into());
+
+        Some(ty)
+    }
+
     fn resolve_scalar_ty(&self, scalar: abi::Scalar, layout: &TyAndLayout) -> slir::ty::Type {
         if matches!(
             scalar,
@@ -355,7 +399,10 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
                             .ty
                             .register(slir::ty::TypeKind::Ptr(pointee_ty))
                     }
-                    _ => bug!("pointer primitive type must be a ref or raw ptr"),
+                    _ => bug!(
+                        "pointer primitive type must be a ref or raw ptr (found `{:?}`)",
+                        ty
+                    ),
                 }
             }
             _ => bug!("primitive type not supported by SLIR"),
@@ -1029,18 +1076,6 @@ impl<'a, 'tcx> MiscCodegenMethods for CodegenContext<'a, 'tcx> {
         self.rcx
             .shim_def_lookup()
             .maybe_shimmed_instance(self.rcx.tcx(), instance)
-    }
-
-    fn adjust_layout(&self, layout: TyAndLayout) -> TyAndLayout {
-        if let Some(ty) = self
-            .rcx
-            .shim_def_lookup()
-            .maybe_shimmed_ty(self.rcx.tcx(), layout.ty)
-        {
-            TyAndLayout::expect_from_ty(ty)
-        } else {
-            layout
-        }
     }
 }
 

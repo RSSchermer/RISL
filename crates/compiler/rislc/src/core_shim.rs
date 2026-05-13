@@ -10,13 +10,12 @@ use rustc_middle::ty::TyCtxt;
 use rustc_public::CrateDef;
 use rustc_public::mir::mono::Instance;
 use rustc_public::rustc_internal::{internal, stable};
-use rustc_public::ty::{RigidTy, Ty, TyKind};
 use rustc_span::Symbol;
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::SHIM_LOOKUP_HEADER;
 use crate::context::RislContext;
-use crate::hir_ext::{FnExt, GpuFnExt, HirExt, StructExt};
+use crate::hir_ext::{FnExt, GpuFnExt, HirExt};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ShimDefLookup {
@@ -30,21 +29,6 @@ impl ShimDefLookup {
             shim_crate_num: shim_crate_num.as_usize(),
             mapping: RwLock::new(FxHashMap::default()),
         }
-    }
-
-    pub fn maybe_shimmed_ty(&self, tcx: TyCtxt, ty: Ty) -> Option<Ty> {
-        if let TyKind::RigidTy(RigidTy::Adt(def, args)) = ty.kind() {
-            let def_path = def.0.name();
-
-            if let Some(shimmed_def_id) = self.shim_def_id(&def_path) {
-                let ty = tcx.type_of(shimmed_def_id);
-                let ty = ty.instantiate(tcx, internal(tcx, args));
-
-                return Some(stable(ty));
-            }
-        }
-
-        None
     }
 
     pub fn maybe_shimmed_instance(&self, tcx: TyCtxt, instance: Instance) -> Instance {
@@ -115,15 +99,6 @@ impl ShimDefLookup {
 
     pub fn register_gpu_fn_ext(&mut self, def_id: DefId, gpu_fn_ext: &GpuFnExt) {
         if let Some(target) = gpu_fn_ext.core_shim_for {
-            self.mapping
-                .get_mut()
-                .unwrap()
-                .insert(target.to_string(), def_id.index.as_usize());
-        }
-    }
-
-    pub fn register_struct_ext(&mut self, def_id: DefId, struct_ext: &StructExt) {
-        if let Some(target) = struct_ext.core_shim_for {
             self.mapping
                 .get_mut()
                 .unwrap()
@@ -211,12 +186,6 @@ pub fn build_shim_def_lookup(hir_ext: &HirExt) -> ShimDefLookup {
         let def_id = hir_id.expect_owner().def_id;
 
         lookup.register_gpu_fn_ext(def_id.to_def_id(), gpu_fn_ext);
-    }
-
-    for (&item_id, struct_ext) in &hir_ext.struct_ext {
-        let def_id = item_id.owner_id.def_id;
-
-        lookup.register_struct_ext(def_id.to_def_id(), struct_ext);
     }
 
     lookup

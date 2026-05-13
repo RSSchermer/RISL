@@ -24,6 +24,12 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::SliceLen => define_slice_len(instance, cx),
             RislIntrinsic::SliceElementRef => define_slice_element_ref(instance, cx),
             RislIntrinsic::SliceRange => define_slice_range(instance, cx),
+            RislIntrinsic::SliceIterNew => define_slice_iter_new(instance, cx),
+            RislIntrinsic::SliceIterGetUnchecked => define_slice_iter_get_unchecked(instance, cx),
+            RislIntrinsic::SliceIterStart => define_slice_iter_start(instance, cx),
+            RislIntrinsic::SliceIterSetStart => define_slice_iter_set_start(instance, cx),
+            RislIntrinsic::SliceIterEnd => define_slice_iter_end(instance, cx),
+            RislIntrinsic::SliceIterSetEnd => define_slice_iter_set_end(instance, cx),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
@@ -82,6 +88,12 @@ pub enum RislIntrinsic {
     SliceLen,
     SliceElementRef,
     SliceRange,
+    SliceIterNew,
+    SliceIterGetUnchecked,
+    SliceIterStart,
+    SliceIterSetStart,
+    SliceIterEnd,
+    SliceIterSetEnd,
     MemResourceAsRef,
     NonZeroNew,
     NonZeroNewUnchecked,
@@ -144,6 +156,12 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(slice_len)]" => RislIntrinsic::SliceLen,
         "#[rislc::intrinsic(slice_element_ref)]" => RislIntrinsic::SliceElementRef,
         "#[rislc::intrinsic(slice_range)]" => RislIntrinsic::SliceRange,
+        "#[rislc::intrinsic(slice_iter_new)]" => RislIntrinsic::SliceIterNew,
+        "#[rislc::intrinsic(slice_iter_get_unchecked)]" => RislIntrinsic::SliceIterGetUnchecked,
+        "#[rislc::intrinsic(slice_iter_start)]" => RislIntrinsic::SliceIterStart,
+        "#[rislc::intrinsic(slice_iter_set_start)]" => RislIntrinsic::SliceIterSetStart,
+        "#[rislc::intrinsic(slice_iter_end)]" => RislIntrinsic::SliceIterEnd,
+        "#[rislc::intrinsic(slice_iter_set_end)]" => RislIntrinsic::SliceIterSetEnd,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
@@ -898,6 +916,138 @@ fn define_slice_range(instance: Instance, cx: &CodegenContext) {
     let (_, ret_value) = cfg.add_stmt_op_load(bb, BlockPosition::Append, alloca_ptr.into());
 
     cfg.set_terminator(bb, Terminator::return_value(ret_value.into()));
+}
+
+fn define_slice_iter_new(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let ret_ptr = body.argument_values()[0];
+    let in_slice_ptr = body.argument_values()[1];
+    let in_slice_len = body.argument_values()[2];
+
+    let bb = body.entry_block();
+
+    let (_, out_slice_ptr_ptr) =
+        cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, ret_ptr.into(), 0);
+    cfg.add_stmt_op_store(
+        bb,
+        BlockPosition::Append,
+        out_slice_ptr_ptr.into(),
+        in_slice_ptr.into(),
+    );
+    let (_, out_start_ptr) =
+        cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, ret_ptr.into(), 1);
+    cfg.add_stmt_op_store(bb, BlockPosition::Append, out_start_ptr.into(), 0u32.into());
+    let (_, out_end_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, ret_ptr.into(), 2);
+    cfg.add_stmt_op_store(
+        bb,
+        BlockPosition::Append,
+        out_end_ptr.into(),
+        in_slice_len.into(),
+    );
+
+    cfg.set_terminator(bb, Terminator::return_void())
+}
+
+fn define_slice_iter_get_unchecked(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let iter_ptr = body.argument_values()[0];
+    let index = body.argument_values()[1];
+
+    let bb = body.entry_block();
+
+    let (_, slice_ptr_ptr) =
+        cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), 0);
+    let (_, slice_ptr) = cfg.add_stmt_op_load(bb, BlockPosition::Append, slice_ptr_ptr.into());
+    let (_, element_ptr) =
+        cfg.add_stmt_op_element_ptr(bb, BlockPosition::Append, slice_ptr.into(), index.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(element_ptr.into()));
+}
+
+fn define_slice_iter_start(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let iter_ptr = body.argument_values()[0];
+
+    let bb = body.entry_block();
+
+    let (_, start_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), 1);
+    let (_, start) = cfg.add_stmt_op_load(bb, BlockPosition::Append, start_ptr.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(start.into()));
+}
+
+fn define_slice_iter_set_start(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let iter_ptr = body.argument_values()[0];
+    let start = body.argument_values()[1];
+
+    let bb = body.entry_block();
+
+    let (_, start_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), 1);
+    cfg.add_stmt_op_store(bb, BlockPosition::Append, start_ptr.into(), start.into());
+
+    cfg.set_terminator(bb, Terminator::return_void());
+}
+
+fn define_slice_iter_end(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let iter_ptr = body.argument_values()[0];
+
+    let bb = body.entry_block();
+
+    let (_, end_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), 2);
+    let (_, end) = cfg.add_stmt_op_load(bb, BlockPosition::Append, end_ptr.into());
+
+    cfg.set_terminator(bb, Terminator::return_value(end.into()));
+}
+
+fn define_slice_iter_set_end(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let iter_ptr = body.argument_values()[0];
+    let end = body.argument_values()[1];
+
+    let bb = body.entry_block();
+
+    let (_, end_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), 2);
+    cfg.add_stmt_op_store(bb, BlockPosition::Append, end_ptr.into(), end.into());
+
+    cfg.set_terminator(bb, Terminator::return_void());
 }
 
 fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {

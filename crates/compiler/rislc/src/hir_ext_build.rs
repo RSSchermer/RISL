@@ -394,11 +394,7 @@ impl<'a, 'tcx> Locator<'a, 'tcx> {
 
     fn visit_item_struct(&mut self, item: &Item<'tcx>, attrs: &Attributes) {
         if attrs.gpu.is_some() {
-            let core_shim_for = attrs.core_shim.as_ref().map(|s| s.target);
-
-            self.hir_ext
-                .struct_ext
-                .insert(item.item_id(), StructExt { core_shim_for });
+            self.hir_ext.struct_ext.insert(item.item_id(), StructExt {});
         }
     }
 

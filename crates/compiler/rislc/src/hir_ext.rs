@@ -433,9 +433,7 @@ pub struct TraitExt {
 }
 
 #[derive(Debug)]
-pub struct StructExt {
-    pub core_shim_for: Option<Symbol>,
-}
+pub struct StructExt {}
 
 #[derive(Debug)]
 pub struct EnumExt {}

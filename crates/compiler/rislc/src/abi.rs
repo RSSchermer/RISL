@@ -1,5 +1,12 @@
-use rustc_abi::Variants;
-use rustc_middle::ty::{Ty, TyCtxt};
+use rustc_abi::{
+    AbiAlign, Align, BackendRepr, FieldsShape, LayoutData, Size, VariantIdx, Variants,
+};
+use rustc_hir::definitions::DefPath;
+use rustc_index::Idx;
+use rustc_middle::infer::canonical::ir::inherent::AdtDef;
+use rustc_middle::ty;
+use rustc_middle::ty::layout::{LayoutError, TyAndLayout};
+use rustc_middle::ty::{Ty, TyCtxt, TyKind};
 use rustc_middle::util::Providers;
 use rustc_target::callconv::{ArgAbi, ArgAttributes, FnAbi, PassMode};
 
@@ -58,4 +65,83 @@ pub fn provide(providers: &mut Providers) {
 
         Ok(adjust_fn_abi(tcx, result?))
     };
+
+    fn is_slice_iter_def(tcx: TyCtxt, def_path: DefPath) -> bool {
+        let crate_sym = tcx.crate_name(def_path.krate);
+        let crate_str = crate_sym.as_str();
+
+        if crate_str != "core" && crate_str != "std" {
+            return false;
+        }
+
+        let Some(slice_mod_path) = def_path.data.get(0) else {
+            return false;
+        };
+
+        if slice_mod_path.as_sym(false).as_str() != "slice" {
+            return false;
+        }
+
+        let Some(iter_mod_path) = def_path.data.get(1) else {
+            return false;
+        };
+
+        if iter_mod_path.as_sym(false).as_str() != "iter" {
+            return false;
+        }
+
+        let Some(ty_path) = def_path.data.get(2) else {
+            return false;
+        };
+
+        let ty_sym = ty_path.as_sym(false);
+        let ty_str = ty_sym.as_str();
+
+        ty_str == "Iter" || ty_str == "IterMut"
+    }
+
+    fn layout_of<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        query: ty::PseudoCanonicalInput<'tcx, Ty<'tcx>>,
+    ) -> Result<TyAndLayout<'tcx>, &'tcx LayoutError<'tcx>> {
+        let ty::PseudoCanonicalInput {
+            typing_env,
+            value: ty,
+        } = query;
+
+        if let TyKind::Adt(def, generic_args) = ty.kind() {
+            let def_path = tcx.def_path(def.def_id());
+
+            if is_slice_iter_def(tcx, def_path) {
+                let layout = LayoutData {
+                    fields: FieldsShape::Arbitrary {
+                        offsets: rustc_index::IndexVec::from_raw(vec![
+                            Size::from_bytes(0),
+                            Size::from_bytes(16),
+                            Size::from_bytes(20),
+                        ]),
+                        memory_index: rustc_index::IndexVec::from_raw(vec![0u32, 1u32, 2u32]),
+                    },
+                    variants: Variants::Single {
+                        index: VariantIdx::new(0),
+                    },
+                    backend_repr: BackendRepr::Memory { sized: true },
+                    largest_niche: None,
+                    uninhabited: false,
+                    align: AbiAlign::new(Align::EIGHT),
+                    size: Size::from_bytes(24),
+                    max_repr_align: None,
+                    unadjusted_abi_align: Align::EIGHT,
+                    randomization_seed: Default::default(),
+                };
+                let layout = tcx.mk_layout(layout);
+
+                return Ok(TyAndLayout { ty, layout });
+            }
+        }
+
+        (rustc_interface::DEFAULT_QUERY_PROVIDERS.layout_of)(tcx, query)
+    }
+
+    providers.layout_of = layout_of;
 }
