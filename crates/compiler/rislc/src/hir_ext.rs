@@ -45,6 +45,23 @@ impl HirExt {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.shader_requests.is_empty()
+            && self.mod_ext.is_empty()
+            && self.fn_ext.is_empty()
+            && self.impl_fn_ext.is_empty()
+            && self.trait_fn_ext.is_empty()
+            && self.struct_ext.is_empty()
+            && self.enum_ext.is_empty()
+            && self.trait_ext.is_empty()
+            && self.const_ext.is_empty()
+            && self.static_ext.is_empty()
+            && self.impl_ext.is_empty()
+            && self.param_ext.is_empty()
+            && self.generic_param_ext.is_empty()
+            && self.field_ext.is_empty()
+    }
+
     pub fn extend_item<'ext, 'hir>(
         &'ext self,
         item: &'hir Item,

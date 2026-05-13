@@ -590,6 +590,12 @@ fn create_shader_request_lookup(cx: &RislContext) {
 
 fn compile_risl(tcx: TyCtxt) {
     let cx = RislContext::new(tcx);
+
+    if cx.hir_ext().is_empty() {
+        // Apparently, the current crate contains no RISL.
+        return;
+    }
+
     let lib_module = codegen_shader_modules(&cx);
     let smam = cx.local_smam();
     let shim_lookup = cx
