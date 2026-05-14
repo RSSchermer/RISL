@@ -509,10 +509,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             None
         };
 
-        let fields = shape
-            .fields
-            .fields_by_offset_order()
-            .into_iter()
+        let fields = (0..layout.layout.fields.count())
             .map(|i| {
                 let layout = layout.field(i);
                 let ty = self.ty_and_layout_resolve(&layout);
