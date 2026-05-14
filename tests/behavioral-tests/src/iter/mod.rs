@@ -1,1 +1,2 @@
+mod adapters;
 mod iterator;
