@@ -142,20 +142,49 @@ fn primitive_ty_to_slir(primitive_ty: RislPrimitiveTy) -> slir::ty::Type {
     }
 }
 
-fn scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAndLayout) {
+fn unpack_scalar_layout(layout: &TyAndLayout) -> TyAndLayout {
+    // We have to account for "transparent" ADT types. For single-variant ADTs where a field
+    // presents a scalar ABI, the ADT itself is also represented with a scalar ABI.
+    // To get at the actual field type, we'll have to unpack its field, potentially recursively.
+    if matches!(
+        layout.ty.kind(),
+        TyKind::RigidTy(RigidTy::Adt(..) | RigidTy::Closure(..) | RigidTy::Tuple(..))
+    ) && matches!(layout.layout.variants, VariantsShape::Single { .. })
+    {
+        let non_zst_fields: Vec<_> = (0..layout.layout.fields.count())
+            .map(|i| layout.field(i))
+            .filter(|f| f.layout.size.bytes() != 0)
+            .collect();
+
+        if non_zst_fields.len() == 1 {
+            return unpack_scalar_layout(&non_zst_fields[0]);
+        }
+    }
+
+    layout.clone()
+}
+
+fn unpack_scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAndLayout) {
     if !matches!(layout.layout.abi, ValueAbi::ScalarPair(..)) {
         bug!("expected scalar pair layout");
     }
 
-    // We have to account or "transparent" ADT types. For single-variant ADTs with a single field,
-    // where the field has a scalar-pair ABI, the ADT itself is also represented with a scalar-pair.
-    // To get at the actual field types, we'll have to unpack its field, potentially recursively.
-    if matches!(layout.layout.variants, VariantsShape::Single { .. })
-        && layout.layout.fields.count() == 1
+    // We have to account for "transparent" ADT types. For single-variant ADTs where the fields
+    // present a scalar-pair ABI, the ADT itself is also represented with a scalar-pair.
+    // To get at the actual field types, we'll have to unpack its fields, potentially recursively.
+    if matches!(
+        layout.ty.kind(),
+        TyKind::RigidTy(RigidTy::Adt(..) | RigidTy::Closure(..) | RigidTy::Tuple(..))
+    ) && matches!(layout.layout.variants, VariantsShape::Single { .. })
     {
-        let layout = layout.field(0);
+        let non_zst_fields: Vec<_> = (0..layout.layout.fields.count())
+            .map(|i| layout.field(i))
+            .filter(|f| f.layout.size.bytes() != 0)
+            .collect();
 
-        return scalar_pair_field_layouts(&layout);
+        if non_zst_fields.len() == 1 {
+            return unpack_scalar_pair_field_layouts(&non_zst_fields[0]);
+        }
     }
 
     let field_0 = layout.field(0);
@@ -385,6 +414,8 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
                 length: FloatLength::F32,
             } => slir::ty::TY_F32,
             Primitive::Pointer(_) => {
+                let layout = unpack_scalar_layout(layout);
+
                 let TyKind::RigidTy(ty) = layout.ty.kind() else {
                     bug!("primitive type must be rigid")
                 };
@@ -415,7 +446,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         s1: abi::Scalar,
         layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        let (l0, l1) = scalar_pair_field_layouts(layout);
+        let (l0, l1) = unpack_scalar_pair_field_layouts(layout);
 
         let t0 = self.resolve_scalar_ty(s0, &l0);
         let t1 = self.resolve_scalar_ty(s1, &l1);
@@ -728,7 +759,7 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
                         bug!("value ABI does not match pass-mode")
                     };
 
-                    let (l0, l1) = scalar_pair_field_layouts(&TyAndLayout {
+                    let (l0, l1) = unpack_scalar_pair_field_layouts(&TyAndLayout {
                         ty: arg.ty,
                         layout: arg.layout.shape(),
                     });

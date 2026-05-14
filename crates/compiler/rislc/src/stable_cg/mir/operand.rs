@@ -7,7 +7,7 @@ use rustc_middle::bug;
 use rustc_public::abi::{ValueAbi, VariantsShape};
 use rustc_public::mir;
 use rustc_public::target::MachineInfo;
-use rustc_public::ty::{Align, ConstantKind, MirConst};
+use rustc_public::ty::{Align, ConstantKind, MirConst, RigidTy, TyKind};
 use tracing::debug;
 
 use super::place::{PlaceRef, PlaceValue};
@@ -468,7 +468,10 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                 // can project the destination to both scalar-pair parts, we have to "unpack" the
                 // ADT type-and-layout until we're left with the actual scalar-pair type-and-layout.
                 let mut dest = dest.clone();
-                while matches!(dest.layout.layout.variants, VariantsShape::Single { .. })
+                while matches!(
+                    dest.layout.ty.kind(),
+                    TyKind::RigidTy(RigidTy::Adt(..) | RigidTy::Closure(..) | RigidTy::Tuple(..))
+                ) && matches!(dest.layout.layout.variants, VariantsShape::Single { .. })
                     && dest.layout.layout.fields.count() == 1
                 {
                     dest = dest.project_field(bx, 0);
