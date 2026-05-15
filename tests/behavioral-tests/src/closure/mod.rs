@@ -1,1 +1,2 @@
+mod capture_move_single_scalar;
 mod capture_ref_single_scalar;
