@@ -31,7 +31,7 @@
 //! depends on the [BranchSelector] kind of the terminator's [Branch::selector][4] and the number of
 //! [Branch::targets][5]:
 //!
-//! - There is only a single branch target: this implies that reaching the predecessors terminator
+//! - There is only a single branch target: this implies that reaching the predecessor's terminator
 //!   would mean reaching the unreachable block. Since the unreachable block cannot be reached, this
 //!   implies that the predecessor's terminator was in actuality also "unreachable". We set the
 //!   predecessor's terminator to [Terminator::Unreachable] and recurse.
