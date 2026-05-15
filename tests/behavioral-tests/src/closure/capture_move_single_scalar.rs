@@ -21,6 +21,10 @@ test_runner! {
     },
     result: u32,
     shader: {
+        // Test capturing a single scalar. While generally rustc assigns "aggregate" ABIs to closure
+        // values, for a closure that captures a single scalar, it can assign a scalar-ABI; rislc
+        // needs to handle this correctly.
+
         let val = *VALUE;
         let closure = move || val + 1;
 
