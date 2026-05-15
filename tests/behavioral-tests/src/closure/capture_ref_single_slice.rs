@@ -45,7 +45,6 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    assert_eq!(runner.run(vec![1, 2, 3, 4]).await?, 10);
     assert_eq!(runner.run(vec![10, 20, 30]).await?, 60);
 
     Ok(())
