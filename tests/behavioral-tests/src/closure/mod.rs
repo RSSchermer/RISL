@@ -1,3 +1,4 @@
+mod capture_move_multiple;
 mod capture_move_single_scalar;
 mod capture_move_struct_scalar;
 mod capture_ref_multiple;
