@@ -1,0 +1,1 @@
+mod capture_ref_single_scalar;
