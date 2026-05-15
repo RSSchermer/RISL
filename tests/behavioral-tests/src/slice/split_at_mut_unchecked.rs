@@ -55,19 +55,19 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
     // Case 1: split_at_mut_unchecked(2) -> [10, 20, 30, 40] -> ([11, 20], [32, 40])
-    let values1 = vec![10u32, 20u32, 30u32, 40u32];
+    let values1 = vec![10, 20, 30, 40];
     let res1 = runner.run(2, values1).await?;
     assert_eq!(res1.left, 11);
     assert_eq!(res1.right, 32);
 
     // Case 2: split_at_mut_unchecked(0) -> [10, 20, 30, 40] -> ([], [12, 20, 30, 40])
-    let values2 = vec![10u32, 20u32, 30u32, 40u32];
+    let values2 = vec![10, 20, 30, 40];
     let res2 = runner.run(0, values2).await?;
     assert_eq!(res2.left, 99);
     assert_eq!(res2.right, 12);
 
     // Case 3: split_at_mut_unchecked(4) -> [10, 20, 30, 40] -> ([11, 20, 30, 40], [])
-    let values3 = vec![10u32, 20u32, 30u32, 40u32];
+    let values3 = vec![10, 20, 30, 40];
     let res3 = runner.run(4, values3).await?;
     assert_eq!(res3.left, 11);
     assert_eq!(res3.right, 99);

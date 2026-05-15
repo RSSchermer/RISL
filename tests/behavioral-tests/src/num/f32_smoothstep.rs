@@ -25,13 +25,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    let cases = [
-        (0.0f32, 0.0f32),
-        (0.5f32, 0.5f32),
-        (1.0f32, 1.0f32),
-        (-0.5f32, 0.0f32),
-        (1.5f32, 1.0f32),
-    ];
+    let cases = [(0.0, 0.0), (0.5, 0.5), (1.0, 1.0), (-0.5, 0.0), (1.5, 1.0)];
 
     for (input, expected) in cases {
         let actual = runner.run(input).await?;

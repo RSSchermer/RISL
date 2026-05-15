@@ -30,7 +30,7 @@ test_runner! {
             index: *START as usize,
         };
 
-        let fold_result: Result<u32, u32> = iter.try_fold(0u32, |acc, x| {
+        let fold_result: Result<u32, u32> = iter.try_fold(0, |acc, x| {
             let next = acc + x;
 
             if next > 50 {
@@ -41,9 +41,9 @@ test_runner! {
         });
 
         let (is_ok, fold_value) = if let Ok(fold_value) = fold_result {
-            (1u32, fold_value)
+            (1, fold_value)
         } else {
-            (0u32, u32::MAX)
+            (0, u32::MAX)
         };
 
         let next_item = if let Some(next_item) = iter.next() {
@@ -65,48 +65,48 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    let values = [40u32, 30u32, 20u32, 10u32];
+    let values = [40, 30, 20, 10];
 
     assert_eq!(
-        runner.run(0u32, values).await?,
+        runner.run(0, values).await?,
         Results {
-            is_ok: 0u32,
+            is_ok: 0,
             fold_value: u32::MAX,
             next_item: 20,
         }
     );
 
     assert_eq!(
-        runner.run(1u32, values).await?,
+        runner.run(1, values).await?,
         Results {
-            is_ok: 0u32,
+            is_ok: 0,
             fold_value: u32::MAX,
             next_item: u32::MAX,
         }
     );
 
     assert_eq!(
-        runner.run(2u32, values).await?,
+        runner.run(2, values).await?,
         Results {
-            is_ok: 1u32,
+            is_ok: 1,
             fold_value: 30,
             next_item: u32::MAX,
         }
     );
 
     assert_eq!(
-        runner.run(3u32, values).await?,
+        runner.run(3, values).await?,
         Results {
-            is_ok: 1u32,
+            is_ok: 1,
             fold_value: 10,
             next_item: u32::MAX,
         }
     );
 
     assert_eq!(
-        runner.run(4u32, values).await?,
+        runner.run(4, values).await?,
         Results {
-            is_ok: 1u32,
+            is_ok: 1,
             fold_value: 0,
             next_item: u32::MAX,
         }

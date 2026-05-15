@@ -48,18 +48,18 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    let values = vec![10u32, 20u32, 30u32, 40u32];
+    let values = vec![10, 20, 30, 40];
 
     // Valid range: [1..=2] -> 20 + 30 = 50
-    assert_eq!(runner.run(1u32, 2u32, values.clone()).await?, 50u32);
+    assert_eq!(runner.run(1, 2, values.clone()).await?, 50);
     // Single element range: [0..=0] -> 10
-    assert_eq!(runner.run(0u32, 0u32, values.clone()).await?, 10u32);
+    assert_eq!(runner.run(0, 0, values.clone()).await?, 10);
     // Valid range (end of slice): [1..=3] -> 20 + 30 + 40 = 90
-    assert_eq!(runner.run(1u32, 3u32, values.clone()).await?, 90u32);
+    assert_eq!(runner.run(1, 3, values.clone()).await?, 90);
     // Invalid range (out of bounds): [1..=4] -> 99
-    assert_eq!(runner.run(1u32, 4u32, values.clone()).await?, 99u32);
+    assert_eq!(runner.run(1, 4, values.clone()).await?, 99);
     // Invalid range (start > end): [2..=1] -> 99
-    assert_eq!(runner.run(2u32, 1u32, values.clone()).await?, 99u32);
+    assert_eq!(runner.run(2, 1, values.clone()).await?, 99);
 
     Ok(())
 }

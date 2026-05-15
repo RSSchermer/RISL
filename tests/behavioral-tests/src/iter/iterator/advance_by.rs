@@ -33,7 +33,7 @@ test_runner! {
         let res = iter.advance_by(*N as usize);
 
         let rem = match res {
-            Ok(()) => 0u32,
+            Ok(()) => 0,
             Err(n) => n.get() as u32,
         };
 

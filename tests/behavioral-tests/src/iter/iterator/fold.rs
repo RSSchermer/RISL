@@ -31,7 +31,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    assert_eq!(runner.run([10u32, 20u32, 30u32, 40u32]).await?, 100);
+    assert_eq!(runner.run([10, 20, 30, 40]).await?, 100);
 
     Ok(())
 }

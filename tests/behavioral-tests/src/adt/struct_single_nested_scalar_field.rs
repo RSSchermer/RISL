@@ -62,7 +62,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 inner: ValueInner { a: 0 }
             })
             .await?,
-        2u32
+        2
     );
 
     Ok(())

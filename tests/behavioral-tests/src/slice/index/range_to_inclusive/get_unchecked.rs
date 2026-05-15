@@ -45,12 +45,12 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    let values = vec![10u32, 20u32, 30u32, 40u32];
+    let values = vec![10, 20, 30, 40];
 
     // Valid range: [..=2] -> 10 + 20 + 30 = 60
-    assert_eq!(runner.run(2u32, values.clone()).await?, 60u32);
+    assert_eq!(runner.run(2, values.clone()).await?, 60);
     // Valid range: [..=3] -> 10 + 20 + 30 + 40 = 100
-    assert_eq!(runner.run(3u32, values.clone()).await?, 100u32);
+    assert_eq!(runner.run(3, values.clone()).await?, 100);
 
     Ok(())
 }

@@ -55,7 +55,7 @@ test_runner! {
 
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
-    let values = vec![10u32, 20u32, 30u32, 40u32];
+    let values = vec![10, 20, 30, 40];
 
     // Case 1: Sub-slice [10, 20, 30, 40] -> first: 10, rest: [20, 30, 40] (sum: 90)
     assert_eq!(

@@ -13,7 +13,7 @@ test_runner! {
     result: u32,
     shader: {
         let empty = [];
-        let not_empty = [1u32];
+        let not_empty = [1];
 
         let slice: &[u32] = if *SELECTOR == 1 {
             &not_empty

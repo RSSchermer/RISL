@@ -40,10 +40,10 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    let values = vec![10u32, 20u32, 30u32, 40u32];
+    let values = vec![10, 20, 30, 40];
 
     // RangeFull should return the entire slice: 10 + 20 + 30 + 40 = 100
-    assert_eq!(runner.run(values.clone()).await?, 100u32);
+    assert_eq!(runner.run(values.clone()).await?, 100);
 
     Ok(())
 }

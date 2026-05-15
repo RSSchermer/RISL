@@ -12,7 +12,7 @@ test_runner! {
     },
     result: u32,
     shader: {
-        let mut sum = 0u32;
+        let mut sum = 0;
 
         for value in &*VALUES {
             sum += value;
@@ -27,7 +27,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    assert_eq!(runner.run(vec![10u32, 20u32, 30u32, 40u32]).await?, 100u32);
+    assert_eq!(runner.run(vec![10, 20, 30, 40]).await?, 100);
 
     Ok(())
 }

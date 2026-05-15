@@ -12,8 +12,8 @@ test_runner! {
     },
     result: u32,
     shader: {
-        let mut i = 0u32;
-        let mut sum = 0u32;
+        let mut i = 0;
+        let mut sum = 0;
 
         while i < *COUNT {
             sum += i;
@@ -30,13 +30,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
     // sum(0..0) = 0
-    assert_eq!(runner.run(0u32).await?, 0u32);
+    assert_eq!(runner.run(0).await?, 0);
     // sum(0..1) = 0
-    assert_eq!(runner.run(1u32).await?, 0u32);
+    assert_eq!(runner.run(1).await?, 0);
     // sum(0..2) = 0 + 1 = 1
-    assert_eq!(runner.run(2u32).await?, 1u32);
+    assert_eq!(runner.run(2).await?, 1);
     // sum(0..5) = 0 + 1 + 2 + 3 + 4 = 10
-    assert_eq!(runner.run(5u32).await?, 10u32);
+    assert_eq!(runner.run(5).await?, 10);
 
     Ok(())
 }

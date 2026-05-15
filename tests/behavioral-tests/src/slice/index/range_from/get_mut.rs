@@ -49,16 +49,16 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    let values = vec![10u32, 20u32, 30u32, 40u32];
+    let values = vec![10, 20, 30, 40];
 
     // Valid range: [1..] -> 20 + 30 + 40 = 90
-    assert_eq!(runner.run(1u32, values.clone()).await?, 90u32);
+    assert_eq!(runner.run(1, values.clone()).await?, 90);
     // Valid range: [0..] -> 10 + 20 + 30 + 40 = 100
-    assert_eq!(runner.run(0u32, values.clone()).await?, 100u32);
+    assert_eq!(runner.run(0, values.clone()).await?, 100);
     // Valid range (end of slice): [4..] -> empty -> 99
-    assert_eq!(runner.run(4u32, values.clone()).await?, 99u32);
+    assert_eq!(runner.run(4, values.clone()).await?, 99);
     // Invalid range (out of bounds): [5..] -> 99
-    assert_eq!(runner.run(5u32, values.clone()).await?, 99u32);
+    assert_eq!(runner.run(5, values.clone()).await?, 99);
 
     Ok(())
 }
