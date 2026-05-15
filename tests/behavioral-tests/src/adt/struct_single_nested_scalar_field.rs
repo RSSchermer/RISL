@@ -35,7 +35,7 @@ fn increment_value_by_val(mut value: ValueOuter) -> ValueOuter {
 }
 
 test_runner! {
-    name: TestRunner,
+    name: Runner,
     inputs: {
         VALUE: ValueOuter as Storage<ValueOuter>,
     },
@@ -54,7 +54,7 @@ test_runner! {
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = TestRunner::init().await?;
+    let runner = Runner::init().await?;
 
     assert_eq!(
         runner

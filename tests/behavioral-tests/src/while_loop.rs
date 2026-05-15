@@ -6,7 +6,7 @@ use behavioral_tests_macros::test_runner;
 use futures::FutureExt;
 
 test_runner! {
-    name: WhileLoopRunner,
+    name: Runner,
     inputs: {
         COUNT: u32 as Uniform<u32>,
     },
@@ -27,7 +27,7 @@ test_runner! {
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = WhileLoopRunner::init().await?;
+    let runner = Runner::init().await?;
 
     // sum(0..0) = 0
     assert_eq!(runner.run(0u32).await?, 0u32);

@@ -27,7 +27,7 @@ fn slice_wrapper_len_by_val(wrapper: SliceWrapper) -> u32 {
 }
 
 test_runner! {
-    name: TestRunner,
+    name: Runner,
     inputs: {
         VALUES: [u32] as Storage<[u32]>,
     },
@@ -45,7 +45,7 @@ test_runner! {
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = TestRunner::init().await?;
+    let runner = Runner::init().await?;
 
     assert_eq!(runner.run(vec![0u32, 1u32, 2u32, 3u32]).await?, 8u32);
 

@@ -6,7 +6,7 @@ use behavioral_tests_macros::test_runner;
 use futures::FutureExt;
 
 test_runner! {
-    name: SliceRangeRunner,
+    name: Runner,
     inputs: {
         VALUES: [u32] as StorageMut<[u32]>,
     },
@@ -29,7 +29,7 @@ test_runner! {
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = SliceRangeRunner::init().await?;
+    let runner = Runner::init().await?;
 
     assert_eq!(runner.run(vec![10u32, 20u32, 30u32, 40u32]).await?, 104u32);
 

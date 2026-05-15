@@ -37,7 +37,7 @@ fn increment_value_by_val(mut wrapper: Wrapper) -> Wrapper {
 }
 
 test_runner! {
-    name: TestRunner,
+    name: Runner,
     inputs: {
         VALUE: u32 as Storage<u32>,
     },
@@ -61,7 +61,7 @@ test_runner! {
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = TestRunner::init().await?;
+    let runner = Runner::init().await?;
 
     assert_eq!(runner.run(0u32).await?, 2u32);
 

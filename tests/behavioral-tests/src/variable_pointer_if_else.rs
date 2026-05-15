@@ -15,7 +15,7 @@ struct Values {
 }
 
 test_runner! {
-    name: VarPtrIfElseRunner,
+    name: Runner,
     inputs: {
         CONDITION: u32 as Uniform<u32>,
         VALUES: Values as Storage<Values>,
@@ -37,7 +37,7 @@ test_runner! {
 }
 
 async fn run() -> Result<(), Box<dyn Error>> {
-    let runner = VarPtrIfElseRunner::init().await?;
+    let runner = Runner::init().await?;
 
     assert_eq!(runner.run(0u32, Values { a: 0, b: 1 }).await?, 1u32);
     assert_eq!(runner.run(1u32, Values { a: 0, b: 1 }).await?, 0u32);
