@@ -5,3 +5,4 @@ mod capture_ref_multiple;
 mod capture_ref_single_scalar;
 mod capture_ref_single_slice;
 mod capture_ref_struct_scalar;
+mod capture_ref_struct_slice;
