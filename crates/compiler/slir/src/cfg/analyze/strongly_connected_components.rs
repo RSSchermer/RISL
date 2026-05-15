@@ -52,7 +52,7 @@ pub struct StronglyConnectedComponent {
 /// - Trivial SCCs that consist of only a single node never need restructuring, so we don't return
 ///   those here.
 /// - Loop restructuring is recursive: restructured loops may still contain nested loops that also
-///   need to be restructured. This function takes an "edge blacklist" as a second argument, to
+///   need to be restructured. This function takes an "edge blacklist" as an additional argument, to
 ///   which the restructuring may add the re-entry edge for each loop that has already been
 ///   restructured. This algorithm will ignore these blacklisted edges, which breaks the strong
 ///   connectedness of the restructured loop, so that any nested SCCs may then be discovered as
