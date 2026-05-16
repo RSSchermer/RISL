@@ -296,14 +296,26 @@ impl Callbacks for RislPassCallbacks {
 
         // Since we're outputting RISL artifacts to an RISL-specific output directory, we also need
         // to adjust the search_paths to look for dependencies in that RISL-specific output
+        // directory. We add the RISL-specific output directory to the search-paths in addition to
+        // the regular output directory. This allows the RISL-pass to resolve dependencies that have
+        // RISL-specific artifacts from the RISL-specific output directory, while still being able
+        // to resolve dependencies that do not have RISL-specific artifacts from the regular output
         // directory.
-        for search_path in &mut config.opts.search_paths {
+        let mut adjusted_search_paths = Vec::new();
+
+        for search_path in &config.opts.search_paths {
+            // Make sure that we add the RISL-specific output directory before we add the regular
+            // output directory.
             if search_path.kind == PathKind::Dependency {
                 let dir = risl_dir(&search_path.dir);
 
-                *search_path = SearchPath::new(PathKind::Dependency, dir);
+                adjusted_search_paths.push(SearchPath::new(PathKind::Dependency, dir));
             }
+
+            adjusted_search_paths.push(search_path.clone());
         }
+
+        config.opts.search_paths = adjusted_search_paths;
 
         // SAFETY: rustc should not be running concurrent threads during Callbacks::config
         unsafe {
