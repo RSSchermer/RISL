@@ -3,18 +3,6 @@ use std::ops::Try;
 
 use risl_macros::gpu;
 
-/// Shim marker to help the RISL compiler recognize the [core::iter::IntoIterator] trait as a
-/// GPU-compatible trait.
-#[cfg_attr(rislc, rislc::core_shim("core::iter::IntoIterator"))]
-#[gpu]
-pub trait IntoIteratorShimMarker {}
-
-/// Shim marker to help the RISL compiler recognize the [core::iter::Iterator] trait as a
-/// GPU-compatible trait.
-#[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator"))]
-#[gpu]
-pub trait IteratorShimMarker {}
-
 #[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::size_hint"))]
 pub fn iterator_size_hint<I>(_: &I) -> (usize, Option<usize>)
@@ -63,7 +51,7 @@ pub fn iterator_count<I>(iter: I) -> usize
 where
     I: Iterator,
 {
-    iterator_fold(iter, 0, |count, _| count + 1)
+    iter.fold(0, |count, _| count + 1)
 }
 
 #[gpu]
