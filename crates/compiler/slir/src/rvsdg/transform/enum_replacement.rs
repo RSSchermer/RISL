@@ -1,6 +1,5 @@
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
-    ValueUser,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
 use crate::ty::{TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry};
 

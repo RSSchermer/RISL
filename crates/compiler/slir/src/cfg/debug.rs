@@ -124,9 +124,6 @@ fn write_const_ptr<W: Write>(w: &mut W, const_ptr: ConstPtr) -> Result {
     write!(w, "&")?;
 
     match const_ptr.root_identifier() {
-        RootIdentifier::Local(b) => {
-            write_local_binding_label(w, b)?;
-        }
         RootIdentifier::Uniform(b) => {
             write_uniform_binding_label(w, b)?;
         }

@@ -532,7 +532,6 @@ impl<'a> RegionBuilder<'a> {
 
     fn resolve_root_identifier(&self, root_identifier: RootIdentifier) -> ValueInput {
         match root_identifier {
-            RootIdentifier::Local(v) => self.input_state_tracker[v],
             RootIdentifier::Uniform(b) => self.input_state_tracker[Item::UniformBinding(b)],
             RootIdentifier::Storage(b) => self.input_state_tracker[Item::StorageBinding(b)],
             RootIdentifier::Workgroup(b) => self.input_state_tracker[Item::WorkgroupBinding(b)],

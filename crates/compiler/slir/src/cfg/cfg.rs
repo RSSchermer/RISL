@@ -45,9 +45,8 @@ pub struct ConstPtr {
 }
 
 impl ConstPtr {
-    pub fn new(module: &Module, cfg: &Cfg, root_identifier: RootIdentifier) -> Self {
+    pub fn new(module: &Module, root_identifier: RootIdentifier) -> Self {
         let pointee_ty = match root_identifier {
-            RootIdentifier::Local(b) => cfg.local_bindings[b].ty,
             RootIdentifier::Uniform(b) => module.uniform_bindings[b].ty,
             RootIdentifier::Storage(b) => module.storage_bindings[b].ty,
             RootIdentifier::Workgroup(b) => module.workgroup_bindings[b].ty,
@@ -58,16 +57,6 @@ impl ConstPtr {
 
         ConstPtr {
             root_identifier,
-            ty,
-        }
-    }
-
-    pub fn local_binding(cfg: &Cfg, local_binding: LocalBinding) -> Self {
-        let pointee_ty = cfg[local_binding].ty();
-        let ty = cfg.ty().register(TypeKind::Ptr(pointee_ty));
-
-        ConstPtr {
-            root_identifier: RootIdentifier::Local(local_binding),
             ty,
         }
     }
@@ -83,7 +72,6 @@ impl ConstPtr {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum RootIdentifier {
-    Local(LocalBinding),
     Uniform(UniformBinding),
     Storage(StorageBinding),
     Workgroup(WorkgroupBinding),

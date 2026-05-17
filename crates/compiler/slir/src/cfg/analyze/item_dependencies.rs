@@ -52,7 +52,6 @@ impl WithItemDependencies for Value {
                     f(Item::WorkgroupBinding(b));
                 }
                 RootIdentifier::Constant(c) => f(Item::Constant(c)),
-                _ => {}
             },
             _ => {}
         }

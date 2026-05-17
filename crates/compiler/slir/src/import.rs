@@ -2,8 +2,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::cfg::{
-    BasicBlock, BlockPosition, BranchSelector, Cfg, ConstPtr, InlineConst, IntrinsicOp,
-    LocalBinding, RootIdentifier, Statement, StatementData, Terminator, Value,
+    BasicBlock, BlockPosition, BranchSelector, Cfg, InlineConst, IntrinsicOp, LocalBinding,
+    RootIdentifier, Statement, StatementData, Terminator, Value,
 };
 use crate::intrinsic::Intrinsic;
 use crate::ty::TypeKind;
@@ -127,7 +127,7 @@ impl FunctionImporter {
                 ),
             },
             Terminator::Return(Some(value)) => {
-                Terminator::return_value(self.dst_value(src_mod, (dst_mod, dst_cfg), *value))
+                Terminator::return_value(self.dst_value(src_mod, dst_mod, *value))
             }
             Terminator::Return(None) => Terminator::return_void(),
             Terminator::Unreachable => Terminator::Unreachable,
@@ -330,7 +330,7 @@ impl FunctionImporter {
     ) {
         let src_data = src_cfg[src_stmt].expect_assign();
         let dst_local = self.dst_local_value(src_data.local_binding());
-        let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
+        let dst_value = self.dst_value(src_mod, dst_mod, src_data.value());
 
         dst_cfg.add_stmt_assign(dst_bb, BlockPosition::Append, dst_local, dst_value);
     }
@@ -343,7 +343,7 @@ impl FunctionImporter {
         src_stmt: Statement,
     ) {
         let src_data = src_cfg[src_stmt].expect_bind();
-        let dst_value = self.dst_value(src_mod, (dst_mod, dst_cfg), src_data.value());
+        let dst_value = self.dst_value(src_mod, dst_mod, src_data.value());
 
         let (_, dst_local) = dst_cfg.add_stmt_bind(dst_bb, BlockPosition::Append, dst_value);
 
@@ -381,7 +381,7 @@ impl FunctionImporter {
         let arguments: SmallVec<[Value; 6]> = src_stmt
             .arguments()
             .iter()
-            .map(|v| self.dst_value(src_mod, (dst_mod, dst_cfg), *v))
+            .map(|v| self.dst_value(src_mod, dst_mod, *v))
             .collect();
 
         let (_, dst_result) = dst_cfg.add_stmt_intrinsic_op(
@@ -432,7 +432,7 @@ impl FunctionImporter {
         let dst_arguments = src_data
             .arguments()
             .iter()
-            .map(|v| self.dst_value(src_mod, (dst_mod, dst_cfg), *v))
+            .map(|v| self.dst_value(src_mod, dst_mod, *v))
             .collect::<Vec<_>>();
 
         let (_, result) =
@@ -458,46 +458,35 @@ impl FunctionImporter {
             .expect("local mapping should be registered earlier")
     }
 
-    fn dst_value(
-        &self,
-        src_mod: &Module,
-        (dst_mod, dst_cfg): (&mut Module, &mut Cfg),
-        src_value: Value,
-    ) -> Value {
+    fn dst_value(&self, src_mod: &Module, dst_mod: &mut Module, src_value: Value) -> Value {
         match src_value {
             Value::Local(local) => Value::Local(self.dst_local_value(local)),
-            value @ Value::InlineConst(InlineConst::Ptr(ptr)) => match ptr.root_identifier() {
-                RootIdentifier::Local(local) => {
-                    let local = self.dst_local_value(local);
-                    let inline_const = InlineConst::Ptr(ConstPtr::local_binding(dst_cfg, local));
+            value @ Value::InlineConst(InlineConst::Ptr(ptr)) => {
+                match ptr.root_identifier() {
+                    RootIdentifier::Constant(constant) => {
+                        // Import the constant if it hasn't already been registered
+                        if !dst_mod.constants.contains(constant) {
+                            let data = &src_mod.constants[constant];
 
-                    inline_const.into()
+                            match data.kind() {
+                                ConstantKind::ByteData(bytes) => dst_mod
+                                    .constants
+                                    .register_byte_data(constant, data.ty(), bytes.clone()),
+                                ConstantKind::Expression => todo!(),
+                                ConstantKind::Overridable(_) => panic!(
+                                    "overridable constants cannot be imported from other modules"
+                                ),
+                            }
+                        };
+
+                        // The `Constant` token is module-independent, so now that we've ensured that
+                        // the constant has been imported, we can simply return the source value
+                        // unaltered and it will resolve to the imported constant.
+                        value
+                    }
+                    _ => panic!("imported functions may not reference module globals"),
                 }
-                RootIdentifier::Constant(constant) => {
-                    // Import the constant if it hasn't already been registered
-                    if !dst_mod.constants.contains(constant) {
-                        let data = &src_mod.constants[constant];
-
-                        match data.kind() {
-                            ConstantKind::ByteData(bytes) => dst_mod.constants.register_byte_data(
-                                constant,
-                                data.ty(),
-                                bytes.clone(),
-                            ),
-                            ConstantKind::Expression => todo!(),
-                            ConstantKind::Overridable(_) => panic!(
-                                "overridable constants cannot be imported from other modules"
-                            ),
-                        }
-                    };
-
-                    // The `Constant` token is module-independent, so now that we've ensured that
-                    // the constant has been imported, we can simply return the source value
-                    // unaltered and it will resolve to the imported constant.
-                    value
-                }
-                _ => panic!("imported functions may not reference module globals"),
-            },
+            }
             value @ _ => value,
         }
     }

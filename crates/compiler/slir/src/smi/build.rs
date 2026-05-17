@@ -623,12 +623,12 @@ mod tests {
         cfg.add_stmt_op_load(
             entry_point_0_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Uniform(uniform_0)).into(),
+            ConstPtr::new(&module, RootIdentifier::Uniform(uniform_0)).into(),
         );
         cfg.add_stmt_op_load(
             entry_point_0_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Constant(overridable_0)).into(),
+            ConstPtr::new(&module, RootIdentifier::Constant(overridable_0)).into(),
         );
         cfg.add_stmt_op_call(
             entry_point_0_bb0,
@@ -651,7 +651,7 @@ mod tests {
         cfg.add_stmt_op_load(
             entry_point_0_bb1,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Storage(storage_0)).into(),
+            ConstPtr::new(&module, RootIdentifier::Storage(storage_0)).into(),
         );
         cfg.set_terminator(
             entry_point_0_bb1,
@@ -681,17 +681,17 @@ mod tests {
         cfg.add_stmt_op_load(
             entry_point_1_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Uniform(uniform_0)).into(),
+            ConstPtr::new(&module, RootIdentifier::Uniform(uniform_0)).into(),
         );
         cfg.add_stmt_op_load(
             entry_point_1_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Constant(overridable_0)).into(),
+            ConstPtr::new(&module, RootIdentifier::Constant(overridable_0)).into(),
         );
         cfg.add_stmt_op_load(
             entry_point_1_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Storage(storage_read_write_0)).into(),
+            ConstPtr::new(&module, RootIdentifier::Storage(storage_read_write_0)).into(),
         );
         cfg.set_terminator(entry_point_1_bb0, Terminator::return_void());
 
@@ -703,12 +703,12 @@ mod tests {
         cfg.add_stmt_op_load(
             called_fn_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Uniform(uniform_1)).into(),
+            ConstPtr::new(&module, RootIdentifier::Uniform(uniform_1)).into(),
         );
         cfg.add_stmt_op_load(
             called_fn_bb0,
             BlockPosition::Append,
-            ConstPtr::new(&module, &cfg, RootIdentifier::Constant(overridable_1)).into(),
+            ConstPtr::new(&module, RootIdentifier::Constant(overridable_1)).into(),
         );
         cfg.set_terminator(called_fn_bb0, Terminator::return_void());
 

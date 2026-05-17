@@ -14,7 +14,7 @@ pub fn Value(cfg: StoredValue<Cfg>, value: slir::cfg::Value) -> impl IntoView {
         }
         .into_any(),
         Value::InlineConst(value) => view! {
-            <InlineConst cfg value/>
+            <InlineConst value/>
         }
         .into_any(),
     }
@@ -52,26 +52,22 @@ fn LocalValue(cfg: StoredValue<Cfg>, value: slir::cfg::LocalBinding) -> impl Int
 }
 
 #[component]
-fn InlineConst(cfg: StoredValue<Cfg>, value: slir::cfg::InlineConst) -> impl IntoView {
+fn InlineConst(value: slir::cfg::InlineConst) -> impl IntoView {
     match value {
         slir::cfg::InlineConst::U32(v) => view! {{format!("{}u32", v)}}.into_any(),
         slir::cfg::InlineConst::I32(v) => view! {{format!("{}i32", v)}}.into_any(),
         slir::cfg::InlineConst::F32(v) => view! {{format!("{}f32", v)}}.into_any(),
         slir::cfg::InlineConst::Bool(v) => view! {{format!("{}", v)}}.into_any(),
         slir::cfg::InlineConst::Ptr(v) => view! {
-            "&"<RootIdentifier cfg root_identifier=v.root_identifier()/>
+            "&"<RootIdentifier root_identifier=v.root_identifier()/>
         }
         .into_any(),
     }
 }
 
 #[component]
-fn RootIdentifier(
-    cfg: StoredValue<Cfg>,
-    root_identifier: slir::cfg::RootIdentifier,
-) -> impl IntoView {
+fn RootIdentifier(root_identifier: slir::cfg::RootIdentifier) -> impl IntoView {
     match root_identifier {
-        slir::cfg::RootIdentifier::Local(v) => view! { <Value cfg value=v.into()/> }.into_any(),
         slir::cfg::RootIdentifier::Uniform(v) => {
             view! {{format!("U{}", v.data().as_ffi())}}.into_any()
         }
