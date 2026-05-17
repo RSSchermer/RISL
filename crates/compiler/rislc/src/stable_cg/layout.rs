@@ -1,5 +1,5 @@
 use rustc_middle::bug;
-use rustc_public::abi::{LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape};
+use rustc_public::abi::{IntegerLength, LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape};
 use rustc_public::target::{MachineInfo, MachineSize};
 use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
@@ -131,14 +131,10 @@ impl TyAndLayout {
                         VariantsShape::Empty => bug!("there is no field in Variants::Empty types"),
 
                         // Discriminant field for enums (where applicable).
-                        VariantsShape::Multiple { tag, .. } => {
-                            assert_eq!(i, 0);
+                        VariantsShape::Multiple { tag, tag_field, .. } => {
+                            assert_eq!(i, 0, "enum only has a discriminant field");
 
-                            todo!()
-                            //     TyAndLayout {
-                            //         layout: tcx.mk_layout(LayoutData::scalar(cx, tag)),
-                            //         ty: tag.primitive().to_ty(tcx),
-                            //     }
+                            TyMaybeWithLayout::Ty(tag_ty(*tag.primitive()))
                         }
                     }
                 }
@@ -192,6 +188,29 @@ impl TyAndLayout {
 
         self
     }
+}
+
+fn tag_ty(primitive: Primitive) -> Ty {
+    let Primitive::Int {
+        length,
+        signed: false,
+    } = primitive
+    else {
+        bug!(
+            "expected enum tag to be an unsigned integer, got {:?}",
+            primitive
+        )
+    };
+
+    let uint_ty = match length {
+        IntegerLength::I8 => UintTy::U8,
+        IntegerLength::I16 => UintTy::U16,
+        IntegerLength::I32 => UintTy::U32,
+        IntegerLength::I64 => UintTy::U64,
+        IntegerLength::I128 => UintTy::U128,
+    };
+
+    Ty::unsigned_ty(uint_ty)
 }
 
 pub trait ScalarExt {
