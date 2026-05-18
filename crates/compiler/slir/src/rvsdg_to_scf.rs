@@ -7,38 +7,11 @@ use crate::intrinsic::Intrinsic;
 use crate::rvsdg::analyse::region_stratification::RegionStratifier;
 use crate::rvsdg::{Connectivity, NodeKind, Rvsdg, SimpleNode, ValueOrigin};
 use crate::scf::{BlockPosition, LocalBinding, LoopControl, Scf};
-use crate::{
-    Constant, Function, Module, StorageBinding, UniformBinding, WorkgroupBinding, rvsdg, scf,
-};
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Value {
-    Local(LocalBinding),
-    Uniform(UniformBinding),
-    Storage(StorageBinding),
-    Workgroup(WorkgroupBinding),
-    Constant(Constant),
-}
-
-impl Value {
-    fn expect_local(&self) -> LocalBinding {
-        if let Value::Local(binding) = self {
-            *binding
-        } else {
-            panic!("expected a local value (found `{:?}`)", self);
-        }
-    }
-}
-
-impl From<LocalBinding> for Value {
-    fn from(binding: LocalBinding) -> Self {
-        Value::Local(binding)
-    }
-}
+use crate::{Function, Module, rvsdg, scf};
 
 #[derive(Clone, Debug)]
 struct ValueMapping {
-    value_mapping: FxHashMap<rvsdg::ValueOrigin, Value>,
+    value_mapping: FxHashMap<ValueOrigin, LocalBinding>,
 }
 
 impl ValueMapping {
@@ -48,12 +21,12 @@ impl ValueMapping {
         }
     }
 
-    fn map_argument(&mut self, argument: u32, value: Value) {
+    fn map_argument(&mut self, argument: u32, value: LocalBinding) {
         self.value_mapping
             .insert(ValueOrigin::Argument(argument), value);
     }
 
-    fn map_output(&mut self, node: rvsdg::Node, output: u32, value: Value) {
+    fn map_output(&mut self, node: rvsdg::Node, output: u32, value: LocalBinding) {
         self.value_mapping.insert(
             ValueOrigin::Output {
                 producer: node,
@@ -63,7 +36,7 @@ impl ValueMapping {
         );
     }
 
-    fn mapping(&self, origin: ValueOrigin) -> Value {
+    fn mapping(&self, origin: ValueOrigin) -> LocalBinding {
         *self
             .value_mapping
             .get(&origin)
@@ -96,7 +69,7 @@ where
             arguments,
         );
 
-        visitor.value_mapping.map_output(node, 0, binding.into());
+        visitor.value_mapping.map_output(node, 0, binding);
     }
 }
 
@@ -143,7 +116,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
 
         let data = self.rvsdg[node].expect_switch();
         let predicate_origin = data.branch_selector().origin;
-        let predicate_binding = self.value_mapping.mapping(predicate_origin).expect_local();
+        let predicate_binding = self.value_mapping.mapping(predicate_origin);
 
         match predicate_origin {
             ValueOrigin::Argument(_) => {
@@ -182,7 +155,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             let binding = self.scf.add_if_out_var(if_stmt, output.ty);
 
             self.value_mapping
-                .map_output(switch_node, i as u32, binding.into());
+                .map_output(switch_node, i as u32, binding);
         }
 
         // Create an argument mapping. Since both the `then` and `else` branches receive the same
@@ -216,7 +189,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             let binding = self.scf.add_switch_out_var(switch_stmt, output.ty);
 
             self.value_mapping
-                .map_output(switch_node, i as u32, binding.into());
+                .map_output(switch_node, i as u32, binding);
         }
 
         // Create an argument mapping. Since each branch receives the same arguments, we construct
@@ -254,7 +227,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             self.visit_sub_region(branch_region, branch_block, argument_mapping);
 
         for (res, input) in self.rvsdg[branch_region].value_results().iter().enumerate() {
-            let value = sub_region_mapping.mapping(input.origin).expect_local();
+            let value = sub_region_mapping.mapping(input.origin);
 
             self.scf.set_control_flow_var(branch_block, res, value);
         }
@@ -281,21 +254,21 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             let value = self.value_mapping.mapping(input.origin);
 
             let value = if !is_loop_constant(i) {
-                let initializer = value.expect_local();
+                let initializer = value;
                 let (index, value) = self.scf.add_loop_var(loop_stmt, initializer);
 
                 loop_var_mapping.insert(i, index);
 
-                Value::Local(value)
+                value
             } else {
                 value
             };
 
             // Add a mapping for the loop value's corresponding argument.
-            argument_mapping.map_argument(i as u32, value.into());
+            argument_mapping.map_argument(i as u32, value);
 
             // Add a mapping for the loop value's corresponding output.
-            self.value_mapping.map_output(node, i as u32, value.into());
+            self.value_mapping.map_output(node, i as u32, value);
         }
 
         // Process the subregion and use the value mapping it produces to set the loop block's
@@ -303,9 +276,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         let sub_region_mapping = self.visit_sub_region(loop_region, loop_block, argument_mapping);
 
         let reentry_condition_origin = self.rvsdg[loop_region].value_results()[0].origin;
-        let reentry_condition_expr = sub_region_mapping
-            .mapping(reentry_condition_origin)
-            .expect_local();
+        let reentry_condition_expr = sub_region_mapping.mapping(reentry_condition_origin);
         self.scf
             .set_loop_control(loop_stmt, LoopControl::Tail(reentry_condition_expr));
 
@@ -315,7 +286,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             .enumerate()
         {
             if let Some(&loop_var_index) = loop_var_mapping.get(&i) {
-                let binding = sub_region_mapping.mapping(result.origin).expect_local();
+                let binding = sub_region_mapping.mapping(result.origin);
 
                 self.scf
                     .set_control_flow_var(loop_block, loop_var_index, binding);
@@ -333,7 +304,6 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             ConstI32(_) => self.visit_const_i32(node),
             ConstF32(_) => self.visit_const_f32(node),
             ConstBool(_) => self.visit_const_bool(node),
-            ConstPtr(_) => self.visit_const_ptr(node),
             OpAlloca(_) => self.visit_op_alloca(node),
             OpStore(_) => self.visit_op_store(node),
             OpLoad(op) => self.prepare_bind_intrinsic(node, op).apply(self),
@@ -410,7 +380,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             self.scf
                 .add_bind_const_u32(self.dst_block, BlockPosition::Append, value);
 
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_const_i32(&mut self, node: rvsdg::Node) {
@@ -419,7 +389,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             self.scf
                 .add_bind_const_i32(self.dst_block, BlockPosition::Append, value);
 
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_const_f32(&mut self, node: rvsdg::Node) {
@@ -428,7 +398,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             self.scf
                 .add_bind_const_f32(self.dst_block, BlockPosition::Append, value);
 
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_const_bool(&mut self, node: rvsdg::Node) {
@@ -437,42 +407,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             self.scf
                 .add_bind_const_bool(self.dst_block, BlockPosition::Append, value);
 
-        self.value_mapping.map_output(node, 0, binding.into());
-    }
-
-    fn visit_const_ptr(&mut self, node: rvsdg::Node) {
-        let data = self.rvsdg[node].expect_const_ptr();
-        let base = self.value_mapping.mapping(data.base().origin);
-
-        let (_, binding) = match base {
-            Value::Uniform(b) => self.scf.add_bind_uniform_ptr(
-                self.dst_block,
-                BlockPosition::Append,
-                &self.module.uniform_bindings,
-                b,
-            ),
-            Value::Storage(b) => self.scf.add_bind_storage_ptr(
-                self.dst_block,
-                BlockPosition::Append,
-                &self.module.storage_bindings,
-                b,
-            ),
-            Value::Workgroup(b) => self.scf.add_bind_workgroup_ptr(
-                self.dst_block,
-                BlockPosition::Append,
-                &self.module.workgroup_bindings,
-                b,
-            ),
-            Value::Constant(c) => self.scf.add_bind_constant_ptr(
-                self.dst_block,
-                BlockPosition::Append,
-                &self.module.constants,
-                c,
-            ),
-            Value::Local(_) => panic!("cannot create pointer to a local value"),
-        };
-
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn prepare_bind_intrinsic<T>(
@@ -487,7 +422,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         let arguments = node_data
             .value_inputs()
             .iter()
-            .map(|i| self.value_mapping.mapping(i.origin).expect_local())
+            .map(|i| self.value_mapping.mapping(i.origin))
             .collect();
 
         PreparedBindIntrinsic {
@@ -503,19 +438,13 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             .scf
             .add_alloca(self.dst_block, BlockPosition::Append, data.ty());
 
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_op_store(&mut self, node: rvsdg::Node) {
         let data = self.rvsdg[node].expect_op_store();
-        let ptr = self
-            .value_mapping
-            .mapping(data.ptr_input().origin)
-            .expect_local();
-        let value = self
-            .value_mapping
-            .mapping(data.value_input().origin)
-            .expect_local();
+        let ptr = self.value_mapping.mapping(data.ptr_input().origin);
+        let value = self.value_mapping.mapping(data.value_input().origin);
 
         self.scf
             .add_store(self.dst_block, BlockPosition::Append, ptr, value);
@@ -527,12 +456,9 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         // `visit_switch_node`. We therefore simply forward the output mapping to the input mapping.
 
         let data = self.rvsdg[node].expect_op_bool_to_branch_selector();
-        let binding = self
-            .value_mapping
-            .mapping(data.value_input().origin)
-            .expect_local();
+        let binding = self.value_mapping.mapping(data.value_input().origin);
 
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_op_case_to_branch_selector(&mut self, node: rvsdg::Node) {
@@ -542,12 +468,9 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         // mapping to the input mapping.
 
         let data = self.rvsdg[node].expect_op_case_to_branch_selector();
-        let binding = self
-            .value_mapping
-            .mapping(data.value_input().origin)
-            .expect_local();
+        let binding = self.value_mapping.mapping(data.value_input().origin);
 
-        self.value_mapping.map_output(node, 0, binding.into());
+        self.value_mapping.map_output(node, 0, binding);
     }
 
     fn visit_sub_region(
@@ -634,7 +557,7 @@ impl<'a, 'b> ScfBuilder<'a, 'b> {
         for (i, binding) in arg_bindings.into_iter().enumerate() {
             let arg = arg_start + i;
 
-            argument_mapping.map_argument(arg as u32, binding.into());
+            argument_mapping.map_argument(arg as u32, binding);
         }
 
         // Set up value mappings for the global (uniform/storage/workgroup/constant) value
@@ -650,21 +573,35 @@ impl<'a, 'b> ScfBuilder<'a, 'b> {
 
             use crate::rvsdg::NodeKind::*;
 
-            match self.rvsdg[dep_node].kind() {
-                UniformBinding(n) => {
-                    argument_mapping.map_argument(arg as u32, Value::Uniform(n.binding()));
-                }
-                StorageBinding(n) => {
-                    argument_mapping.map_argument(arg as u32, Value::Storage(n.binding()));
-                }
-                WorkgroupBinding(n) => {
-                    argument_mapping.map_argument(arg as u32, Value::Workgroup(n.binding()));
-                }
-                Constant(n) => {
-                    argument_mapping.map_argument(arg as u32, Value::Constant(n.constant()));
-                }
-                _ => (),
-            }
+            let (_, binding) = match self.rvsdg[dep_node].kind() {
+                UniformBinding(n) => self.scf.add_bind_uniform_ptr(
+                    body_block,
+                    BlockPosition::Append,
+                    &self.module.uniform_bindings,
+                    n.binding(),
+                ),
+                StorageBinding(n) => self.scf.add_bind_storage_ptr(
+                    body_block,
+                    BlockPosition::Append,
+                    &self.module.storage_bindings,
+                    n.binding(),
+                ),
+                WorkgroupBinding(n) => self.scf.add_bind_workgroup_ptr(
+                    body_block,
+                    BlockPosition::Append,
+                    &self.module.workgroup_bindings,
+                    n.binding(),
+                ),
+                Constant(n) => self.scf.add_bind_constant_ptr(
+                    body_block,
+                    BlockPosition::Append,
+                    &self.module.constants,
+                    n.constant(),
+                ),
+                _ => continue,
+            };
+
+            argument_mapping.map_argument(arg as u32, binding);
         }
 
         let value_mapping = visit_region(
@@ -683,7 +620,7 @@ impl<'a, 'b> ScfBuilder<'a, 'b> {
         );
 
         if let Some(result) = self.rvsdg[body_region].value_results().first() {
-            let value = value_mapping.mapping(result.origin).expect_local();
+            let value = value_mapping.mapping(result.origin);
 
             self.scf
                 .add_return(body_block, BlockPosition::Append, Some(value));

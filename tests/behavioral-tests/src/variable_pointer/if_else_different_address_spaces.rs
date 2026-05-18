@@ -1,4 +1,4 @@
-#![cfg(feature = "test_variable_pointer_if_else")]
+#![cfg(feature = "test_variable_pointer_if_else_different_address_spaces")]
 
 use std::error::Error;
 
@@ -7,27 +7,19 @@ use empa::abi;
 use futures::FutureExt;
 use risl::gpu;
 
-#[derive(Clone, Copy, abi::Sized)]
-#[gpu]
-struct Values {
-    a: u32,
-    b: u32,
-}
-
 test_runner! {
     name: Runner,
     inputs: {
         CONDITION: u32 as Uniform<u32>,
-        VALUES: Values as Storage<Values>,
+        A: u32 as Uniform<u32>,
+        B: u32 as Storage<u32>,
     },
     result: u32,
     shader: {
-        let values = VALUES.as_ref();
-
         let value = if *CONDITION == 1 {
-            &values.a
+            A.as_ref()
         } else {
-            &values.b
+            B.as_ref()
         };
 
         unsafe {
@@ -39,8 +31,8 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    assert_eq!(runner.run(0, Values { a: 0, b: 1 }).await?, 1);
-    assert_eq!(runner.run(1, Values { a: 0, b: 1 }).await?, 0);
+    assert_eq!(runner.run(0, 0, 1).await?, 1);
+    assert_eq!(runner.run(1, 0, 1).await?, 0);
 
     Ok(())
 }

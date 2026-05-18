@@ -454,10 +454,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         // We need a pointer for OpLoad.
-        let const_val = rvsdg.add_const_u32(region, 0);
-        let const_ptr =
-            rvsdg.add_const_ptr(region, TY_U32, ValueInput::output(TY_U32, const_val, 0));
-        let val_input = ValueInput::output(TY_PTR_U32, const_ptr, 0);
+        let val_alloca = rvsdg.add_op_alloca(region, TY_U32);
+        let val_input = ValueInput::output(TY_PTR_U32, val_alloca, 0);
 
         // Create a loop with 1 loop-value. Link the loop into the function's state chain.
         let (loop_node, loop_region) =
@@ -565,10 +563,8 @@ mod tests {
         let mut rvsdg = Rvsdg::new(module.ty.clone());
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
-        let const_val = rvsdg.add_const_u32(region, 0);
-        let const_ptr =
-            rvsdg.add_const_ptr(region, TY_U32, ValueInput::output(TY_U32, const_val, 0));
-        let val_input = ValueInput::output(TY_PTR_U32, const_ptr, 0);
+        let val_alloca = rvsdg.add_op_alloca(region, TY_U32);
+        let val_input = ValueInput::output(TY_PTR_U32, val_alloca, 0);
 
         // Create a loop with 1 loop-value, part of the state chain.
         let (loop_node, loop_region) =

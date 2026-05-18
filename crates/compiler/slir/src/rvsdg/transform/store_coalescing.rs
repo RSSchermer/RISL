@@ -211,8 +211,7 @@ impl ReverseValueFlowVisitor for PointerAnalyzer {
             Simple(OpFieldPtr(_))
             | Simple(OpElementPtr(_))
             | Simple(OpVariantPtr(_))
-            | Simple(OpOffsetSlice(_))
-            | Simple(ConstPtr(_)) => {
+            | Simple(OpOffsetSlice(_)) => {
                 // Only visit the pointer input.
                 visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
             }

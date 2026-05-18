@@ -512,12 +512,12 @@ impl<'a> RegionBuilder<'a> {
             ),
             InlineConst::Bool(v) => (TY_BOOL, self.rvsdg.add_const_bool(self.region, v)),
             InlineConst::Ptr(ptr) => {
-                let base = self.resolve_root_identifier(ptr.root_identifier());
-                let ty = ptr.ty();
-                let pointee_ty = self.module.ty.kind(ty).expect_ptr();
-                let node = self.rvsdg.add_const_ptr(self.region, pointee_ty, base);
+                // We don't add Ptr nodes to the RVSDG. Instead, the root-identifiers are function
+                // node dependency inputs. These are already made available as pointer-type region
+                // arguments in the function node's body region, so we can simply resolve these
+                // values here.
 
-                (ty, node)
+                return self.resolve_root_identifier(ptr.root_identifier());
             }
         };
 

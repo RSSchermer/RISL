@@ -5,7 +5,7 @@ use crate::cfg::{
     Assign, Bind, Cfg, InlineConst, IntrinsicOp, OpCall, RootIdentifier, StatementData,
     Uninitialized, Value,
 };
-use crate::ty::Type;
+use crate::ty::{Type, TypeKind};
 use crate::{Constant, Function, Module, StorageBinding, UniformBinding, WorkgroupBinding};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -21,10 +21,23 @@ impl Item {
     pub fn ty(&self, module: &Module) -> Type {
         match *self {
             Item::Function(f) => module.fn_sigs[f].ty,
-            Item::UniformBinding(b) => module.uniform_bindings[b].ty,
-            Item::StorageBinding(b) => module.storage_bindings[b].ty,
-            Item::WorkgroupBinding(b) => module.workgroup_bindings[b].ty,
-            Item::Constant(c) => module.constants[c].ty(),
+
+            // Note that for UniformBindings, StorageBindings, WorkgroupBindings and Constants, we
+            // record the dependencies as pointer types. The CFG IR only allows those item kinds to
+            // be interacted with behind pointers via InlineConst::Ptr values. We can therefore opt
+            // to add these directly as pointer-type dependency arguments to RVSDG function bodies,
+            // instead of needing an additional RVSDG node kind to create a pointer. This simplifies
+            // not just RVSDG construction but also RVSDG transformations.
+            Item::UniformBinding(b) => module
+                .ty
+                .register(TypeKind::Ptr(module.uniform_bindings[b].ty)),
+            Item::StorageBinding(b) => module
+                .ty
+                .register(TypeKind::Ptr(module.storage_bindings[b].ty)),
+            Item::WorkgroupBinding(b) => module
+                .ty
+                .register(TypeKind::Ptr(module.workgroup_bindings[b].ty)),
+            Item::Constant(c) => module.ty.register(TypeKind::Ptr(module.constants[c].ty())),
         }
     }
 }

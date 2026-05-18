@@ -226,7 +226,7 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
             Simple(OpOffsetSlice(_) | ValueProxy(_)) => {
                 visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
             }
-            Simple(ConstPtr(_) | ConstFallback(_)) => (),
+            Simple(ConstFallback(_)) => (),
             _ => unreachable!("node kind cannot output a pointer"),
         }
     }
@@ -330,7 +330,7 @@ struct LoopResultInitJob {
 ///
 /// We can emulate a variable pointer if we can reconstruct the entire access chain and branching
 /// history, all the way back to the root-identifier pointer(s) (the output of an [OpAlloca] node
-/// or a [ConstPtr] node), see `variable_pointer_emulation.rs` for details. However, we cannot
+/// or a region argument), see `variable_pointer_emulation.rs` for details. However, we cannot
 /// reliably do this if the pointer was the output of an [OpLoad] node. Fortunately, we don't allow
 /// uniform, storage or workgroup values to be pointer-typed or contain pointer-typed fields at any
 /// level. That means [OpLoad] operations that produce pointer-typed outputs can only operate on

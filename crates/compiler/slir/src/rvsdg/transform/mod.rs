@@ -2,7 +2,6 @@ pub mod branch_selector_normalization;
 pub mod common_node_elimination;
 pub mod common_value_elimination;
 pub mod conditional_ub_elimination;
-pub mod const_ptr_pull;
 pub mod const_switch_inlining;
 pub mod dead_loop_value_normalization;
 pub mod dead_value_elimination;
@@ -36,7 +35,6 @@ use crate::rvsdg::Rvsdg;
 
 pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
-    const_ptr_pull::transform_entry_points(module, rvsdg);
     switch_passthrough_elimination::transform_entry_points(module, rvsdg);
     loop_passthrough_elimination::transform_entry_points(module, rvsdg);
     offset_slice_elaboration::transform_entry_points(module, rvsdg);

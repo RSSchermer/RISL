@@ -153,7 +153,6 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
             Simple(ConstF32(_)) => self.replicate_const_f32_node(node),
             Simple(ConstBool(_)) => self.replicate_const_bool_node(node),
             Simple(ConstPredicate(_)) => self.replicate_const_predicate_node(node),
-            Simple(ConstPtr(_)) => self.replicate_const_ptr_node(node),
             Simple(ConstFallback(_)) => self.replicate_const_fallback_node(node),
             Simple(OpAlloca(op)) => self
                 .prepare_replicate_intrinsic_node(op)
@@ -457,14 +456,6 @@ impl<'a, 'b> RegionReplicator<'a, 'b> {
         let value = self.rvsdg[node].expect_const_predicate().value();
 
         self.rvsdg.add_const_predicate(self.dst_region, value)
-    }
-
-    fn replicate_const_ptr_node(&mut self, node: Node) -> Node {
-        let data = self.rvsdg[node].expect_const_ptr();
-        let pointee_ty = data.pointee_ty();
-        let base = self.mapped_value_input(data.base());
-
-        self.rvsdg.add_const_ptr(self.dst_region, pointee_ty, base)
     }
 
     fn replicate_const_fallback_node(&mut self, node: Node) -> Node {

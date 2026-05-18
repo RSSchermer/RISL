@@ -975,7 +975,6 @@ impl NodeLayout {
                 SimpleNode::ConstPredicate(v) => {
                     NodeContent::PlainText(v.value().to_string().into())
                 }
-                SimpleNode::ConstPtr(_) => NodeContent::PlainText("ptr".into()),
                 SimpleNode::ConstFallback(_) => NodeContent::PlainText("fallback".into()),
                 SimpleNode::OpAlloca(_) => NodeContent::PlainText("alloca".into()),
                 SimpleNode::OpLoad(_) => NodeContent::PlainText("load".into()),

@@ -988,11 +988,7 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
                     GlobalAlloc::TypeId { .. } => todo!(),
                 };
 
-                slir::cfg::InlineConst::Ptr(slir::cfg::ConstPtr::new(
-                    &*self.module.borrow(),
-                    &*self.cfg.borrow(),
-                    ident,
-                ))
+                slir::cfg::InlineConst::Ptr(slir::cfg::ConstPtr::new(&*self.module.borrow(), ident))
             }
         };
 

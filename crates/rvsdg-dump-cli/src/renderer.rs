@@ -362,7 +362,6 @@ impl<'a> Renderer<'a> {
             SimpleNode::ConstF32(n) => self.write_const_f32(writer, node, n),
             SimpleNode::ConstBool(n) => self.write_const_bool(writer, node, n),
             SimpleNode::ConstPredicate(n) => self.write_const_predicate(writer, node, n),
-            SimpleNode::ConstPtr(n) => self.write_const_ptr(writer, node, n),
             SimpleNode::ConstFallback(_) => self.write_node_common(writer, node, "ConstFallback"),
             SimpleNode::OpAlloca(n) => self.write_op_alloca(writer, node, n),
             SimpleNode::OpLoad(_) => self.write_node_common(writer, node, "OpLoad"),
@@ -501,20 +500,6 @@ impl<'a> Renderer<'a> {
         write!(writer, "[")?;
         self.write_node_id(writer, node)?;
         write!(writer, "] ConstPredicate{{{}}}", n.value())?;
-        self.write_node_io_signature(writer, node)
-    }
-
-    fn write_const_ptr<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-        node: Node,
-        n: &slir::rvsdg::ConstPtr,
-    ) -> std::io::Result<()> {
-        write!(writer, "[")?;
-        self.write_node_id(writer, node)?;
-        write!(writer, "] ConstPtr{{pointee_ty: ")?;
-        self.write_type(writer, n.pointee_ty())?;
-        write!(writer, "}}")?;
         self.write_node_io_signature(writer, node)
     }
 

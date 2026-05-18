@@ -536,6 +536,16 @@ impl NodeData {
         }
     }
 
+    pub fn is_global_resource(&self) -> bool {
+        matches!(
+            self.kind,
+            NodeKind::UniformBinding(_)
+                | NodeKind::StorageBinding(_)
+                | NodeKind::WorkgroupBinding(_)
+                | NodeKind::Constant(_)
+        )
+    }
+
     pub fn is_simple(&self) -> bool {
         matches!(self.kind, NodeKind::Simple(_))
     }
@@ -594,7 +604,6 @@ impl NodeData {
         ConstF32 is_const_f32 expect_const_f32 "a `f32` constant",
         ConstBool is_const_bool expect_const_bool "a `bool` constant",
         ConstPredicate is_const_predicate expect_const_predicate "a `predicate` constant",
-        ConstPtr is_const_ptr expect_const_ptr "a pointer constant",
         ConstFallback is_const_fallback expect_const_fallback "a fallback-value constant",
         OpAlloca is_op_alloca expect_op_alloca "an `alloca` operation",
         OpLoad is_op_load expect_op_load "a `load` operation",
@@ -1873,49 +1882,6 @@ gen_const_nodes! {
     ConstPredicate: u32,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
-pub struct ConstPtr {
-    base: ValueInput,
-    output: ValueOutput,
-    pointee_ty: Type,
-}
-
-impl ConstPtr {
-    pub fn base(&self) -> &ValueInput {
-        &self.base
-    }
-
-    pub fn pointee_ty(&self) -> Type {
-        self.pointee_ty
-    }
-}
-
-impl Connectivity for ConstPtr {
-    fn value_inputs(&self) -> &[ValueInput] {
-        slice::from_ref(&self.base)
-    }
-
-    fn value_inputs_mut(&mut self) -> &mut [ValueInput] {
-        slice::from_mut(&mut self.base)
-    }
-
-    fn value_outputs(&self) -> &[ValueOutput] {
-        slice::from_ref(&self.output)
-    }
-
-    fn value_outputs_mut(&mut self) -> &mut [ValueOutput] {
-        slice::from_mut(&mut self.output)
-    }
-
-    fn state(&self) -> Option<&State> {
-        None
-    }
-
-    fn state_mut(&mut self) -> Option<&mut State> {
-        None
-    }
-}
-
 /// Represents a "fallback" value of a given type that is used when a determinate (initialized)
 /// value is unknown.
 ///
@@ -2151,7 +2117,6 @@ gen_simple_node! {
     ConstF32,
     ConstBool,
     ConstPredicate,
-    ConstPtr,
     ConstFallback,
     OpAlloca,
     OpLoad,
@@ -2532,7 +2497,11 @@ impl Rvsdg {
             .iter()
             .copied()
             .map(|dep| {
-                let ty = self[dep].value_outputs()[0].ty;
+                let mut ty = self[dep].value_outputs()[0].ty;
+
+                if self.nodes[dep].is_global_resource() {
+                    ty = self.ty.register(TypeKind::Ptr(ty));
+                }
 
                 ValueInput {
                     ty,
@@ -3214,27 +3183,6 @@ impl Rvsdg {
         });
 
         self.regions[region].nodes.insert(node);
-
-        node
-    }
-
-    pub fn add_const_ptr(&mut self, region: Region, pointee_ty: Type, base: ValueInput) -> Node {
-        let ptr_ty = self.ty.register(TypeKind::Ptr(pointee_ty));
-
-        let node = self.nodes.insert(NodeData {
-            kind: NodeKind::Simple(
-                ConstPtr {
-                    base,
-                    output: ValueOutput::new(ptr_ty),
-                    pointee_ty,
-                }
-                .into(),
-            ),
-            region: Some(region),
-        });
-
-        self.regions[region].nodes.insert(node);
-        self.connect_node_value_inputs(node);
 
         node
     }
@@ -4202,7 +4150,12 @@ impl Rvsdg {
     /// list, and all call arguments are shifted to the right; the RVSDG is updated so that all
     /// users of the body region's call arguments remain valid.
     pub fn add_function_dependency(&mut self, function_node: Node, dependency: Node) -> u32 {
-        let ty = self[dependency].value_outputs()[0].ty;
+        let mut ty = self[dependency].value_outputs()[0].ty;
+
+        if self.nodes[dependency].is_global_resource() {
+            ty = self.ty.register(TypeKind::Ptr(ty));
+        }
+
         let fn_data = self.nodes[function_node].expect_function_mut();
 
         for (i, dep_input) in fn_data.dependencies().iter().enumerate() {

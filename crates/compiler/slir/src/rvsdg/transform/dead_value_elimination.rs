@@ -45,6 +45,12 @@ impl DeadValueEliminator {
                 process_node(rvsdg, node, &mut self.next_candidates, false);
             }
         }
+
+        let owner = rvsdg[region].owner();
+
+        if rvsdg[owner].is_function() {
+            rvsdg.remove_unused_dependencies(owner);
+        }
     }
 }
 

@@ -15,5 +15,5 @@ mod iter;
 mod num;
 mod ops;
 mod slice;
-mod variable_pointer_if_else;
+mod variable_pointer;
 mod while_loop;

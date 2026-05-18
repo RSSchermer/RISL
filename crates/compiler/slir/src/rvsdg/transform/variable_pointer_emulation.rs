@@ -471,7 +471,6 @@ impl EmulationContext {
                 Simple(OpFieldPtr(_)) => self.create_field_ptr_info(rvsdg, producer),
                 Simple(OpElementPtr(_)) => self.create_element_ptr_info(rvsdg, producer),
                 Simple(OpAlloca(_)) => self.create_alloca_info(rvsdg, producer),
-                Simple(ConstPtr(_)) => self.create_const_ptr_info(rvsdg, producer),
                 Simple(ConstFallback(_)) => self.create_fallback_info(rvsdg, producer),
                 Simple(OpOffsetSlice(_)) => self.create_offset_slice_info(rvsdg, producer),
                 Simple(OpLoad(_)) => panic!(
@@ -926,21 +925,6 @@ impl EmulationContext {
 
         PointerEmulationInfo {
             pointer_ty: rvsdg[op_alloca].expect_op_alloca().value_output().ty,
-            emulation_root: emulation_root.into(),
-        }
-    }
-
-    fn create_const_ptr_info(&mut self, rvsdg: &Rvsdg, const_ptr: Node) -> PointerEmulationInfo {
-        let emulation_root = LeafNode {
-            root_pointer: ValueOrigin::Output {
-                producer: const_ptr,
-                output: 0,
-            },
-            access_chain: vec![],
-        };
-
-        PointerEmulationInfo {
-            pointer_ty: rvsdg[const_ptr].value_outputs()[0].ty,
             emulation_root: emulation_root.into(),
         }
     }

@@ -169,7 +169,18 @@ impl PtrOffsetReplacer {
         match rvsdg[owner].kind() {
             Switch(_) => self.offset_for_switch_branch_argument(rvsdg, region, ptr_argument),
             Loop(_) => self.offset_for_loop_region_argument(rvsdg, owner, ptr_argument),
-            Function(_) => panic!("cannot track offset through function calls; inline first"),
+            Function(n) => {
+                // We cannot track offset through function call arguments. We do allow pointers to
+                // originate from function dependency arguments (to global bindings and global
+                // constants); in this case we know the offset is always zero.
+
+                assert!(
+                    ptr_argument < n.dependencies().len() as u32,
+                    "cannot track offset through function call arguments; inline first"
+                );
+
+                PtrOffset::Zero
+            }
             _ => unreachable!("node kind cannot own a region"),
         }
     }
@@ -184,7 +195,7 @@ impl PtrOffsetReplacer {
             Simple(OpOffsetSlice(_)) => self.offset_for_op_offset_slice(rvsdg, node),
             Simple(
                 OpAlloca(_) | OpFieldPtr(_) | OpElementPtr(_) | OpVariantPtr(_) | OpExtractField(_)
-                | OpExtractElement(_) | ConstPtr(_) | ConstFallback(_),
+                | OpExtractElement(_) | ConstFallback(_),
             ) => PtrOffset::Zero,
             _ => panic!("unsupported node kind"),
         }

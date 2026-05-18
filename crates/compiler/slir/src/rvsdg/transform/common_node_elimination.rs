@@ -15,7 +15,6 @@ enum SimpleNodeMetadata {
     ConstF32(u32), // Use u32 bits for Hash/Eq
     ConstBool(bool),
     ConstPredicate(u32),
-    ConstPtr(Type),
     ConstFallback(Type),
     OpExtractField(u32),
     OpExtractElement,
@@ -84,7 +83,6 @@ impl SimpleNodeMetadata {
             SimpleNode::ConstF32(n) => SimpleNodeMetadata::ConstF32(n.value().to_bits()),
             SimpleNode::ConstBool(n) => SimpleNodeMetadata::ConstBool(n.value()),
             SimpleNode::ConstPredicate(n) => SimpleNodeMetadata::ConstPredicate(n.value()),
-            SimpleNode::ConstPtr(n) => SimpleNodeMetadata::ConstPtr(n.pointee_ty()),
             SimpleNode::ConstFallback(n) => SimpleNodeMetadata::ConstFallback(n.ty()),
             SimpleNode::OpExtractField(n) => SimpleNodeMetadata::OpExtractField(n.field_index()),
             SimpleNode::OpExtractElement(_) => SimpleNodeMetadata::OpExtractElement,
