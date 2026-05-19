@@ -143,11 +143,11 @@ mod tests {
         let expected = "\
 [Node(3v1)] test_func(arg0: u32, arg1: u32) -> u32
   Dependencies:
-    - Node(1v1) -> u32
-    - Node(2v1) -> u32
+    - Node(1v1) -> ptr<u32>
+    - Node(2v1) -> ptr<u32>
 
   Body Region (Region(2v1)):
-    Arguments: [Region(2v1)a0: u32, Region(2v1)a1: u32, Region(2v1)a2: u32, Region(2v1)a3: u32, Region(2v1)s: State]
+    Arguments: [Region(2v1)a0: ptr<u32>, Region(2v1)a1: ptr<u32>, Region(2v1)a2: u32, Region(2v1)a3: u32, Region(2v1)s: State]
     [Node(4v1)] OpBinary{operator: +}(Region(2v1)a2, Region(2v1)a3) -> Node(4v1)e0 : u32
     Results: [Node(4v1)e0, Region(2v1)s]
 ";

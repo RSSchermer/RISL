@@ -100,7 +100,7 @@ mod tests {
         let output = String::from_utf8(writer).unwrap();
         let expected = "\
 Region (Region(2v1)):
-  Arguments: [Region(2v1)a0: u32, Region(2v1)a1: ptr<u32>, Region(2v1)s: State]
+  Arguments: [Region(2v1)a0: ptr<u32>, Region(2v1)a1: ptr<u32>, Region(2v1)s: State]
   [Node(3v1)] OpLoad(Region(2v1)a1) (state: Arg) -> Node(3v1)e0 : u32, Node(3v1)s : State
   [Node(4v1)] OpStore(Region(2v1)a1, Node(3v1)e0) (state: Node(3v1)) -> Node(4v1)s : State
   Results: [Node(3v1)e0, Node(4v1)s]
@@ -233,7 +233,7 @@ Region (Region(2v1)):
 
         let expected = "\
 Region (Region(2v1)):
-  Arguments: [Region(2v1)a0: predicate, Region(2v1)a1: u32, Region(2v1)s: State]
+  Arguments: [Region(2v1)a0: ptr<predicate>, Region(2v1)a1: ptr<u32>, Region(2v1)s: State]
   [Node(4v1)] Switch(Region(2v1)a0, Region(2v1)a1) -> Node(4v1)e0 : u32
     Branch 0 (Region(3v1)):
       Arguments: [Region(3v1)a0: u32, Region(3v1)s: State]
