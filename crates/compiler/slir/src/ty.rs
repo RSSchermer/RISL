@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Deref, Range, RangeInclusive};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::{fmt, mem};
 
@@ -233,6 +233,110 @@ pub struct Struct {
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct Enum {
     pub variants: Vec<Type>,
+    pub tag_primitive: TagPrimitive,
+    pub tag_encoding: TagEncoding,
+    pub tag_offset: u64,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum TagEncoding {
+    /// The tag value directly represents the discriminant of the active variant.
+    ///
+    /// This is the "standard" enum representation where a dedicated field (the tag) stores an
+    /// integer value identifying the variant. While this value often matches the variant index, it
+    /// may be explicitly assigned by the user (e.g., `enum E { A = 10 }`).
+    ///
+    /// To resolve the active variant:
+    ///
+    /// 1. Read the discriminant value `v` from the [Enum::tag_offset] as an integer of
+    ///    [Enum::tag_primitive] type zero-extended to a `u128`.
+    /// 2. Look up `v` in the `discriminants` vector.
+    /// 3. The index `i` such that `discriminants[i] == v` is the active variant index. Note that
+    ///    this should only be true for one element in the `discriminants` vector, otherwise the
+    ///    enum encoding is invalid (UB).
+    Direct {
+        /// The discriminant value for each variant.
+        ///
+        /// The length of this vector must match the length of the [Enum::variants] vector, and it
+        /// must not contain duplicate values.
+        discriminants: Vec<u128>,
+    },
+
+    /// The tag is a field of one of the variants (the "niche" field), and its value is used to
+    /// distinguish between the "untagged" variant and one or more "niche" variants.
+    ///
+    /// This encoding is a common Rust optimization used when a field in one variant (the
+    /// `untagged_variant`) has "invalid" bit patterns (niches) that are not used by the field's
+    /// type. These invalid patterns are repurposed to represent other variants (the
+    /// `niche_variants`).
+    ///
+    /// For enums using niche encoding, the discriminant of each variant is always equal to the
+    /// variant index.
+    ///
+    /// Example: `Option<&T>`
+    /// - `&T` is a non-null reference, so the bit pattern `0` (null) is "invalid".
+    /// - `Some(&T)` is the `untagged_variant` (e.g., index 1). It owns the memory.
+    /// - `None` is a niche variant (e.g., index 0).
+    /// - If the value at `tag_offset` is non-zero, it's `Some`. If it's zero, it's `None`.
+    ///
+    /// To resolve the active variant disciminant/index:
+    ///
+    /// 1. Read the value `v` from the [Enum::tag_offset] as an integer of [Enum::tag_primitive]
+    ///    type zero-extended to a `u128`.
+    /// 2. If `v` is within `valid_range`, the active variant is `untagged_variant`.
+    /// 3. Otherwise, calculate the niche index: `niche_index = v.wrapping_sub(niche_start)`.
+    /// 4. If `niche_index` is less than the count of variants in `niche_variants`:
+    ///    The active variant is `niche_variants.start() + (niche_index as usize)`.
+    ///    If this results in the `untagged_variant` index, the tag is invalid (UB).
+    /// 5. Otherwise, the result is undefined (UB).
+    ///
+    /// Note that `niche_variants` is a contiguous range of indices. It is possible for
+    /// `untagged_variant` index to fall within this range; if it does, the niche value that would
+    /// correspond to it is simply never used by the compiler.
+    Niche {
+        /// The range of bit patterns that are considered valid for the niche field of the
+        /// `untagged_variant`.
+        ///
+        /// Any value `V` that falls within this range indicates that the `untagged_variant` is
+        /// active. Values outside this range are niches and represent one of the `niche_variants`.
+        valid_range: Range<u128>,
+
+        /// The index of the variant that is active when the tag value represents a valid
+        /// value for the niche field.
+        untagged_variant: usize,
+
+        /// The range of variant indices that are encoded as niches.
+        ///
+        /// These indices are represented by bit patterns that are outside the valid range of the
+        /// niche field in the `untagged_variant`.
+        niche_variants: RangeInclusive<usize>,
+
+        /// The bit pattern value that corresponds to the first variant in `niche_variants`.
+        ///
+        /// Niche variants are mapped linearly from this starting value. For a tag value `v`,
+        /// the corresponding variant index is
+        /// `v.wrapping_sub(niche_start) + niche_variants.start()`, provided the result is within
+        /// the `niche_variants` range.
+        niche_start: u128,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum TagPrimitive {
+    Int {
+        length: TagIntegerLength,
+        signed: bool,
+    },
+    Pointer,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum TagIntegerLength {
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]

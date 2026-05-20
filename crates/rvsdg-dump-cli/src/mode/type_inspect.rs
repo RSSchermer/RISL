@@ -23,7 +23,10 @@ pub fn render_type_inspect_mode<W: Write>(
 #[cfg(test)]
 mod tests {
     use slir::rvsdg::Rvsdg;
-    use slir::ty::{Enum, Struct, StructField, TY_F32, TY_U32, TypeKind, TypeRegistry};
+    use slir::ty::{
+        Enum, Struct, StructField, TY_F32, TY_U32, TagEncoding, TagIntegerLength, TagPrimitive,
+        TypeKind, TypeRegistry,
+    };
 
     use super::*;
     use crate::renderer::Renderer;
@@ -67,6 +70,14 @@ struct(0):
         let registry = TypeRegistry::default();
         let enum_ty = registry.register(TypeKind::Enum(Enum {
             variants: vec![TY_U32, TY_F32],
+            tag_primitive: TagPrimitive::Int {
+                length: TagIntegerLength::I32,
+                signed: false,
+            },
+            tag_encoding: TagEncoding::Direct {
+                discriminants: vec![0, 1],
+            },
+            tag_offset: 0,
         }));
 
         let rvsdg = Rvsdg::new(registry.into());

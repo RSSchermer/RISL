@@ -746,7 +746,10 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueOutput};
-    use crate::ty::{Enum, Struct, StructField, TY_DUMMY, TY_PREDICATE};
+    use crate::ty::{
+        Enum, Struct, StructField, TY_DUMMY, TY_PREDICATE, TagEncoding, TagIntegerLength,
+        TagPrimitive,
+    };
     use crate::{FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
@@ -794,6 +797,14 @@ mod tests {
 
         let enum_ty = module.ty.register(TypeKind::Enum(Enum {
             variants: vec![variant_0_ty, variant_1_ty],
+            tag_primitive: TagPrimitive::Int {
+                length: TagIntegerLength::I32,
+                signed: false,
+            },
+            tag_encoding: TagEncoding::Direct {
+                discriminants: vec![0, 1],
+            },
+            tag_offset: 0,
         }));
         let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
 
@@ -1342,6 +1353,14 @@ mod tests {
 
         let enum_ty = module.ty.register(TypeKind::Enum(Enum {
             variants: vec![variant_0_ty, variant_1_ty],
+            tag_primitive: TagPrimitive::Int {
+                length: TagIntegerLength::I32,
+                signed: false,
+            },
+            tag_encoding: TagEncoding::Direct {
+                discriminants: vec![0, 1],
+            },
+            tag_offset: 0,
         }));
         let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
 

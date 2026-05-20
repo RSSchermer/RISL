@@ -1,11 +1,10 @@
 use std::cell::RefCell;
-use std::io;
 
 use rustc_hash::FxHashMap;
 use rustc_middle::bug;
 use rustc_public::abi::{
-    FieldsShape, FloatLength, FnAbi, IntegerLength, PassMode, Primitive, ValueAbi, VariantsShape,
-    WrappingRange,
+    FieldsShape, FloatLength, FnAbi, IntegerLength, PassMode, Primitive, TagEncoding, ValueAbi,
+    VariantsShape, WrappingRange,
 };
 use rustc_public::mir::alloc::GlobalAlloc;
 use rustc_public::mir::mono::{Instance, StaticDef};
@@ -95,6 +94,55 @@ fn resource_binding_to_slir(resource_binding: &ResourceBinding) -> slir::Resourc
     slir::ResourceBinding {
         group: resource_binding.group,
         binding: resource_binding.binding,
+    }
+}
+
+fn tag_primitive_to_slir(primitive: &Primitive) -> slir::ty::TagPrimitive {
+    match primitive {
+        Primitive::Int { length, signed } => slir::ty::TagPrimitive::Int {
+            length: tag_length_to_slir(length),
+            signed: *signed,
+        },
+        Primitive::Pointer(_) => slir::ty::TagPrimitive::Pointer,
+        _ => bug!(
+            "expected enum tag to be an integer or pointer primitive, got {:?}",
+            primitive
+        ),
+    }
+}
+
+fn tag_length_to_slir(length: &IntegerLength) -> slir::ty::TagIntegerLength {
+    match length {
+        IntegerLength::I8 => slir::ty::TagIntegerLength::I8,
+        IntegerLength::I16 => slir::ty::TagIntegerLength::I16,
+        IntegerLength::I32 => slir::ty::TagIntegerLength::I32,
+        IntegerLength::I64 => slir::ty::TagIntegerLength::I64,
+        IntegerLength::I128 => slir::ty::TagIntegerLength::I128,
+    }
+}
+
+fn tag_encoding_to_slir(
+    tag: &abi::Scalar,
+    tag_encoding: &TagEncoding,
+    discriminants: Vec<u128>,
+) -> slir::ty::TagEncoding {
+    match tag_encoding {
+        TagEncoding::Direct => slir::ty::TagEncoding::Direct { discriminants },
+        TagEncoding::Niche {
+            untagged_variant,
+            niche_variants,
+            niche_start,
+        } => {
+            let abi::Scalar::Initialized { valid_range, .. } = tag else {
+                bug!("expected initialized scalar for niche encoding")
+            };
+            slir::ty::TagEncoding::Niche {
+                untagged_variant: untagged_variant.to_index(),
+                niche_variants: niche_variants.start().to_index()..=niche_variants.end().to_index(),
+                niche_start: *niche_start,
+                valid_range: valid_range.start..(valid_range.end + 1),
+            }
+        }
     }
 }
 
@@ -582,7 +630,20 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         variant_shapes: &[abi::LayoutShape],
         layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        let variants = variant_shapes
+        let VariantsShape::Multiple {
+            tag,
+            tag_encoding,
+            tag_field,
+            ..
+        } = &layout.layout.variants
+        else {
+            bug!(
+                "expected enum with multiple variants, got {:?}",
+                layout.layout.variants
+            );
+        };
+
+        let variants: Vec<slir::ty::Type> = variant_shapes
             .iter()
             .map(|shape| {
                 let variant_layout = TyAndLayout {
@@ -598,11 +659,36 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             })
             .collect();
 
-        let ty = self
-            .module
-            .borrow()
-            .ty
-            .register(slir::ty::Enum { variants }.into());
+        let FieldsShape::Arbitrary { offsets, .. } = &layout.layout.fields else {
+            bug!(
+                "expected enum fields to be arbitrary, got {:?}",
+                layout.layout.fields
+            )
+        };
+        let tag_offset = offsets[*tag_field].bytes() as u64;
+
+        let tag_primitive = match tag {
+            abi::Scalar::Initialized { value, .. } => tag_primitive_to_slir(value),
+            abi::Scalar::Union { value } => tag_primitive_to_slir(value),
+        };
+
+        let adt_def = match layout.ty.kind() {
+            TyKind::RigidTy(RigidTy::Adt(def, _)) => def,
+            _ => bug!("expected enum ADT definition"),
+        };
+        let discriminants: Vec<u128> = (0..variants.len())
+            .map(|i| adt_def.discriminant_for_variant(VariantIdx::to_val(i)).val)
+            .collect();
+
+        let ty = self.module.borrow().ty.register(
+            slir::ty::Enum {
+                variants,
+                tag_primitive,
+                tag_encoding: tag_encoding_to_slir(tag, tag_encoding, discriminants),
+                tag_offset,
+            }
+            .into(),
+        );
 
         self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
