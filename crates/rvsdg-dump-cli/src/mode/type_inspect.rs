@@ -24,8 +24,8 @@ pub fn render_type_inspect_mode<W: Write>(
 mod tests {
     use slir::rvsdg::Rvsdg;
     use slir::ty::{
-        Enum, Struct, StructField, TY_F32, TY_U32, TagEncoding, TagIntegerLength, TagPrimitive,
-        TypeKind, TypeRegistry,
+        Enum, EnumTagEncoding, EnumTagTy, EnumVariant, Int, IntSize, Struct, StructField, TY_F32,
+        TY_U32, TypeKind, TypeRegistry,
     };
 
     use super::*;
@@ -69,14 +69,26 @@ struct(0):
     fn test_render_type_enum() {
         let registry = TypeRegistry::default();
         let enum_ty = registry.register(TypeKind::Enum(Enum {
-            variants: vec![TY_U32, TY_F32],
-            tag_primitive: TagPrimitive::Int {
-                length: TagIntegerLength::I32,
+            variants: vec![
+                EnumVariant {
+                    ty: TY_U32,
+                    discriminant: 0,
+                },
+                EnumVariant {
+                    ty: TY_F32,
+                    discriminant: 1,
+                },
+            ],
+            discriminant_ty: Int {
+                size: IntSize::I32,
                 signed: false,
             },
-            tag_encoding: TagEncoding::Direct {
-                discriminants: vec![0, 1],
-            },
+            tag_ty: Int {
+                size: IntSize::I32,
+                signed: false,
+            }
+            .into(),
+            tag_encoding: EnumTagEncoding::Direct,
             tag_offset: 0,
         }));
 

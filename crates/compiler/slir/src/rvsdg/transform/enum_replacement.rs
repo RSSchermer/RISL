@@ -45,20 +45,27 @@ impl<'a> EnumAllocaReplacer<'a> {
 
         let ty_kind = self.ty.kind(self.enum_ty);
 
-        replacements.extend(ty_kind.expect_enum().variants.iter().copied().map(|ty| {
-            let ptr_ty = self.ty.register(TypeKind::Ptr(ty));
-            let variant_node = self.rvsdg.add_op_alloca(region, ty);
+        replacements.extend(
+            ty_kind
+                .expect_enum()
+                .variants
+                .iter()
+                .copied()
+                .map(|variant| {
+                    let ptr_ty = self.ty.register(TypeKind::Ptr(variant.ty));
+                    let variant_node = self.rvsdg.add_op_alloca(region, variant.ty);
 
-            with_replacements(variant_node, ty);
+                    with_replacements(variant_node, variant.ty);
 
-            ValueInput {
-                ty: ptr_ty,
-                origin: ValueOrigin::Output {
-                    producer: variant_node,
-                    output: 0,
-                },
-            }
-        }));
+                    ValueInput {
+                        ty: ptr_ty,
+                        origin: ValueOrigin::Output {
+                            producer: variant_node,
+                            output: 0,
+                        },
+                    }
+                }),
+        );
 
         self.visit_users(self.node, 0, &replacements);
 
@@ -747,8 +754,8 @@ mod tests {
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueOutput};
     use crate::ty::{
-        Enum, Struct, StructField, TY_DUMMY, TY_PREDICATE, TagEncoding, TagIntegerLength,
-        TagPrimitive,
+        Enum, EnumTagEncoding, EnumTagTy, EnumVariant, Int, IntSize, Struct, StructField, TY_DUMMY,
+        TY_PREDICATE,
     };
     use crate::{FnArg, FnSig, Function, Module, Symbol, thin_set};
 
@@ -796,14 +803,26 @@ mod tests {
         let variant_1_ptr_ty = module.ty.register(TypeKind::Ptr(variant_1_ty));
 
         let enum_ty = module.ty.register(TypeKind::Enum(Enum {
-            variants: vec![variant_0_ty, variant_1_ty],
-            tag_primitive: TagPrimitive::Int {
-                length: TagIntegerLength::I32,
+            variants: vec![
+                EnumVariant {
+                    ty: variant_0_ty,
+                    discriminant: 0,
+                },
+                EnumVariant {
+                    ty: variant_1_ty,
+                    discriminant: 1,
+                },
+            ],
+            discriminant_ty: Int {
+                size: IntSize::I32,
                 signed: false,
             },
-            tag_encoding: TagEncoding::Direct {
-                discriminants: vec![0, 1],
-            },
+            tag_ty: Int {
+                size: IntSize::I32,
+                signed: false,
+            }
+            .into(),
+            tag_encoding: EnumTagEncoding::Direct,
             tag_offset: 0,
         }));
         let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
@@ -1352,14 +1371,26 @@ mod tests {
         }));
 
         let enum_ty = module.ty.register(TypeKind::Enum(Enum {
-            variants: vec![variant_0_ty, variant_1_ty],
-            tag_primitive: TagPrimitive::Int {
-                length: TagIntegerLength::I32,
+            variants: vec![
+                EnumVariant {
+                    ty: variant_0_ty,
+                    discriminant: 0,
+                },
+                EnumVariant {
+                    ty: variant_1_ty,
+                    discriminant: 1,
+                },
+            ],
+            discriminant_ty: Int {
+                size: IntSize::I32,
                 signed: false,
             },
-            tag_encoding: TagEncoding::Direct {
-                discriminants: vec![0, 1],
-            },
+            tag_ty: Int {
+                size: IntSize::I32,
+                signed: false,
+            }
+            .into(),
+            tag_encoding: EnumTagEncoding::Direct,
             tag_offset: 0,
         }));
         let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));

@@ -28,7 +28,7 @@ impl Intrinsic for OpVariantPtr {
                 arg.to_string(ty_registry)
             ));
         };
-        let Some(variant_ty) = enum_ty.variants.get(self.variant_index as usize) else {
+        let Some(variant) = enum_ty.variants.get(self.variant_index as usize) else {
             return Err(format!(
                 "variant-ptr operation wants to select variant `{}`, but enum type `{}` only has \
                 {} variant(s)",
@@ -37,7 +37,7 @@ impl Intrinsic for OpVariantPtr {
                 enum_ty.variants.len(),
             ));
         };
-        let variant_ptr_ty = ty_registry.register(TypeKind::Ptr(*variant_ty));
+        let variant_ptr_ty = ty_registry.register(TypeKind::Ptr(variant.ty));
 
         Ok(Some(variant_ptr_ty))
     }

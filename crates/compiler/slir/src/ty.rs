@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::ops::{Deref, Range, RangeInclusive};
+use std::ops::{Deref, RangeInclusive};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::{fmt, mem};
 
@@ -232,14 +232,154 @@ pub struct Struct {
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct Enum {
-    pub variants: Vec<Type>,
-    pub tag_primitive: TagPrimitive,
-    pub tag_encoding: TagEncoding,
+    /// The ordered list of variants in the enum.
+    ///
+    /// Note that each variant must have a unique [EnumVariant::discriminant] value, otherwise the
+    /// enum is invalid (UB).
+    pub variants: Vec<EnumVariant>,
+
+    /// Describes the type of the discriminant for this enum.
+    ///
+    /// Is used to decode the [EnumVariant::discriminant] values in this enum's [variants] list.
+    pub discriminant_ty: Int,
+
+    /// Describes the type of tag-values for this enum.
+    pub tag_ty: EnumTagTy,
+
+    /// Describes how the tag-value encodes the enum's discriminant.
+    pub tag_encoding: EnumTagEncoding,
+
+    /// The offset in bytes of the tag-value within the enum data.
     pub tag_offset: u64,
 }
 
+impl Enum {
+    pub fn read_discriminant(&self, enum_data: &[u8]) -> EnumDiscriminant {
+        let tag_value = self.read_tag_value(enum_data);
+
+        match &self.tag_encoding {
+            EnumTagEncoding::Direct => {
+                let tag_ty = self.tag_ty.expect_int();
+
+                let mut v = tag_value;
+
+                if tag_ty.size != self.discriminant_ty.size {
+                    // The discriminant-size may be different from the tag-size (if the user
+                    // declared an explicit discriminant type for the enum). To convert the tag to
+                    // the discriminant size:
+                    //
+                    // 1. For signed types we first sign-extend the tag to 128 bits.
+                    // 2. For both signed and unsigned types, we truncate back down to the
+                    //    discriminant size.
+
+                    if tag_ty.signed {
+                        // Sign-extend
+
+                        let size = self.tag_ty.size();
+                        let shift = 128 - (size * 8);
+
+                        v = ((v << shift) as i128 >> shift) as u128;
+                    }
+
+                    // Truncate
+                    v &= self.discriminant_ty.size.mask();
+                }
+
+                EnumDiscriminant {
+                    value: v,
+                    ty: self.discriminant_ty,
+                }
+            }
+            EnumTagEncoding::Niche {
+                valid_range,
+                untagged_variant,
+                niche_variants,
+                niche_start,
+            } => {
+                let variant_index = if valid_range.contains(tag_value) {
+                    *untagged_variant
+                } else {
+                    let niche_index = tag_value.wrapping_sub(*niche_start) & self.tag_ty.mask();
+                    let count = (niche_variants.end() - niche_variants.start() + 1) as u128;
+
+                    if niche_index < count {
+                        niche_variants.start() + niche_index as usize
+                    } else {
+                        panic!("invalid tag value for niche-encoded enum");
+                    }
+                };
+
+                EnumDiscriminant {
+                    value: self.variants[variant_index].discriminant,
+                    ty: self.discriminant_ty,
+                }
+            }
+        }
+    }
+
+    pub fn variant_index_for(&self, discriminant: EnumDiscriminant) -> Option<usize> {
+        self.variants
+            .iter()
+            .position(|v| v.discriminant == discriminant.value)
+    }
+
+    pub fn resolve_variant_index(&self, enum_data: &[u8]) -> usize {
+        let discriminant = self.read_discriminant(enum_data);
+
+        self.variant_index_for(discriminant)
+            .expect("enum tag-value should encode a valid discriminant")
+    }
+
+    fn read_tag_value(&self, enum_data: &[u8]) -> u128 {
+        let tag_offset = self.tag_offset as usize;
+        let tag_data = &enum_data[tag_offset..];
+
+        match self.tag_ty {
+            EnumTagTy::Int(int) => match int.size {
+                IntSize::I8 => enum_data[0] as u128,
+                IntSize::I16 => u16::from_le_bytes(tag_data[..2].try_into().unwrap()) as u128,
+                IntSize::I32 => u32::from_le_bytes(tag_data[..4].try_into().unwrap()) as u128,
+                IntSize::I64 => u64::from_le_bytes(tag_data[..8].try_into().unwrap()) as u128,
+                IntSize::I128 => u128::from_le_bytes(tag_data[..16].try_into().unwrap()),
+            },
+            EnumTagTy::Pointer => u64::from_le_bytes(enum_data[..8].try_into().unwrap()) as u128,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub struct EnumVariant {
+    /// The [Type] of the variant.
+    ///
+    /// Must resolve to a struct type.
+    pub ty: Type,
+
+    /// The value of the discriminant for this variant.
+    ///
+    /// The value stored depends on the [Enum::discriminant_ty] for this enum. For a discriminant
+    /// with an [Int] type that has a size of `N` bits, the `N` least significant bits store the
+    /// discriminant value; the remaining bits are all `0`.
+    pub discriminant: u128,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub struct WrappingRange {
+    pub start: u128,
+    pub end: u128,
+}
+
+impl WrappingRange {
+    pub fn contains(&self, v: u128) -> bool {
+        if self.start <= self.end {
+            v >= self.start && v <= self.end
+        } else {
+            v >= self.start || v <= self.end
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-pub enum TagEncoding {
+pub enum EnumTagEncoding {
     /// The tag value directly represents the discriminant of the active variant.
     ///
     /// This is the "standard" enum representation where a dedicated field (the tag) stores an
@@ -248,19 +388,14 @@ pub enum TagEncoding {
     ///
     /// To resolve the active variant:
     ///
-    /// 1. Read the discriminant value `v` from the [Enum::tag_offset] as an integer of
-    ///    [Enum::tag_primitive] type zero-extended to a `u128`.
-    /// 2. Look up `v` in the `discriminants` vector.
-    /// 3. The index `i` such that `discriminants[i] == v` is the active variant index. Note that
-    ///    this should only be true for one element in the `discriminants` vector, otherwise the
-    ///    enum encoding is invalid (UB).
-    Direct {
-        /// The discriminant value for each variant.
-        ///
-        /// The length of this vector must match the length of the [Enum::variants] vector, and it
-        /// must not contain duplicate values.
-        discriminants: Vec<u128>,
-    },
+    /// 1. Read the tag value `v` from the [Enum::tag_offset] as raw bits of [Enum::tag_primitive]
+    ///    size, zero-extended to a `u128`.
+    /// 2. If [Enum::tag_primitive] is signed, sign-extend `v` from [Enum::tag_primitive]'s size
+    ///    to 128 bits.
+    /// 3. Truncate `v` to the size of the [Enum::discriminant_ty].
+    /// 4. Look up the variant in the [Enum::variants] vector for which the
+    ///    [EnumVariant::discriminant] is equal to `v`.
+    Direct,
 
     /// The tag is a field of one of the variants (the "niche" field), and its value is used to
     /// distinguish between the "untagged" variant and one or more "niche" variants.
@@ -270,21 +405,19 @@ pub enum TagEncoding {
     /// type. These invalid patterns are repurposed to represent other variants (the
     /// `niche_variants`).
     ///
-    /// For enums using niche encoding, the discriminant of each variant is always equal to the
-    /// variant index.
-    ///
     /// Example: `Option<&T>`
     /// - `&T` is a non-null reference, so the bit pattern `0` (null) is "invalid".
     /// - `Some(&T)` is the `untagged_variant` (e.g., index 1). It owns the memory.
     /// - `None` is a niche variant (e.g., index 0).
     /// - If the value at `tag_offset` is non-zero, it's `Some`. If it's zero, it's `None`.
     ///
-    /// To resolve the active variant disciminant/index:
+    /// To resolve the active variant index:
     ///
-    /// 1. Read the value `v` from the [Enum::tag_offset] as an integer of [Enum::tag_primitive]
-    ///    type zero-extended to a `u128`.
+    /// 1. Read the tag value `v` from the [Enum::tag_offset] as raw bits of [Enum::tag_primitive]
+    ///    size, zero-extended to a `u128`.
     /// 2. If `v` is within `valid_range`, the active variant is `untagged_variant`.
-    /// 3. Otherwise, calculate the niche index: `niche_index = v.wrapping_sub(niche_start)`.
+    /// 3. Otherwise, calculate the niche index:
+    ///    `niche_index = v.wrapping_sub(niche_start) & Enum::tag_primitive.mask()`.
     /// 4. If `niche_index` is less than the count of variants in `niche_variants`:
     ///    The active variant is `niche_variants.start() + (niche_index as usize)`.
     ///    If this results in the `untagged_variant` index, the tag is invalid (UB).
@@ -299,7 +432,7 @@ pub enum TagEncoding {
         ///
         /// Any value `V` that falls within this range indicates that the `untagged_variant` is
         /// active. Values outside this range are niches and represent one of the `niche_variants`.
-        valid_range: Range<u128>,
+        valid_range: WrappingRange,
 
         /// The index of the variant that is active when the tag value represents a valid
         /// value for the niche field.
@@ -322,21 +455,82 @@ pub enum TagEncoding {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-pub enum TagPrimitive {
-    Int {
-        length: TagIntegerLength,
-        signed: bool,
-    },
+pub enum EnumTagTy {
+    Int(Int),
     Pointer,
 }
 
+impl EnumTagTy {
+    pub fn expect_int(&self) -> &Int {
+        if let EnumTagTy::Int(int) = self {
+            int
+        } else {
+            panic!("not an integer tag primitive");
+        }
+    }
+
+    fn size(&self) -> usize {
+        match self {
+            EnumTagTy::Int(int) => int.size.bytes(),
+            EnumTagTy::Pointer => 8, // Assuming 64-bit target for now
+        }
+    }
+
+    fn mask(&self) -> u128 {
+        match self {
+            EnumTagTy::Int(int) => int.size.mask(),
+            EnumTagTy::Pointer => 0xFFFFFFFF_FFFFFFFF,
+        }
+    }
+}
+
+impl From<Int> for EnumTagTy {
+    fn from(int: Int) -> Self {
+        EnumTagTy::Int(int)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
-pub enum TagIntegerLength {
+pub struct Int {
+    pub size: IntSize,
+    pub signed: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum IntSize {
     I8,
     I16,
     I32,
     I64,
     I128,
+}
+
+impl IntSize {
+    pub fn bytes(&self) -> usize {
+        match self {
+            IntSize::I8 => 1,
+            IntSize::I16 => 2,
+            IntSize::I32 => 4,
+            IntSize::I64 => 8,
+            IntSize::I128 => 16,
+        }
+    }
+
+    fn mask(&self) -> u128 {
+        match self {
+            IntSize::I8 => 0xFF,
+            IntSize::I16 => 0xFFFF,
+            IntSize::I32 => 0xFFFFFFFF,
+            IntSize::I64 => 0xFFFFFFFF_FFFFFFFF,
+            IntSize::I128 => 0xFFFFFFFF_FFFFFFFF_FFFFFFFF_FFFFFFFF,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct EnumDiscriminant {
+    pub value: u128,
+    pub ty: Int,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
@@ -922,7 +1116,7 @@ impl TypeRegistry {
             }
             TypeKind::Enum(enum_data) => {
                 for variant in &mut enum_data.variants {
-                    *variant = self.import(other_reg, *variant);
+                    variant.ty = self.import(other_reg, variant.ty);
                 }
             }
             _ => (),

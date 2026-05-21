@@ -80,8 +80,8 @@ pub fn Enum(ty: slir::ty::Type) -> impl IntoView {
             <h2>"Variants:"</h2>
 
             <ul>
-                {module_data.module.read_value().ty.kind(ty).expect_enum().variants.iter().map(|s| {
-                    let s = s.registration_id().unwrap_or_default();
+                {module_data.module.read_value().ty.kind(ty).expect_enum().variants.iter().map(|v| {
+                    let s = v.ty.registration_id().unwrap_or_default();
 
                     view! {
                         <li>

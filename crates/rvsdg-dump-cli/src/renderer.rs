@@ -76,26 +76,32 @@ impl<'a> Renderer<'a> {
             TypeKind::Struct(s) => {
                 self.write_type(writer, ty)?;
                 writeln!(writer, ":")?;
+
                 for (i, field) in s.fields.iter().enumerate() {
                     write!(writer, "  - field {}: ", i)?;
                     self.write_type(writer, field.ty)?;
                     write!(writer, " (offset: {})", field.offset)?;
+
                     if i < s.fields.len() - 1 {
                         writeln!(writer)?;
                     }
                 }
+
                 Ok(())
             }
             TypeKind::Enum(e) => {
                 self.write_type(writer, ty)?;
                 writeln!(writer, ":")?;
-                for (i, variant_ty) in e.variants.iter().enumerate() {
+
+                for (i, variant) in e.variants.iter().enumerate() {
                     write!(writer, "  - variant {}: ", i)?;
-                    self.write_type(writer, *variant_ty)?;
+                    self.write_type(writer, variant.ty)?;
+
                     if i < e.variants.len() - 1 {
                         writeln!(writer)?;
                     }
                 }
+
                 Ok(())
             }
             _ => {
