@@ -6,7 +6,7 @@ use rustc_public::abi::{
     FieldsShape, FloatLength, FnAbi, IntegerLength, PassMode, Primitive, TagEncoding, ValueAbi,
     VariantsShape, WrappingRange,
 };
-use rustc_public::mir::alloc::GlobalAlloc;
+use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::rustc_internal::internal;
 use rustc_public::target::{MachineInfo, MachineSize};
@@ -260,6 +260,7 @@ pub struct CodegenContext<'a, 'tcx> {
     pub ty_to_slir: RefCell<FxHashMap<TyAndLayout, slir::ty::Type>>,
     pub instance_to_slir: RefCell<FxHashMap<Instance, slir::Function>>,
     pub static_to_slir: RefCell<FxHashMap<StaticDef, SlirStatic>>,
+    pub alloc_id_to_slir: RefCell<FxHashMap<AllocId, slir::AllocId>>,
 }
 
 impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
@@ -276,6 +277,7 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             ty_to_slir: RefCell::new(Default::default()),
             instance_to_slir: RefCell::new(Default::default()),
             static_to_slir: RefCell::new(Default::default()),
+            alloc_id_to_slir: RefCell::new(Default::default()),
         }
     }
 
@@ -1064,9 +1066,24 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
                         }
                     }
                     GlobalAlloc::Memory(alloc) => {
-                        let bytes = alloc
-                            .raw_bytes()
-                            .expect("could not read constant memory allocation");
+                        let slir_alloc_id = {
+                            let mut module = self.module.borrow_mut();
+
+                            *self
+                                .alloc_id_to_slir
+                                .borrow_mut()
+                                .entry(ptr.alloc_id)
+                                .or_insert_with(|| {
+                                    let bytes = alloc
+                                        .raw_bytes()
+                                        .expect("could not read constant memory allocation");
+
+                                    module.allocations.register(slir::Allocation {
+                                        bytes: bytes.to_vec(),
+                                    })
+                                })
+                        };
+
                         let const_id = ptr.alloc_id.to_index();
                         let const_name = slir::Symbol::new(format!("c{}", const_id));
                         let constant = slir::Constant {
@@ -1075,10 +1092,12 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
                         };
                         let ty = self.ty_and_layout_resolve(&ptr.pointee_layout);
 
-                        self.module
-                            .borrow_mut()
-                            .constants
-                            .register_byte_data(constant, ty, bytes);
+                        self.module.borrow_mut().constants.register_byte_data(
+                            constant,
+                            ty,
+                            slir_alloc_id,
+                            ptr.offset as usize,
+                        );
 
                         slir::cfg::RootIdentifier::Constant(constant)
                     }

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
@@ -7,11 +9,12 @@ use crate::cfg::{
 };
 use crate::intrinsic::Intrinsic;
 use crate::ty::TypeKind;
-use crate::{ConstantKind, Function, Module};
+use crate::{AllocId, ConstantKind, Function, Module};
 
 pub struct FunctionImporter {
     bb_mapping: FxHashMap<BasicBlock, BasicBlock>,
     local_value_mapping: FxHashMap<LocalBinding, LocalBinding>,
+    alloc_mapping: RefCell<FxHashMap<AllocId, AllocId>>,
 }
 
 impl FunctionImporter {
@@ -19,6 +22,7 @@ impl FunctionImporter {
         Self {
             bb_mapping: FxHashMap::default(),
             local_value_mapping: FxHashMap::default(),
+            alloc_mapping: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -469,9 +473,24 @@ impl FunctionImporter {
                             let data = &src_mod.constants[constant];
 
                             match data.kind() {
-                                ConstantKind::ByteData(bytes) => dst_mod
-                                    .constants
-                                    .register_byte_data(constant, data.ty(), bytes.clone()),
+                                ConstantKind::ByteData(src_alloc_id, offset) => {
+                                    let dst_alloc_id = *self
+                                        .alloc_mapping
+                                        .borrow_mut()
+                                        .entry(*src_alloc_id)
+                                        .or_insert_with(|| {
+                                            let src_alloc = &src_mod.allocations[*src_alloc_id];
+
+                                            dst_mod.allocations.register(src_alloc.clone())
+                                        });
+
+                                    dst_mod.constants.register_byte_data(
+                                        constant,
+                                        data.ty(),
+                                        dst_alloc_id,
+                                        *offset,
+                                    )
+                                }
                                 ConstantKind::Expression => todo!(),
                                 ConstantKind::Overridable(_) => panic!(
                                     "overridable constants cannot be imported from other modules"

@@ -115,9 +115,12 @@ mod tests {
             name: Symbol::from_ref("test_const"),
             module: Symbol::from_ref("test_module"),
         };
+        let alloc_id = module.allocations.register(slir::Allocation {
+            bytes: vec![42, 0, 0, 0],
+        });
         module
             .constants
-            .register_byte_data(constant, TY_U32, vec![42, 0, 0, 0]);
+            .register_byte_data(constant, TY_U32, alloc_id, 0);
         rvsdg.register_constant(&module, constant);
 
         let renderer = Renderer::new(&rvsdg, 0, 0);

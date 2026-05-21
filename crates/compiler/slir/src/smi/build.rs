@@ -68,7 +68,7 @@ impl DependencyCollector {
                         resources.insert(Resource::Storage(*b));
                     }
                     Item::Constant(c) => match module.constants[*c].kind() {
-                        ConstantKind::ByteData(_) => {}
+                        ConstantKind::ByteData(..) => {}
                         ConstantKind::Overridable(_) => {
                             overridable_constants.insert(*c);
                         }

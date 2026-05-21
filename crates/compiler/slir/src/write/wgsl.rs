@@ -543,14 +543,18 @@ impl WgslModuleWriter {
         self.write_type(cx, ty);
 
         match data.kind() {
-            ConstantKind::ByteData(data) => {
+            ConstantKind::ByteData(alloc_id, offset) => {
                 self.write_optional_space();
                 self.w.push_str("=");
                 self.write_optional_space();
 
-                let mut writer = ConstantValueWriter { writer: self, data };
+                let allocation = &cx.module.allocations[*alloc_id];
+                let mut writer = ConstantValueWriter {
+                    writer: self,
+                    data: &allocation.bytes,
+                };
 
-                writer.write_value(cx, ty, 0);
+                writer.write_value(cx, ty, *offset);
             }
             ConstantKind::Expression => todo!(),
             ConstantKind::Overridable(overridable) => {

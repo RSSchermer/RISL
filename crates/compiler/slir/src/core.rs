@@ -14,6 +14,7 @@ slotmap::new_key_type! {
     pub struct UniformBinding;
     pub struct StorageBinding;
     pub struct WorkgroupBinding;
+    pub struct AllocId;
 }
 
 pub type Symbol = Intern<String>;
@@ -208,6 +209,38 @@ impl Index<WorkgroupBinding> for WorkgroupBindingRegistry {
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+pub struct Allocation {
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
+pub struct AllocationRegistry {
+    store: SlotMap<AllocId, Allocation>,
+}
+
+impl AllocationRegistry {
+    pub fn register(&mut self, allocation: Allocation) -> AllocId {
+        self.store.insert(allocation)
+    }
+
+    pub fn get(&self, id: AllocId) -> Option<&Allocation> {
+        self.store.get(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (AllocId, &Allocation)> {
+        self.store.iter()
+    }
+}
+
+impl Index<AllocId> for AllocationRegistry {
+    type Output = Allocation;
+
+    fn index(&self, id: AllocId) -> &Self::Output {
+        self.get(id).expect("allocation not registered")
+    }
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ConstantData {
     ty: Type,
     kind: ConstantKind,
@@ -270,7 +303,7 @@ impl OverridableConstant {
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub enum ConstantKind {
-    ByteData(Vec<u8>),
+    ByteData(AllocId, usize),
     Expression,
     Overridable(OverridableConstant),
 }
@@ -290,7 +323,13 @@ pub struct ConstantRegistry {
 }
 
 impl ConstantRegistry {
-    pub fn register_byte_data(&mut self, constant: Constant, ty: Type, data: Vec<u8>) {
+    pub fn register_byte_data(
+        &mut self,
+        constant: Constant,
+        ty: Type,
+        alloc_id: AllocId,
+        offset: usize,
+    ) {
         if let Some(data) = self.store.get(&constant) {
             assert_eq!(
                 data.ty, ty,
@@ -302,7 +341,7 @@ impl ConstantRegistry {
             constant,
             ConstantData {
                 ty,
-                kind: ConstantKind::ByteData(data),
+                kind: ConstantKind::ByteData(alloc_id, offset),
             },
         );
     }
@@ -392,6 +431,7 @@ pub struct Module {
     pub uniform_bindings: UniformBindingRegistry,
     pub storage_bindings: StorageBindingRegistry,
     pub workgroup_bindings: WorkgroupBindingRegistry,
+    pub allocations: AllocationRegistry,
     pub constants: ConstantRegistry,
     pub entry_points: EntryPointRegistry,
 }
@@ -405,6 +445,7 @@ impl Module {
             uniform_bindings: Default::default(),
             storage_bindings: Default::default(),
             workgroup_bindings: Default::default(),
+            allocations: Default::default(),
             constants: Default::default(),
             entry_points: Default::default(),
         }

@@ -136,18 +136,24 @@ Region (Region(2v1)):
             name: Symbol::from_ref("true"),
             module: Symbol::from_ref("test_module"),
         };
+        let alloc_id_true = module
+            .allocations
+            .register(slir::Allocation { bytes: vec![1] });
         module
             .constants
-            .register_byte_data(const_true, TY_PREDICATE, vec![1]);
+            .register_byte_data(const_true, TY_PREDICATE, alloc_id_true, 0);
         let predicate_global_node = rvsdg.register_constant(&module, const_true);
 
         let const_u32 = Constant {
             name: Symbol::from_ref("c_u32"),
             module: Symbol::from_ref("test_module"),
         };
+        let alloc_id_u32 = module.allocations.register(slir::Allocation {
+            bytes: vec![10, 0, 0, 0],
+        });
         module
             .constants
-            .register_byte_data(const_u32, TY_U32, vec![10, 0, 0, 0]);
+            .register_byte_data(const_u32, TY_U32, alloc_id_u32, 0);
         let u32_global_node = rvsdg.register_constant(&module, const_u32);
 
         // Register function with dependencies
