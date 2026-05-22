@@ -18,7 +18,7 @@ impl MemoryTransformer {
         }
     }
 
-    pub fn transform_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) {
+    pub fn transform_fn(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, function: Function) {
         let node = rvsdg
             .get_function_node(function)
             .expect("function should have RVSDG body");
@@ -41,7 +41,7 @@ impl MemoryTransformer {
             if iterations == 0 || did_transform {
                 did_transform = false;
 
-                did_transform |= region_replacement_cx.replace(rvsdg);
+                did_transform |= region_replacement_cx.replace(module, rvsdg);
 
                 region_eliminate_proxy_nodes(rvsdg, body_region);
 
@@ -58,10 +58,12 @@ impl MemoryTransformer {
     }
 }
 
-pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
     let mut transformer = MemoryTransformer::new();
 
-    for (entry_point, _) in module.entry_points.iter() {
-        transformer.transform_fn(rvsdg, entry_point);
+    let entry_points: Vec<_> = module.entry_points.iter().map(|(f, _)| f).collect();
+
+    for entry_point in entry_points {
+        transformer.transform_fn(module, rvsdg, entry_point);
     }
 }

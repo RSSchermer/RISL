@@ -546,6 +546,14 @@ impl NodeData {
         )
     }
 
+    pub fn expect_constant(&self) -> &ConstantNode {
+        if let NodeKind::Constant(n) = &self.kind {
+            n
+        } else {
+            panic!("expected node to be a constant node")
+        }
+    }
+
     pub fn is_simple(&self) -> bool {
         matches!(self.kind, NodeKind::Simple(_))
     }
@@ -2222,6 +2230,7 @@ pub struct RvsdgAsData<'a> {
     nodes: &'a SlotMap<Node, NodeData>,
     global_region: &'a Region,
     function_node: &'a FxHashMap<Function, Node>,
+    constant_node: &'a FxHashMap<Constant, Node>,
 }
 
 /// Type that helps facilitate deserializing an [Rvsdg] instance without its [TypeRegistry].
@@ -2233,6 +2242,7 @@ pub struct RvsdgData {
     nodes: SlotMap<Node, NodeData>,
     global_region: Region,
     function_node: FxHashMap<Function, Node>,
+    constant_node: FxHashMap<Constant, Node>,
 }
 
 /// A Regionalized Value-State Dependency Graph.
@@ -2245,6 +2255,7 @@ pub struct Rvsdg {
     nodes: SlotMap<Node, NodeData>,
     global_region: Region,
     function_node: FxHashMap<Function, Node>,
+    constant_node: FxHashMap<Constant, Node>,
 }
 
 impl Rvsdg {
@@ -2269,6 +2280,7 @@ impl Rvsdg {
             nodes: Default::default(),
             global_region,
             function_node: Default::default(),
+            constant_node: Default::default(),
         }
     }
 
@@ -2281,6 +2293,7 @@ impl Rvsdg {
             nodes,
             global_region,
             function_node,
+            constant_node,
         } = data;
 
         Rvsdg {
@@ -2289,6 +2302,7 @@ impl Rvsdg {
             nodes,
             global_region,
             function_node,
+            constant_node,
         }
     }
 
@@ -2301,6 +2315,7 @@ impl Rvsdg {
             nodes: &self.nodes,
             global_region: &self.global_region,
             function_node: &self.function_node,
+            constant_node: &self.constant_node,
         }
     }
 
@@ -2438,6 +2453,10 @@ impl Rvsdg {
     ///
     /// Panics if the constant cannot be resolved with the `module`'s [Module::constants] registry.
     pub fn register_constant(&mut self, module: &Module, constant: Constant) -> Node {
+        if let Some(node) = self.constant_node.get(&constant) {
+            return *node;
+        }
+
         let ty = module.constants[constant].ty();
 
         let node = self.nodes.insert(NodeData {
@@ -2449,6 +2468,7 @@ impl Rvsdg {
         });
 
         self.regions[self.global_region].nodes.insert(node);
+        self.constant_node.insert(constant, node);
 
         node
     }
@@ -2577,6 +2597,12 @@ impl Rvsdg {
     /// See also [Rvsdg::register_function].
     pub fn get_function_node(&self, function: Function) -> Option<Node> {
         self.function_node.get(&function).copied()
+    }
+
+    /// Returns the [Node] for the given `constant` if it has already been registered with this
+    /// [Rvsdg].
+    pub fn get_constant_node(&self, constant: Constant) -> Option<Node> {
+        self.constant_node.get(&constant).copied()
     }
 
     /// Whether this [Rvsdg] still contains [RegionData] for the given `region`.

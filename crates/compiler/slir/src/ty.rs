@@ -533,6 +533,28 @@ pub struct EnumDiscriminant {
     pub ty: Int,
 }
 
+impl EnumDiscriminant {
+    pub fn backend_ty(&self) -> Type {
+        if self.ty.signed { TY_I32 } else { TY_U32 }
+    }
+
+    pub fn to_u32(&self) -> u32 {
+        self.value as u32
+    }
+
+    pub fn to_i32(&self) -> i32 {
+        self.value as i32
+    }
+
+    pub fn backend_bytes(&self) -> Vec<u8> {
+        if self.ty.signed {
+            self.to_i32().to_le_bytes().to_vec()
+        } else {
+            self.to_u32().to_le_bytes().to_vec()
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct StructField {
     pub offset: u64,

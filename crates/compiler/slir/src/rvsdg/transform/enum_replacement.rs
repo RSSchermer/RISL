@@ -1,35 +1,35 @@
+use internment::Intern;
+
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
 use crate::ty::{TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::{AllocId, Allocation, Constant, Module};
 
-pub struct EnumAllocaReplacer<'a> {
+pub struct EnumReplacer<'a> {
     rvsdg: &'a mut Rvsdg,
-    node: Node,
     ty: TypeRegistry,
     enum_ty: Type,
 }
 
-impl<'a> EnumAllocaReplacer<'a> {
-    pub fn new(rvsdg: &'a mut Rvsdg, node: Node) -> Self {
-        let enum_ty = rvsdg[node].expect_op_alloca().ty();
+impl<'a> EnumReplacer<'a> {
+    pub fn new(rvsdg: &'a mut Rvsdg, enum_ty: Type) -> Self {
         let ty_registry = rvsdg.ty().clone();
 
         assert!(ty_registry.kind(enum_ty).is_enum());
 
-        EnumAllocaReplacer {
+        EnumReplacer {
             ty: rvsdg.ty().clone(),
             rvsdg,
             enum_ty,
-            node,
         }
     }
 
-    pub fn replace_alloca<F>(&mut self, mut with_replacements: F)
+    pub fn replace_alloca<F>(&mut self, node: Node, mut with_replacements: F)
     where
         F: FnMut(Node, Type),
     {
-        let node_data = &self.rvsdg[self.node];
+        let node_data = &self.rvsdg[node];
         let region = node_data.region();
         let discriminant_node = self.rvsdg.add_op_alloca(region, TY_U32);
 
@@ -67,10 +67,106 @@ impl<'a> EnumAllocaReplacer<'a> {
                 }),
         );
 
-        self.visit_users(self.node, 0, &replacements);
+        self.visit_users(node, 0, &replacements);
 
         // The OpAlloca node now should not have any users left, so we can remove it
-        self.rvsdg.remove_node(self.node);
+        self.rvsdg.remove_node(node);
+    }
+
+    pub fn replace_constant_dependency<F>(
+        &mut self,
+        module: &mut Module,
+        function_node: Node,
+        dep_index: u32,
+        constant: Constant,
+        alloc_id: AllocId,
+        offset: usize,
+        mut with_replacements: F,
+    ) where
+        F: FnMut(u32, Type),
+    {
+        let fn_data = self.rvsdg[function_node].expect_function();
+        let region = fn_data.body_region();
+
+        let ty_kind = self.ty.kind(self.enum_ty);
+        let enum_data = ty_kind.expect_enum();
+
+        let discriminant =
+            enum_data.read_discriminant(&module.allocations[alloc_id].bytes[offset..]);
+        let active_variant_index = enum_data
+            .variant_index_for(discriminant)
+            .expect("a valid discriminant should map to a variant-index");
+        let active_variant = &enum_data.variants[active_variant_index];
+
+        // Resolve a new discriminant constant node
+        let discr_name = format!("{}.discriminant", constant.name);
+        let discr_ty = discriminant.backend_ty();
+
+        let discr_constant = Constant {
+            name: Intern::new(discr_name),
+            module: constant.module,
+        };
+
+        if !module.constants.contains(discr_constant) {
+            let discr_bytes = discriminant.backend_bytes();
+
+            let discr_alloc_id = module
+                .allocations
+                .register(Allocation { bytes: discr_bytes });
+
+            module
+                .constants
+                .register_byte_data(discr_constant, discr_ty, discr_alloc_id, 0);
+        }
+
+        let discr_node = self.rvsdg.register_constant(module, discr_constant);
+
+        // Resolve a constant node for the active variant
+        let variant_name = format!("{}.{}", constant.name, active_variant_index);
+        let variant_constant = Constant {
+            name: Intern::new(variant_name),
+            module: constant.module,
+        };
+
+        if !module.constants.contains(variant_constant) {
+            module.constants.register_byte_data(
+                variant_constant,
+                active_variant.ty,
+                alloc_id,
+                offset,
+            );
+        }
+        let variant_node = self.rvsdg.register_constant(module, variant_constant);
+
+        // Prepare split_inputs
+        let mut split_inputs = Vec::new();
+        let discriminant_ptr_ty = self.ty.register(TypeKind::Ptr(discr_ty));
+        let discr_dep_index = self
+            .rvsdg
+            .add_function_dependency(function_node, discr_node);
+
+        split_inputs.push(ValueInput::argument(discriminant_ptr_ty, discr_dep_index));
+
+        for i in 0..enum_data.variants.len() {
+            let variant_ty = enum_data.variants[i].ty;
+            let variant_ptr_ty = self.ty.register(TypeKind::Ptr(variant_ty));
+
+            if i == active_variant_index {
+                let var_dep_index = self
+                    .rvsdg
+                    .add_function_dependency(function_node, variant_node);
+
+                split_inputs.push(ValueInput::argument(variant_ptr_ty, var_dep_index));
+
+                with_replacements(var_dep_index, variant_ty);
+            } else {
+                let fallback_node = self.rvsdg.add_const_fallback(region, variant_ptr_ty);
+
+                split_inputs.push(ValueInput::output(variant_ptr_ty, fallback_node, 0));
+            }
+        }
+
+        self.redirect_region_argument(region, dep_index, &split_inputs);
     }
 
     fn visit_users(&mut self, node: Node, output: u32, split_inputs: &[ValueInput]) {
@@ -676,7 +772,7 @@ impl<'a> EnumAllocaReplacer<'a> {
     /// Redirects all users of the `region`'s given `argument` to the `split_input` nodes.
     ///
     /// Leaves the `argument` without any users.
-    fn redirect_region_argument(
+    pub fn redirect_region_argument(
         &mut self,
         region: Region,
         argument: u32,
@@ -699,7 +795,7 @@ impl<'a> EnumAllocaReplacer<'a> {
     /// [OpPtrVariantPtr] nodes for the variants.
     ///
     /// Leaves the original result connected to the "placeholder" origin.
-    fn redirect_region_result(
+    pub fn redirect_region_result(
         &mut self,
         region: Region,
         original: usize,
@@ -744,7 +840,33 @@ pub fn replace_enum_alloca<F>(rvsdg: &mut Rvsdg, node: Node, with_replacements: 
 where
     F: FnMut(Node, Type),
 {
-    EnumAllocaReplacer::new(rvsdg, node).replace_alloca(with_replacements)
+    let enum_ty = rvsdg[node].expect_op_alloca().ty();
+    EnumReplacer::new(rvsdg, enum_ty).replace_alloca(node, with_replacements)
+}
+
+pub fn replace_enum_constant_dependency<F>(
+    rvsdg: &mut Rvsdg,
+    module: &mut Module,
+    function_node: Node,
+    dep_index: u32,
+    constant: Constant,
+    alloc_id: AllocId,
+    offset: usize,
+    with_replacements: F,
+) where
+    F: FnMut(u32, Type),
+{
+    let enum_ty = module.constants[constant].ty();
+
+    EnumReplacer::new(rvsdg, enum_ty).replace_constant_dependency(
+        module,
+        function_node,
+        dep_index,
+        constant,
+        alloc_id,
+        offset,
+        with_replacements,
+    )
 }
 
 #[cfg(test)]
@@ -754,7 +876,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueOutput};
     use crate::ty::{
-        Enum, EnumTagEncoding, EnumTagTy, EnumVariant, Int, IntSize, Struct, StructField, TY_DUMMY,
+        Enum, EnumTagEncoding, EnumVariant, Int, IntSize, Struct, StructField, TY_DUMMY,
         TY_PREDICATE,
     };
     use crate::{FnArg, FnSig, Function, Module, Symbol, thin_set};

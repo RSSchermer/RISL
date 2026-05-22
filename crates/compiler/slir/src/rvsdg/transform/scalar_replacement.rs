@@ -178,20 +178,30 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
 
+use internment::Intern;
 use rustc_hash::FxHashSet;
 
 use crate::rvsdg::analyse::element_index::ElementIndex;
-use crate::rvsdg::transform::enum_replacement::replace_enum_alloca;
+use crate::rvsdg::transform::enum_replacement::{
+    replace_enum_alloca, replace_enum_constant_dependency,
+};
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
     ValueOutput, ValueUser, visit,
 };
 use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::{AllocId, Constant, ConstantKind, Module};
 
 enum SwitchOutputSplitKind {
     Struct,
     Array,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Job {
+    Alloca(Node),
+    ConstantDependency { fn_node: Node, dep_index: u32 },
 }
 
 /// Whether the given type must be split for reasons of legalization.
@@ -212,13 +222,13 @@ fn ty_must_split(ty_registry: &TypeRegistry, ty: Type) -> bool {
     }
 }
 
-/// Whether an alloca for the given type would be a candidate for splitting.
+/// Whether an alloca or constant of the given type would be a candidate for splitting.
 ///
 /// Struct and enum types are always candidates for splitting. Array types are only candidates if
 /// they contain a type that must be split (see [ty_must_split]). See the "Splitting switch node
 /// results and output" section of the module-level documentation for details on why we're
 /// conservative when it comes to splitting arrays.
-fn alloca_ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
+fn ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
     match ty_registry.kind(ty).deref() {
         TypeKind::Struct(_) | TypeKind::Enum(_) => true,
         TypeKind::Array { element_ty, .. } => ty_must_split(ty_registry, *element_ty),
@@ -231,13 +241,30 @@ fn alloca_ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
 ///
 /// Note that this does not yet make any decisions about whether we should perform a scalar
 /// replacement transform on a given [OpAlloca] node, this requires further analysis.
-struct CandidateAllocaCollector<'a, 'b> {
+struct CandidateCollector<'a, 'b> {
     rvsdg: &'a Rvsdg,
-    candidates: &'b mut VecDeque<Node>,
+    candidates: &'b mut VecDeque<Job>,
 }
 
-impl CandidateAllocaCollector<'_, '_> {
+impl CandidateCollector<'_, '_> {
     fn visit_region(&mut self, region: Region) {
+        let owner = self.rvsdg[region].owner();
+
+        if let NodeKind::Function(n) = self.rvsdg[owner].kind() {
+            for (i, dependency) in n.dependencies().iter().enumerate() {
+                if let ValueOrigin::Output { producer, .. } = dependency.origin {
+                    if let NodeKind::Constant(op) = self.rvsdg[producer].kind() {
+                        if ty_is_candidate(&self.rvsdg.ty(), op.output().ty) {
+                            self.candidates.push_back(Job::ConstantDependency {
+                                fn_node: owner,
+                                dep_index: i as u32,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         for node in self.rvsdg[region].nodes() {
             self.visit_node(*node);
         }
@@ -246,8 +273,8 @@ impl CandidateAllocaCollector<'_, '_> {
     fn visit_node(&mut self, node: Node) {
         match self.rvsdg[node].kind() {
             NodeKind::Simple(SimpleNode::OpAlloca(op)) => {
-                if alloca_ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
-                    self.candidates.push_back(node);
+                if ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
+                    self.candidates.push_back(Job::Alloca(node));
                 }
             }
             NodeKind::Switch(n) => {
@@ -261,8 +288,8 @@ impl CandidateAllocaCollector<'_, '_> {
     }
 }
 
-fn collect_candidate_allocas(rvsdg: &Rvsdg, candidates: &mut VecDeque<Node>, region: Region) {
-    CandidateAllocaCollector { rvsdg, candidates }.visit_region(region);
+fn collect_candidate_jobs(rvsdg: &Rvsdg, candidates: &mut VecDeque<Job>, region: Region) {
+    CandidateCollector { rvsdg, candidates }.visit_region(region);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -297,14 +324,14 @@ pub enum AnalysisResult {
 /// input to on [OpStore], if it is used as the "value" input to an [OpStore] we cannot. However,
 /// such [OpStore] nodes may be "promoted" away by a [memory_promotion_and_legalization] pass, so
 /// the [OpAlloca] may be retried later.
-struct AggregateAllocaAnalyzer {
+struct JobAnalyzer {
     visited: FxHashSet<(Region, ValueUser)>,
     was_loaded: bool,
     has_nonlocal_use: bool,
     is_stored_value: bool,
 }
 
-impl AggregateAllocaAnalyzer {
+impl JobAnalyzer {
     fn new() -> Self {
         Self {
             visited: FxHashSet::default(),
@@ -314,7 +341,7 @@ impl AggregateAllocaAnalyzer {
         }
     }
 
-    fn analyze_alloca_node(&mut self, rvsdg: &Rvsdg, alloca_node: Node) -> AnalysisResult {
+    fn analyze_job(&mut self, rvsdg: &Rvsdg, job: Job) -> AnalysisResult {
         // Reset
         self.visited.clear();
         self.has_nonlocal_use = false;
@@ -322,7 +349,15 @@ impl AggregateAllocaAnalyzer {
         self.was_loaded = false;
 
         // Perform the analysis
-        self.visit_value_output(rvsdg, alloca_node, 0);
+        match job {
+            Job::Alloca(node) => {
+                self.visit_value_output(rvsdg, node, 0);
+            }
+            Job::ConstantDependency { fn_node, dep_index } => {
+                let region = rvsdg[fn_node].expect_function().body_region();
+                self.visit_region_argument(rvsdg, region, dep_index);
+            }
+        }
 
         // Summarize the analysis result
         if self.has_nonlocal_use {
@@ -335,7 +370,7 @@ impl AggregateAllocaAnalyzer {
     }
 }
 
-impl ValueFlowVisitor for AggregateAllocaAnalyzer {
+impl ValueFlowVisitor for JobAnalyzer {
     fn should_visit(&mut self, region: Region, user: ValueUser) -> bool {
         // Don't do duplicate visits and we can stop early if we've already found a non-local use.
         !self.has_nonlocal_use && self.visited.insert((region, user))
@@ -402,13 +437,37 @@ impl ValueFlowVisitor for AggregateAllocaAnalyzer {
     }
 }
 
-struct Replacer<'a, 'b> {
-    rvsdg: &'a mut Rvsdg,
-    candidate_queue: &'b mut VecDeque<Node>,
+struct Replacer<'a, 'b, 'c> {
+    module: &'a mut Module,
+    rvsdg: &'b mut Rvsdg,
+    candidate_queue: &'c mut VecDeque<Job>,
     ty: TypeRegistry,
 }
 
-impl Replacer<'_, '_> {
+impl Replacer<'_, '_, '_> {
+    fn get_or_create_sub_constant(
+        &mut self,
+        original: Constant,
+        name: String,
+        ty: Type,
+        alloc_id: AllocId,
+        offset: usize,
+    ) -> Constant {
+        let name = Intern::new(name);
+        let constant = Constant {
+            name,
+            module: original.module,
+        };
+
+        if !self.module.constants.contains(constant) {
+            self.module
+                .constants
+                .register_byte_data(constant, ty, alloc_id, offset);
+        }
+
+        constant
+    }
+
     fn replace_alloca(&mut self, node: Node) {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
@@ -422,7 +481,7 @@ impl Replacer<'_, '_> {
                 // Enum replacement is handled separately
                 return replace_enum_alloca(&mut self.rvsdg, node, |node, ty| {
                     if self.ty.kind(ty).is_aggregate() {
-                        self.candidate_queue.push_back(node);
+                        self.candidate_queue.push_back(Job::Alloca(node));
                     }
                 });
             }
@@ -446,7 +505,7 @@ impl Replacer<'_, '_> {
                     });
 
                     if element_is_aggregate {
-                        self.candidate_queue.push_back(element_node);
+                        self.candidate_queue.push_back(Job::Alloca(element_node));
                     }
                 }
             }
@@ -465,7 +524,7 @@ impl Replacer<'_, '_> {
                     });
 
                     if self.ty.kind(field_ty).is_aggregate() {
-                        self.candidate_queue.push_back(field_node);
+                        self.candidate_queue.push_back(Job::Alloca(field_node));
                     }
                 }
             }
@@ -475,6 +534,111 @@ impl Replacer<'_, '_> {
         self.visit_users(node, 0, &replacements);
 
         let _ = self.rvsdg.try_remove_node(node);
+    }
+
+    fn replace_constant_dependency(&mut self, fn_node: Node, dep_index: u32) {
+        let fn_data = self.rvsdg[fn_node].expect_function();
+        let region = fn_data.body_region();
+        let dependency = fn_data.dependencies()[dep_index as usize];
+
+        let (producer, _output) = match dependency.origin {
+            ValueOrigin::Output { producer, output } => (producer, output),
+            _ => unreachable!("dependency origin should be an output"),
+        };
+
+        let constant = self.rvsdg[producer].expect_constant().constant();
+        let constant_entry = &self.module.constants[constant];
+        let ty = constant_entry.ty();
+
+        let (alloc_id, offset) = match constant_entry.kind() {
+            ConstantKind::ByteData(alloc_id, offset) => (*alloc_id, *offset),
+            ConstantKind::Overridable(_) | ConstantKind::Expression => {
+                // Overridable constants and specializable constant expressions are never replaced
+                return;
+            }
+        };
+
+        let mut split_inputs = Vec::new();
+
+        match self.ty.clone().kind(ty).deref() {
+            TypeKind::Struct(struct_data) => {
+                for (i, field) in struct_data.fields.iter().enumerate() {
+                    let field_constant = self.get_or_create_sub_constant(
+                        constant,
+                        format!("{}.{}", constant.name, i),
+                        field.ty,
+                        alloc_id,
+                        offset + field.offset as usize,
+                    );
+
+                    let field_node = self.rvsdg.register_constant(self.module, field_constant);
+                    let field_ptr_ty = self.ty.register(TypeKind::Ptr(field.ty));
+                    let field_dep_index = self.rvsdg.add_function_dependency(fn_node, field_node);
+
+                    split_inputs.push(ValueInput::argument(field_ptr_ty, field_dep_index));
+
+                    if self.ty.kind(field.ty).is_aggregate() {
+                        self.candidate_queue.push_back(Job::ConstantDependency {
+                            fn_node,
+                            dep_index: field_dep_index,
+                        });
+                    }
+                }
+            }
+            TypeKind::Array {
+                element_ty,
+                count,
+                stride,
+            } => {
+                for i in 0..*count {
+                    let element_constant = self.get_or_create_sub_constant(
+                        constant,
+                        format!("{}.{}", constant.name, i),
+                        *element_ty,
+                        alloc_id,
+                        offset + (i as usize) * (*stride as usize),
+                    );
+
+                    let element_node = self.rvsdg.register_constant(self.module, element_constant);
+                    let element_ptr_ty = self.ty.register(TypeKind::Ptr(*element_ty));
+                    let element_dep_index =
+                        self.rvsdg.add_function_dependency(fn_node, element_node);
+
+                    split_inputs.push(ValueInput::argument(element_ptr_ty, element_dep_index));
+
+                    if self.ty.kind(*element_ty).is_aggregate() {
+                        self.candidate_queue.push_back(Job::ConstantDependency {
+                            fn_node,
+                            dep_index: element_dep_index,
+                        });
+                    }
+                }
+            }
+            TypeKind::Enum(_) => {
+                replace_enum_constant_dependency(
+                    self.rvsdg,
+                    self.module,
+                    fn_node,
+                    dep_index,
+                    constant,
+                    alloc_id,
+                    offset,
+                    |var_dep_index, variant_ty| {
+                        if self.ty.kind(variant_ty).is_aggregate() {
+                            self.candidate_queue.push_back(Job::ConstantDependency {
+                                fn_node,
+                                dep_index: var_dep_index,
+                            });
+                        }
+                    },
+                );
+
+                return;
+            }
+            _ => unreachable!("type is not an aggregate"),
+        }
+
+        self.redirect_region_argument(region, dep_index, &split_inputs);
     }
 
     fn visit_users(&mut self, node: Node, output: u32, split_inputs: &[ValueInput]) {
@@ -1575,15 +1739,15 @@ impl Replacer<'_, '_> {
 }
 
 pub struct AggregateReplacementContext {
-    analyzer: AggregateAllocaAnalyzer,
-    queue: VecDeque<Node>,
-    candidates: VecDeque<Node>,
+    analyzer: JobAnalyzer,
+    queue: VecDeque<Job>,
+    candidates: VecDeque<Job>,
 }
 
 impl AggregateReplacementContext {
     pub fn new() -> Self {
         AggregateReplacementContext {
-            analyzer: AggregateAllocaAnalyzer::new(),
+            analyzer: JobAnalyzer::new(),
             queue: VecDeque::new(),
             candidates: VecDeque::new(),
         }
@@ -1593,7 +1757,7 @@ impl AggregateReplacementContext {
         self.queue.clear();
         self.candidates.clear();
 
-        collect_candidate_allocas(rvsdg, &mut self.candidates, region);
+        collect_candidate_jobs(rvsdg, &mut self.candidates, region);
 
         RegionReplacementContext { cx: self }
     }
@@ -1602,11 +1766,11 @@ impl AggregateReplacementContext {
         let mut i = start;
 
         while i < self.candidates.len() {
-            let node = self.candidates[i];
+            let job = self.candidates[i];
 
-            match self.analyzer.analyze_alloca_node(rvsdg, node) {
+            match self.analyzer.analyze_job(rvsdg, job) {
                 AnalysisResult::Replace => {
-                    self.queue.push_back(node);
+                    self.queue.push_back(job);
                     self.candidates.swap_remove_back(i);
 
                     // Note that we don't increment `i` here, because we just moved another yet
@@ -1631,7 +1795,7 @@ pub struct RegionReplacementContext<'a> {
 }
 
 impl RegionReplacementContext<'_> {
-    pub fn replace(&mut self, rvsdg: &mut Rvsdg) -> bool {
+    pub fn replace(&mut self, module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
         self.cx.try_enqueue_candidates(rvsdg, 0);
 
         if self.cx.queue.is_empty() {
@@ -1639,16 +1803,22 @@ impl RegionReplacementContext<'_> {
         } else {
             let ty_registry = rvsdg.ty().clone();
 
-            while let Some(node) = self.cx.queue.pop_front() {
+            while let Some(job) = self.cx.queue.pop_front() {
                 let prior_candidate_count = self.cx.candidates.len();
 
                 let mut replacer = Replacer {
+                    module,
                     rvsdg,
                     candidate_queue: &mut self.cx.candidates,
                     ty: ty_registry.clone(),
                 };
 
-                replacer.replace_alloca(node);
+                match job {
+                    Job::Alloca(node) => replacer.replace_alloca(node),
+                    Job::ConstantDependency { fn_node, dep_index } => {
+                        replacer.replace_constant_dependency(fn_node, dep_index)
+                    }
+                }
 
                 // Attempt to add any newly added candidates to the end of the queue *during* this
                 // current replacement iteration. This helps minimize the number of
@@ -1667,7 +1837,7 @@ mod tests {
 
     use super::*;
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_PTR_U32};
-    use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
+    use crate::{Allocation, BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
     fn test_scalar_replace_op_field_ptr() {
@@ -1729,7 +1899,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         assert_eq!(
             rvsdg[region].value_results()[0].origin,
@@ -1820,7 +1990,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         assert_eq!(
             rvsdg[region].value_results()[0].origin,
@@ -1913,7 +2083,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         assert_eq!(
             rvsdg[region].value_results()[0].origin,
@@ -2092,7 +2262,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         let result_input = rvsdg[region].value_results()[0];
 
@@ -2199,7 +2369,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         let StateOrigin::Node(store_field_1_node) = *rvsdg[region].state_result() else {
             panic!("the state origin should be a node output")
@@ -2459,7 +2629,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         let result_input = rvsdg[region].value_results()[0];
 
@@ -2686,7 +2856,7 @@ mod tests {
         let mut cx = AggregateReplacementContext::new();
         let mut rcx = cx.for_region(&rvsdg, region);
 
-        rcx.replace(&mut rvsdg);
+        rcx.replace(&mut module, &mut rvsdg);
 
         let loop_data = rvsdg[loop_node].expect_loop();
         let loop_region = loop_data.loop_region();
@@ -2782,5 +2952,282 @@ mod tests {
         assert!(!results.iter().any(|result| result.origin.is_placeholder()));
 
         assert!(!rvsdg.is_live_node(op_ptr_field_ptr_node));
+    }
+
+    #[test]
+    fn test_scalar_replace_constant_enum_get_discriminant() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let function = Function {
+            name: Symbol::from_ref("main"),
+            module: Symbol::from_ref("test"),
+        };
+
+        let variant0_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![crate::ty::StructField {
+                offset: 4,
+                ty: TY_U32,
+                io_binding: None,
+            }],
+        }));
+
+        let enum_ty = module.ty.register(TypeKind::Enum(crate::ty::Enum {
+            variants: vec![crate::ty::EnumVariant {
+                ty: variant0_ty,
+                discriminant: 42,
+            }],
+            discriminant_ty: crate::ty::Int {
+                signed: false,
+                size: crate::ty::IntSize::I32,
+            },
+            tag_ty: crate::ty::EnumTagTy::Int(crate::ty::Int {
+                signed: false,
+                size: crate::ty::IntSize::I32,
+            }),
+            tag_encoding: crate::ty::EnumTagEncoding::Direct,
+            tag_offset: 0,
+        }));
+        let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
+
+        let alloc_id = module.allocations.register(Allocation {
+            bytes: vec![42, 0, 0, 0, 0, 0, 0, 0],
+        });
+
+        let constant = Constant {
+            name: Symbol::from_ref("ENUM_CONST"),
+            module: Symbol::from_ref("test"),
+        };
+        module
+            .constants
+            .register_byte_data(constant, enum_ty, alloc_id, 0);
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Symbol::from_ref("main"),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let const_node = rvsdg.register_constant(&module, constant);
+        let (fn_node, body_region) = rvsdg.register_function(&module, function, [const_node]);
+
+        // Add a use of OpGetDiscriminant on the enum constant dependency (arg 0)
+        let get_discr = rvsdg.add_op_get_discriminant(
+            body_region,
+            ValueInput::argument(enum_ptr_ty, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            body_region,
+            0,
+            ValueOrigin::Output {
+                producer: get_discr,
+                output: 0,
+            },
+        );
+
+        let mut context = AggregateReplacementContext::new();
+        let mut region_context = context.for_region(&rvsdg, body_region);
+
+        let changed = region_context.replace(&mut module, &mut rvsdg);
+
+        assert!(changed);
+
+        // Verify that the body_region result is now connected to an OpLoad node
+        let result_origin = rvsdg[body_region].value_results()[0].origin;
+        let ValueOrigin::Output {
+            producer: load_node,
+            ..
+        } = result_origin
+        else {
+            panic!("expected Output origin");
+        };
+        let op_load = rvsdg[load_node].expect_op_load();
+
+        // Verify that the load node is connected to the new discriminant dependency argument
+        // (index 1)
+        assert_eq!(op_load.ptr_input().origin, ValueOrigin::Argument(1));
+
+        // Verify that the FunctionNode now has 4 dependencies (original enum, discriminant,
+        // variant, and variant field)
+        let fn_data = rvsdg[fn_node].expect_function();
+
+        assert_eq!(fn_data.dependencies().len(), 4);
+
+        // The original dependency argument is now without users
+        assert!(rvsdg[body_region].value_arguments()[0].users.is_empty());
+
+        // Verify that the second dependency (index 1) connects to a new ConstantNode for the discriminant
+        let discr_dep = fn_data.dependencies()[1];
+        let ValueOrigin::Output {
+            producer: discr_const_node,
+            ..
+        } = discr_dep.origin
+        else {
+            panic!("expected Output origin for dependency");
+        };
+        let discr_constant = rvsdg[discr_const_node].expect_constant().constant();
+
+        assert_eq!(discr_constant.name.as_str(), "ENUM_CONST.discriminant");
+
+        // Verify that the allocation for that constant holds the correct data (42)
+        let discr_data = &module.constants[discr_constant];
+        let ConstantKind::ByteData(alloc_id, _) = discr_data.kind() else {
+            panic!("expected ByteData constant");
+        };
+        let discr_bytes = &module.allocations[*alloc_id].bytes;
+        assert_eq!(discr_bytes, &[42, 0, 0, 0]);
+
+        // The OpGetDiscriminant node is removed.
+        assert!(!rvsdg.is_live_node(get_discr));
+    }
+
+    #[test]
+    fn test_scalar_replace_constant_struct() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let function = Function {
+            name: Symbol::from_ref("main"),
+            module: Symbol::from_ref("test"),
+        };
+
+        let ty_u32 = TY_U32;
+        let struct_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![
+                crate::ty::StructField {
+                    offset: 0,
+                    ty: ty_u32,
+                    io_binding: None,
+                },
+                crate::ty::StructField {
+                    offset: 4,
+                    ty: ty_u32,
+                    io_binding: None,
+                },
+            ],
+        }));
+        let struct_ptr_ty = module.ty.register(TypeKind::Ptr(struct_ty));
+
+        let alloc_id = module.allocations.register(Allocation {
+            bytes: vec![1, 0, 0, 0, 2, 0, 0, 0],
+        });
+
+        let constant = Constant {
+            name: Symbol::from_ref("CONST"),
+            module: Symbol::from_ref("test"),
+        };
+        module
+            .constants
+            .register_byte_data(constant, struct_ty, alloc_id, 0);
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Symbol::from_ref("main"),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(ty_u32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let const_node = rvsdg.register_constant(&module, constant);
+        let (fn_node, body_region) = rvsdg.register_function(&module, function, [const_node]);
+
+        // Add a use of the struct constant dependency (arg 0)
+        let field_ptr =
+            rvsdg.add_op_field_ptr(body_region, ValueInput::argument(struct_ptr_ty, 0), 0);
+        let load = rvsdg.add_op_load(
+            body_region,
+            ValueInput::output(TY_PTR_U32, field_ptr, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            body_region,
+            0,
+            ValueOrigin::Output {
+                producer: load,
+                output: 0,
+            },
+        );
+
+        let mut context = AggregateReplacementContext::new();
+        let mut region_context = context.for_region(&rvsdg, body_region);
+
+        let changed = region_context.replace(&mut module, &mut rvsdg);
+
+        assert!(changed);
+
+        // Verify that the body_region result is now connected to an OpLoad node
+        let result_origin = rvsdg[body_region].value_results()[0].origin;
+        let ValueOrigin::Output {
+            producer: load_node,
+            ..
+        } = result_origin
+        else {
+            panic!("expected Output origin");
+        };
+        let op_load = rvsdg[load_node].expect_op_load();
+
+        // Verify that the load node is connected to the new field dependency argument (index 1)
+        assert_eq!(op_load.ptr_input().origin, ValueOrigin::Argument(1));
+
+        let fn_data = rvsdg[fn_node].expect_function();
+        // The original dependency remains (to be cleaned up by dead-value-elimination), and 2 new
+        // dependencies are added.
+        assert_eq!(fn_data.dependencies().len(), 3);
+
+        // The original dependency argument is now without users
+        assert!(rvsdg[body_region].value_arguments()[0].users.is_empty());
+
+        let dep_0 = fn_data.dependencies()[1];
+        let ValueOrigin::Output {
+            producer: field_0_const_node,
+            ..
+        } = dep_0.origin
+        else {
+            panic!("expected Output origin for field 0 dependency");
+        };
+        let field_0_constant = rvsdg[field_0_const_node].expect_constant().constant();
+        assert_eq!(field_0_constant.name.as_str(), "CONST.0");
+
+        let dep_1 = fn_data.dependencies()[2];
+        let ValueOrigin::Output {
+            producer: field_1_const_node,
+            ..
+        } = dep_1.origin
+        else {
+            panic!("expected Output origin for field 1 dependency");
+        };
+        let field_1_constant = rvsdg[field_1_const_node].expect_constant().constant();
+        assert_eq!(field_1_constant.name.as_str(), "CONST.1");
+
+        assert!(module.constants.contains(field_0_constant));
+        assert!(module.constants.contains(field_1_constant));
+
+        let data_0 = &module.constants[field_0_constant];
+        assert_eq!(data_0.ty(), ty_u32);
+        let ConstantKind::ByteData(id_0, offset_0) = data_0.kind() else {
+            panic!("expected ByteData");
+        };
+        // Should point into the original allocation, at the offset for field `0` (0)
+        assert_eq!(*id_0, alloc_id);
+        assert_eq!(*offset_0, 0);
+
+        let data_1 = &module.constants[field_1_constant];
+        assert_eq!(data_1.ty(), ty_u32);
+        let ConstantKind::ByteData(id_1, offset_1) = data_1.kind() else {
+            panic!("expected ByteData");
+        };
+        // Should point into the original allocation, at the offset for field `1` (4)
+        assert_eq!(*id_1, alloc_id);
+        assert_eq!(*offset_1, 4);
+
+        // The original OpFieldPtr node is removed.
+        assert!(!rvsdg.is_live_node(field_ptr));
     }
 }
