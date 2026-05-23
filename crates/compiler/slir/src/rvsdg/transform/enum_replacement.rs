@@ -1,3 +1,12 @@
+//! Replaces enum-typed alloca nodes and constant dependencies with multiple allocas or constants:
+//! one for the discriminant and one for each of the enum's variants.
+//!
+//! We'll also refer to this as "splitting" an enum alloca or constant dependency.
+//!
+//! This is a key transformation for eliminating enums from the RVSDG, as enums are not supported by
+//! our target shader languages. By splitting an enum into its parts, we can then replace uses of
+//! the enum with uses of its parts.
+//!
 use internment::Intern;
 
 use crate::rvsdg::{
@@ -201,7 +210,7 @@ impl<'a> EnumReplacer<'a> {
             NodeKind::Loop(_) => self.split_loop_result(region, result, split_input),
             NodeKind::Function(_) => panic!(
                 "cannot split function result; \
-            non-local-use analyses should have rejected the alloca"
+            non-local-use analyses should have rejected the alloca or constant"
             ),
             _ => unreachable!("node kind cannot by a region owner"),
         }
@@ -221,7 +230,7 @@ impl<'a> EnumReplacer<'a> {
             Simple(OpDiscriminantPtr(_)) => self.elide_op_discriminant_ptr(node, split_input),
             Simple(OpVariantPtr(_)) => self.elide_op_variant_ptr(node, split_input),
             Simple(ValueProxy(_)) => self.visit_value_proxy(node, split_input),
-            _ => unreachable!("node kind cannot take a pointer to an enum as input"),
+            _ => unreachable!("node kind cannot take a pointer to or a copy of an enum as input"),
         }
     }
 

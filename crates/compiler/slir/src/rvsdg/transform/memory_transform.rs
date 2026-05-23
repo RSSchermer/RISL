@@ -37,7 +37,7 @@ impl MemoryTransformer {
             }
 
             // We run the promoter-legalizer at least once (on the first iteration) and then as
-            // often as we keep replacing aggregate alloca nodes.
+            // often as we keep replacing aggregate alloca nodes or constant dependencies.
             if iterations == 0 || did_transform {
                 did_transform = false;
 
