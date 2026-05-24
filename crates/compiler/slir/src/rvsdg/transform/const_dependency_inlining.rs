@@ -45,7 +45,7 @@ impl ConstDependencyInliner {
                             self.visited.clear();
                             self.queue.clear();
 
-                            let mut visitor = ConstDependencyVisitor {
+                            let mut visitor = JobCollector {
                                 inliner: self,
                                 alloc_id: *alloc_id,
                                 offset: *offset,
@@ -113,13 +113,13 @@ impl ConstDependencyInliner {
     }
 }
 
-struct ConstDependencyVisitor<'a> {
+struct JobCollector<'a> {
     inliner: &'a mut ConstDependencyInliner,
     alloc_id: AllocId,
     offset: usize,
 }
 
-impl ValueFlowVisitor for ConstDependencyVisitor<'_> {
+impl ValueFlowVisitor for JobCollector<'_> {
     fn should_visit(&mut self, region: Region, user: ValueUser) -> bool {
         self.inliner.visited.insert((region, user))
     }
