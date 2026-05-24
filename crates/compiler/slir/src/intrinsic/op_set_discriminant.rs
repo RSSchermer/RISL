@@ -3,9 +3,17 @@ use serde::{Deserialize, Serialize};
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{Type, TypeKind};
 
-/// Operation that takes a pointer to an enum and returns its discriminant.
+/// Operation that takes a pointer to an enum and sets its discriminant according to the
+/// `variant_index`.
 ///
-/// An enum value's discriminant dynamically represents the enum value's active variant.
+/// *IMPORTANT*: this operation is parameterized by the variant-index, not the discriminant! While
+/// the variant-index and the discriminant may be the same, they ofter are not. For example, in
+/// Rust users can associate explicit discriminant values with enum variants. The discriminant
+/// can be resolved from the variant index using the [Enum::variants](crate::ty::Enum::variants)
+/// list, where the variant's position in the list maps to its
+/// [EnumVariant::discriminant](crate::ty::EnumVariant::discriminant). Transformations need to be
+/// mindful of the discintinction between variant-index and discriminant and ensure they use the
+/// appropriate value.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpSetDiscriminant {
     pub variant_index: u32,

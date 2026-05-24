@@ -334,17 +334,21 @@ impl<'a> EnumReplacer<'a> {
         let enum_kind = self.ty.kind(self.enum_ty);
         let enum_data = enum_kind.expect_enum();
         let discr_ty = enum_data.discriminant_ty.backend_ty();
+        let discriminant = enum_data.variants[variant_index as usize].discriminant;
 
-        let variant_node = if enum_data.discriminant_ty.signed {
-            self.rvsdg.add_const_i32(region, variant_index as i32)
-        } else {
-            self.rvsdg.add_const_u32(region, variant_index)
+        let discr_node = match discr_ty {
+            TY_U32 => self.rvsdg.add_const_u32(region, discriminant as u32),
+            TY_I32 => self.rvsdg.add_const_i32(region, discriminant as i32),
+            _ => panic!(
+                "unsupported backend type for enum discriminant: {:?}",
+                discr_ty
+            ),
         };
 
         self.rvsdg.add_op_store(
             region,
             split_input[0],
-            ValueInput::output(discr_ty, variant_node, 0),
+            ValueInput::output(discr_ty, discr_node, 0),
             state_origin,
         );
         self.rvsdg.remove_node(node);
