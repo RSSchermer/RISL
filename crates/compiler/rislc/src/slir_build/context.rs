@@ -936,8 +936,15 @@ impl<'a, 'tcx> BackendTypes for CodegenContext<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> StaticCodegenMethods for CodegenContext<'a, 'tcx> {
-    fn static_addr_of(&self, cv: Self::Value, align: Align, kind: Option<&str>) -> Self::Value {
-        todo!()
+    fn static_addr_of(&self, cv: Self::Value, _align: Align, _kind: Option<&str>) -> Self::Value {
+        match cv {
+            Value::Constant(c) => slir::cfg::InlineConst::Ptr(slir::cfg::ConstPtr::new(
+                &*self.module.borrow(),
+                slir::cfg::RootIdentifier::Constant(c),
+            ))
+            .into(),
+            _ => todo!("static_addr_of for non-constant value"),
+        }
     }
 
     fn codegen_static(&self, def: StaticDef) {}
@@ -1039,7 +1046,28 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn const_data_from_alloc(&self, alloc: &Allocation, layout: &TyAndLayout) -> Self::Value {
-        todo!()
+        let slir_alloc_id = {
+            let mut module = self.module.borrow_mut();
+
+            let bytes: Vec<u8> = alloc.bytes.iter().map(|b| b.unwrap_or(0)).collect();
+
+            module.allocations.register(slir::Allocation { bytes })
+        };
+
+        let const_id = self.module.borrow().constants.iter().count();
+        let const_name = slir::Symbol::new(format!("ca{}", const_id));
+        let constant = slir::Constant {
+            name: const_name,
+            module: self.module_name,
+        };
+        let ty = self.ty_and_layout_resolve(layout);
+
+        self.module
+            .borrow_mut()
+            .constants
+            .register_byte_data(constant, ty, slir_alloc_id, 0);
+
+        Value::Constant(constant)
     }
 
     fn scalar_to_backend(&self, scalar: Scalar) -> Self::Value {
@@ -1074,13 +1102,10 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
                                 .borrow_mut()
                                 .entry(ptr.alloc_id)
                                 .or_insert_with(|| {
-                                    let bytes = alloc
-                                        .raw_bytes()
-                                        .expect("could not read constant memory allocation");
+                                    let bytes: Vec<u8> =
+                                        alloc.bytes.iter().map(|b| b.unwrap_or(0)).collect();
 
-                                    module.allocations.register(slir::Allocation {
-                                        bytes: bytes.to_vec(),
-                                    })
+                                    module.allocations.register(slir::Allocation { bytes })
                                 })
                         };
 

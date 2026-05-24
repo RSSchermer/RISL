@@ -177,44 +177,47 @@ impl<'a, V: CodegenObject> OperandRef<V> {
         let ty = val.ty();
         let layout = TyAndLayout::expect_from_ty(ty);
         let alloc_align = alloc.align;
+        let is_multivariant = matches!(layout.layout.variants, VariantsShape::Multiple { .. });
 
         assert!(alloc_align >= layout.layout.abi_align);
 
         let machine_info = MachineInfo::target();
 
-        match layout.layout.abi.clone() {
-            ValueAbi::Scalar(abi) => {
-                let size = abi.size(&machine_info);
+        if !is_multivariant {
+            match layout.layout.abi.clone() {
+                ValueAbi::Scalar(abi) => {
+                    let size = abi.size(&machine_info);
 
-                assert_eq!(
-                    size, layout.layout.size,
-                    "abi::Scalar size does not match layout size"
-                );
+                    assert_eq!(
+                        size, layout.layout.size,
+                        "abi::Scalar size does not match layout size"
+                    );
 
-                let val = Scalar::read_from_alloc(alloc, 0, abi, &layout);
-                let val = bx.scalar_to_backend(val);
+                    let val = Scalar::read_from_alloc(alloc, 0, abi, &layout);
+                    let val = bx.scalar_to_backend(val);
 
-                return OperandRef {
-                    val: OperandValue::Immediate(val),
-                    layout,
-                };
+                    return OperandRef {
+                        val: OperandValue::Immediate(val),
+                        layout,
+                    };
+                }
+                ValueAbi::ScalarPair(a, b) => {
+                    let b_offset = a.size(&machine_info).bytes();
+
+                    let a_val = Scalar::read_from_alloc(alloc, 0, a, &layout.field(0));
+                    let b_val = Scalar::read_from_alloc(alloc, b_offset, b, &layout.field(1));
+
+                    let a_val = bx.scalar_to_backend(a_val);
+                    let b_val = bx.scalar_to_backend(b_val);
+
+                    return OperandRef {
+                        val: OperandValue::Pair(a_val, b_val),
+                        layout,
+                    };
+                }
+                _ if layout.layout.is_1zst() => return OperandRef::zero_sized(layout),
+                _ => {}
             }
-            ValueAbi::ScalarPair(a, b) => {
-                let b_offset = a.size(&machine_info).bytes();
-
-                let a_val = Scalar::read_from_alloc(alloc, 0, a, &layout.field(0));
-                let b_val = Scalar::read_from_alloc(alloc, b_offset, b, &layout.field(1));
-
-                let a_val = bx.scalar_to_backend(a_val);
-                let b_val = bx.scalar_to_backend(b_val);
-
-                return OperandRef {
-                    val: OperandValue::Pair(a_val, b_val),
-                    layout,
-                };
-            }
-            _ if layout.layout.is_1zst() => return OperandRef::zero_sized(layout),
-            _ => {}
         }
 
         // Neither a scalar nor scalar pair. Load from a place

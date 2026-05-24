@@ -2,6 +2,7 @@
 pub enum Value {
     Value(slir::cfg::Value),
     FnAddr(slir::Function),
+    Constant(slir::Constant),
     Void,
 }
 
@@ -19,6 +20,14 @@ impl Value {
             *f
         } else {
             panic!("expected a function address")
+        }
+    }
+
+    pub fn expect_constant(&self) -> slir::Constant {
+        if let Value::Constant(c) = self {
+            *c
+        } else {
+            panic!("expected a constant")
         }
     }
 }
