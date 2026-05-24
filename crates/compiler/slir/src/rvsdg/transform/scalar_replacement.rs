@@ -4,7 +4,7 @@
 //! We'll also refer to this as "splitting" an alloca node or constant dependency.
 //!
 //! The following types are considered aggregate types: struct types, array types, slice (unsized
-//! array) types, and enum types. We don't support alloca nodes or constants for unsized types, so 
+//! array) types, and enum types. We don't support alloca nodes or constants for unsized types, so
 //! we will not have to consider the case of splitting a slice alloca node or constant; we only ever
 //! split alloca nodes and constants for struct types, array types, and enum types.
 //!
@@ -27,9 +27,9 @@
 //!
 //! However, for this compiler specifically, we may also need to split alloca nodes or constant
 //! dependencies for reasons of "legalization". Our primary output target, WGSL, does not allow
-//! aggregate types to contain pointers (or "pointer-likes" such as texture handles): their parts 
-//! may not be of a pointer type or an aggregate type that contains pointer types (recursively). If 
-//! we encounter such an alloca node or constant dependency, splitting is not optional; we must find 
+//! aggregate types to contain pointers (or "pointer-likes" such as texture handles): their parts
+//! may not be of a pointer type or an aggregate type that contains pointer types (recursively). If
+//! we encounter such an alloca node or constant dependency, splitting is not optional; we must find
 //! a way to split out the pointers it contains into scalar values.
 //!
 //! # Value-flow splitting
@@ -47,8 +47,8 @@
 //! multiple [OpStore] nodes: one for each part. An [OpStore] node does not have an output value, so
 //! no further splitting is required.
 //!
-//! If an [OpLoad] node was a user of the value-flow, then we replace the [OpLoad] node with 
-//! multiple [OpLoad] nodes: one for each part. However, the original [OpLoad] node *does* have a 
+//! If an [OpLoad] node was a user of the value-flow, then we replace the [OpLoad] node with
+//! multiple [OpLoad] nodes: one for each part. However, the original [OpLoad] node *does* have a
 //! value output; it represents a copy of the aggregate value. Further splitting is now required: to
 //! eliminate the original node, we must eliminate all its users, which means eliminating the
 //! original [OpLoad] node, which means the original [OpLoad] node must be made "user-less" and its
@@ -64,15 +64,15 @@
 //! However, not all node kinds that may consume a pointer to or a copy of an aggregate value also
 //! output a pointer to or a copy of an aggregate. As discussed above [OpStore] has no output value
 //! at all, so no downstream adjustments will need to be made. [OpFieldPtr], [OpElementPtr],
-//! [OpExtractField], [OpExtractElement], [OpDiscriminantPtr] and [OpVariantPtr] all output a 
-//! pointer to or a copy of a part of the aggregate; we'll call these "part-selector" nodes. These 
-//! may all be adjusted by connecting their users directly to the appropriate split part value and 
-//! removing the part-selector node. As the element index for [OpElementPtr] and [OpExtractElement] 
-//! may be runtime-dynamic, we introduce a new [Switch] node to select the appropriate part, using 
-//! the index value as the [Switch] node's branch selector. An [OpGetDiscriminant] node may be 
+//! [OpExtractField], [OpExtractElement], [OpDiscriminantPtr] and [OpVariantPtr] all output a
+//! pointer to or a copy of a part of the aggregate; we'll call these "part-selector" nodes. These
+//! may all be adjusted by connecting their users directly to the appropriate split part value and
+//! removing the part-selector node. As the element index for [OpElementPtr] and [OpExtractElement]
+//! may be runtime-dynamic, we introduce a new [Switch] node to select the appropriate part, using
+//! the index value as the [Switch] node's branch selector. An [OpGetDiscriminant] node may be
 //! replaced by an [OpLoad] node that uses the discriminant-part value of an enum's value-flow. An
-//! [OpSetDiscriminant] may be replaced by an [OpStore] node that uses the discriminant-part value 
-//! of an enum's value-flow. All of these node kinds act as terminators of value-flow splitting; no 
+//! [OpSetDiscriminant] may be replaced by an [OpStore] node that uses the discriminant-part value
+//! of an enum's value-flow. All of these node kinds act as terminators of value-flow splitting; no
 //! further down-stream splitting is required after one of these node kinds.
 //!
 //! [OpOffsetSlice] and [OpGetSliceOffset] nodes form an exception. We don't split these nodes and
@@ -407,8 +407,8 @@ impl ValueFlowVisitor for JobAnalyzer {
             Simple(OpStore(_)) if input == 1 && !self.was_loaded => {
                 self.is_stored_value = true;
 
-                // We do continue searching for non-local uses, as non-local use will cause an 
-                // alloca or constant dependency to be ignored entirely, which supersedes retrying 
+                // We do continue searching for non-local uses, as non-local use will cause an
+                // alloca or constant dependency to be ignored entirely, which supersedes retrying
                 // after memory promotion.
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
@@ -734,10 +734,11 @@ impl Replacer<'_, '_, '_> {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
+                let selector_ty = node_data.index_input().ty;
                 let to_predicate = self.rvsdg.add_op_case_to_branch_selector(
                     region,
                     ValueInput {
-                        ty: TY_U32,
+                        ty: selector_ty,
                         origin: selector,
                     },
                     0..(split_input.len() as u32 - 1),
@@ -821,10 +822,11 @@ impl Replacer<'_, '_, '_> {
                 // The element index is not statically known. We'll have to dynamically select an
                 // input at runtime with a switch node.
 
+                let selector_ty = node_data.index_input().ty;
                 let to_predicate = self.rvsdg.add_op_case_to_branch_selector(
                     region,
                     ValueInput {
-                        ty: TY_U32,
+                        ty: selector_ty,
                         origin: selector,
                     },
                     0..(split_input.len() as u32 - 1),

@@ -23,14 +23,14 @@ impl Intrinsic for OpGetDiscriminant {
                 arg.to_string(ty_registry)
             ));
         };
-        let TypeKind::Enum(_) = &*ty_registry.kind(pointee_ty) else {
+        let TypeKind::Enum(enum_data) = &*ty_registry.kind(pointee_ty) else {
             return Err(format!(
                 "get-discriminant operation expected a pointer to an `enum` type, found `{}`",
                 arg.to_string(ty_registry)
             ));
         };
 
-        Ok(Some(TY_U32))
+        Ok(Some(enum_data.discriminant_ty.backend_ty()))
     }
 
     fn affects_state(&self) -> bool {

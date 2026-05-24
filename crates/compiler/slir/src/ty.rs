@@ -496,6 +496,12 @@ pub struct Int {
     pub signed: bool,
 }
 
+impl Int {
+    pub fn backend_ty(&self) -> Type {
+        if self.signed { TY_I32 } else { TY_U32 }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum IntSize {
     I8,
@@ -535,7 +541,7 @@ pub struct EnumDiscriminant {
 
 impl EnumDiscriminant {
     pub fn backend_ty(&self) -> Type {
-        if self.ty.signed { TY_I32 } else { TY_U32 }
+        self.ty.backend_ty()
     }
 
     pub fn to_u32(&self) -> u32 {

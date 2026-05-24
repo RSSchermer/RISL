@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::intrinsic::{Intrinsic, expect_one_arg};
-use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
+use crate::ty::{TY_I32, TY_PREDICATE, TY_U32, Type, TypeRegistry};
 
 /// Converts an integer into a branch selector predicate by comparing it against a list of cases.
 ///
@@ -22,9 +22,9 @@ impl Intrinsic for OpCaseToBranchSelector {
     ) -> Result<Option<Type>, String> {
         let arg = expect_one_arg!("op-case-to-branch-selector", args);
 
-        if arg != TY_U32 {
+        if arg != TY_U32 && arg != TY_I32 {
             return Err(format!(
-                "case-to-branch-selector operation expects its argument to be a `u32`, found `{}`",
+                "case-to-branch-selector operation expects its argument to be a `u32` or `i32`, found `{}`",
                 arg.to_string(ty_registry)
             ));
         }

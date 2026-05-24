@@ -29,14 +29,17 @@ impl Intrinsic for OpDiscriminantPtr {
                 arg.to_string(ty_registry)
             ));
         };
-        let TypeKind::Enum(_) = &*ty_registry.kind(pointee_ty) else {
+        let TypeKind::Enum(enum_data) = &*ty_registry.kind(pointee_ty) else {
             return Err(format!(
                 "discriminant-ptr operation expected a pointer to an `enum` type, found `{}`",
                 arg.to_string(ty_registry)
             ));
         };
 
-        Ok(Some(TY_PTR_U32))
+        let discr_ty = enum_data.discriminant_ty.backend_ty();
+        let discr_ptr_ty = ty_registry.register(TypeKind::Ptr(discr_ty));
+
+        Ok(Some(discr_ptr_ty))
     }
 
     fn affects_state(&self) -> bool {

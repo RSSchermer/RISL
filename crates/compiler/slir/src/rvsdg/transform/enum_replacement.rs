@@ -40,12 +40,19 @@ impl<'a> EnumReplacer<'a> {
     {
         let node_data = &self.rvsdg[node];
         let region = node_data.region();
-        let discriminant_node = self.rvsdg.add_op_alloca(region, TY_U32);
+        let discr_ty = self
+            .ty
+            .kind(self.enum_ty)
+            .expect_enum()
+            .discriminant_ty
+            .backend_ty();
+        let discr_ptr_ty = self.ty.register(TypeKind::Ptr(discr_ty));
+        let discriminant_node = self.rvsdg.add_op_alloca(region, discr_ty);
 
         let mut replacements = Vec::new();
 
         replacements.push(ValueInput {
-            ty: TY_PTR_U32,
+            ty: discr_ptr_ty,
             origin: ValueOrigin::Output {
                 producer: discriminant_node,
                 output: 0,
@@ -324,12 +331,20 @@ impl<'a> EnumReplacer<'a> {
         let node_data = self.rvsdg[node].expect_op_set_discriminant();
         let variant_index = node_data.variant_index();
 
-        let variant_node = self.rvsdg.add_const_u32(region, variant_index);
+        let enum_kind = self.ty.kind(self.enum_ty);
+        let enum_data = enum_kind.expect_enum();
+        let discr_ty = enum_data.discriminant_ty.backend_ty();
+
+        let variant_node = if enum_data.discriminant_ty.signed {
+            self.rvsdg.add_const_i32(region, variant_index as i32)
+        } else {
+            self.rvsdg.add_const_u32(region, variant_index)
+        };
 
         self.rvsdg.add_op_store(
             region,
             split_input[0],
-            ValueInput::output(TY_U32, variant_node, 0),
+            ValueInput::output(discr_ty, variant_node, 0),
             state_origin,
         );
         self.rvsdg.remove_node(node);
@@ -532,8 +547,12 @@ impl<'a> EnumReplacer<'a> {
         let mut split_ptr_input = Vec::new();
 
         let discriminant_ptr = self.rvsdg.add_op_discriminant_ptr(region, ptr_input);
+        let discr_ptr_ty = self.rvsdg[discriminant_ptr]
+            .expect_op_discriminant_ptr()
+            .value_output()
+            .ty;
 
-        split_ptr_input.push(ValueInput::output(TY_PTR_U32, discriminant_ptr, 0));
+        split_ptr_input.push(ValueInput::output(discr_ptr_ty, discriminant_ptr, 0));
 
         let ty_kind = self.ty.kind(self.enum_ty);
         let variant_count = ty_kind.expect_enum().variants.len();
@@ -721,13 +740,19 @@ impl<'a> EnumReplacer<'a> {
         let discriminant_node = self
             .rvsdg
             .add_op_discriminant_ptr(outer_region, proxy_input);
+        let discr_ptr_ty = self.rvsdg[discriminant_node]
+            .expect_op_discriminant_ptr()
+            .value_output()
+            .ty;
 
-        self.rvsdg
-            .add_loop_input(owner, ValueInput::output(TY_PTR_U32, discriminant_node, 0));
+        self.rvsdg.add_loop_input(
+            owner,
+            ValueInput::output(discr_ptr_ty, discriminant_node, 0),
+        );
 
-        split_args.push(ValueInput::argument(TY_PTR_U32, prior_input_count as u32));
+        split_args.push(ValueInput::argument(discr_ptr_ty, prior_input_count as u32));
         split_outputs.push(ValueInput::output(
-            TY_PTR_U32,
+            discr_ptr_ty,
             owner,
             prior_input_count as u32,
         ));
