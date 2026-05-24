@@ -2,6 +2,7 @@ pub mod branch_selector_normalization;
 pub mod common_node_elimination;
 pub mod common_value_elimination;
 pub mod conditional_ub_elimination;
+pub mod const_dependency_inlining;
 pub mod const_switch_inlining;
 pub mod dead_loop_value_normalization;
 pub mod dead_value_elimination;
@@ -45,6 +46,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     pred_to_case_to_pred_merging::transform_entry_points(module, rvsdg);
     switchify_pred_to_case::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
+    const_dependency_inlining::transform_entry_points(module, rvsdg);
     invalid_ptr_replacement::transform_entry_points(module, rvsdg);
     switch_arg_reduction::transform_entry_points(module, rvsdg);
     const_switch_inlining::transform_entry_points(module, rvsdg);
