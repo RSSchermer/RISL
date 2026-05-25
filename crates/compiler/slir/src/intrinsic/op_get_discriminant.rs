@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::intrinsic::{Intrinsic, expect_one_arg};
-use crate::ty::{TY_U32, Type, TypeKind};
+use crate::ty::{Type, TypeKind};
 
 /// Operation that takes a pointer to an enum and returns its discriminant.
 ///

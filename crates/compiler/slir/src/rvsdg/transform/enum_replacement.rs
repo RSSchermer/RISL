@@ -12,8 +12,8 @@ use internment::Intern;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
-use crate::ty::{TY_PTR_U32, TY_U32, Type, TypeKind, TypeRegistry};
-use crate::{AllocId, Allocation, Constant, Module};
+use crate::ty::{Type, TypeKind, TypeRegistry};
+use crate::{AllocId, Allocation, Constant, Module, ty};
 
 pub struct EnumReplacer<'a> {
     rvsdg: &'a mut Rvsdg,
@@ -337,8 +337,8 @@ impl<'a> EnumReplacer<'a> {
         let discriminant = enum_data.variants[variant_index as usize].discriminant;
 
         let discr_node = match discr_ty {
-            TY_U32 => self.rvsdg.add_const_u32(region, discriminant as u32),
-            TY_I32 => self.rvsdg.add_const_i32(region, discriminant as i32),
+            ty::TY_U32 => self.rvsdg.add_const_u32(region, discriminant as u32),
+            ty::TY_I32 => self.rvsdg.add_const_i32(region, discriminant as i32),
             _ => panic!(
                 "unsupported backend type for enum discriminant: {:?}",
                 discr_ty
@@ -915,7 +915,7 @@ mod tests {
     use crate::rvsdg::{StateOrigin, ValueOutput};
     use crate::ty::{
         Enum, EnumTagEncoding, EnumVariant, Int, IntSize, Struct, StructField, TY_DUMMY,
-        TY_PREDICATE,
+        TY_PREDICATE, TY_PTR_U32, TY_U32,
     };
     use crate::{FnArg, FnSig, Function, Module, Symbol, thin_set};
 
