@@ -3,8 +3,9 @@ use indexmap::IndexSet;
 use crate::rvsdg::visit::region_nodes::{RegionNodesVisitor, visit_node};
 use crate::rvsdg::visit::reverse_value_flow::{ReverseValueFlowVisitor, visit_region_argument};
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, ValueUser,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
+use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32};
 use crate::{BinaryOperator, Module, UnaryOperator};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -13,7 +14,7 @@ enum MaybeConstantValue {
     I32(i32),
     F32(f32),
     Bool(bool),
-    Variable(ValueOrigin),
+    Variable(ValueInput),
 }
 
 pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
@@ -81,6 +82,34 @@ impl NodeReducer {
                     self.apply_reduction(rvsdg, node, region, reduced);
                 }
             }
+            Simple(OpConvertToU32(_)) => {
+                let val = self.resolve_value(rvsdg, node, 0);
+
+                if let Some(reduced) = try_reduce_convert_to_u32(val) {
+                    self.apply_reduction(rvsdg, node, region, reduced);
+                }
+            }
+            Simple(OpConvertToI32(_)) => {
+                let val = self.resolve_value(rvsdg, node, 0);
+
+                if let Some(reduced) = try_reduce_convert_to_i32(val) {
+                    self.apply_reduction(rvsdg, node, region, reduced);
+                }
+            }
+            Simple(OpConvertToF32(_)) => {
+                let val = self.resolve_value(rvsdg, node, 0);
+
+                if let Some(reduced) = try_reduce_convert_to_f32(val) {
+                    self.apply_reduction(rvsdg, node, region, reduced);
+                }
+            }
+            Simple(OpConvertToBool(_)) => {
+                let val = self.resolve_value(rvsdg, node, 0);
+
+                if let Some(reduced) = try_reduce_convert_to_bool(val) {
+                    self.apply_reduction(rvsdg, node, region, reduced);
+                }
+            }
             _ => {}
         }
     }
@@ -125,7 +154,7 @@ impl NodeReducer {
                     output: 0,
                 }
             }
-            MaybeConstantValue::Variable(origin) => origin,
+            MaybeConstantValue::Variable(input) => input.origin,
         };
 
         let original_origin = ValueOrigin::Output {
@@ -155,7 +184,7 @@ impl NodeReducer {
         resolver.visit_value_input(rvsdg, node, input_index);
 
         resolver.result.unwrap_or_else(|| {
-            MaybeConstantValue::Variable(rvsdg[node].value_inputs()[input_index as usize].origin)
+            MaybeConstantValue::Variable(rvsdg[node].value_inputs()[input_index as usize])
         })
     }
 }
@@ -169,7 +198,11 @@ impl<'a> RegionNodesVisitor for CandidateCollector<'a> {
         use NodeKind::*;
         use SimpleNode::*;
 
-        if let Simple(OpBinary(_) | OpUnary(_)) = rvsdg[node].kind() {
+        if let Simple(
+            OpBinary(_) | OpUnary(_) | OpConvertToU32(_) | OpConvertToI32(_) | OpConvertToF32(_)
+            | OpConvertToBool(_),
+        ) = rvsdg[node].kind()
+        {
             self.worklist.insert(node);
         }
 
@@ -191,13 +224,6 @@ impl ReverseValueFlowVisitor for ValueResolver {
             return;
         }
 
-        if region == rvsdg.global_region() {
-            self.result = Some(MaybeConstantValue::Variable(ValueOrigin::Argument(
-                argument,
-            )));
-            return;
-        }
-
         let owner = rvsdg[region].owner();
 
         use NodeKind::*;
@@ -216,14 +242,18 @@ impl ReverseValueFlowVisitor for ValueResolver {
                 if result_origin == ValueOrigin::Argument(argument) {
                     visit_region_argument(self, rvsdg, region, argument);
                 } else {
-                    self.result = Some(MaybeConstantValue::Variable(ValueOrigin::Argument(
-                        argument,
+                    let ty = rvsdg[region].value_arguments()[argument as usize].ty;
+
+                    self.result = Some(MaybeConstantValue::Variable(ValueInput::argument(
+                        ty, argument,
                     )));
                 }
             }
             Function(_) => {
-                self.result = Some(MaybeConstantValue::Variable(ValueOrigin::Argument(
-                    argument,
+                let ty = rvsdg[region].value_arguments()[argument as usize].ty;
+
+                self.result = Some(MaybeConstantValue::Variable(ValueInput::argument(
+                    ty, argument,
                 )));
             }
             _ => unreachable!(),
@@ -256,10 +286,11 @@ impl ReverseValueFlowVisitor for ValueResolver {
                 self.visit_value_input(rvsdg, node, 0);
             }
             _ => {
-                self.result = Some(MaybeConstantValue::Variable(ValueOrigin::Output {
-                    producer: node,
-                    output,
-                }));
+                let ty = rvsdg[node].value_outputs()[output as usize].ty;
+
+                self.result = Some(MaybeConstantValue::Variable(ValueInput::output(
+                    ty, node, output,
+                )));
             }
         }
     }
@@ -581,13 +612,65 @@ fn try_reduce_or(lhs: MaybeConstantValue, rhs: MaybeConstantValue) -> Option<May
     }
 }
 
+fn try_reduce_convert_to_u32(val: MaybeConstantValue) -> Option<MaybeConstantValue> {
+    use MaybeConstantValue::*;
+
+    match val {
+        U32(v) => Some(U32(v)),
+        I32(v) => Some(U32(v as u32)),
+        F32(v) if is_safe_f32(v) => Some(U32(v as u32)),
+        Bool(v) => Some(U32(v as u32)),
+        Variable(input) if input.ty == TY_U32 => Some(Variable(input)),
+        _ => None,
+    }
+}
+
+fn try_reduce_convert_to_i32(val: MaybeConstantValue) -> Option<MaybeConstantValue> {
+    use MaybeConstantValue::*;
+
+    match val {
+        U32(v) => Some(I32(v as i32)),
+        I32(v) => Some(I32(v)),
+        F32(v) if is_safe_f32(v) => Some(I32(v as i32)),
+        Bool(v) => Some(I32(v as i32)),
+        Variable(input) if input.ty == TY_I32 => Some(Variable(input)),
+        _ => None,
+    }
+}
+
+fn try_reduce_convert_to_f32(val: MaybeConstantValue) -> Option<MaybeConstantValue> {
+    use MaybeConstantValue::*;
+
+    match val {
+        U32(v) => Some(F32(v as f32)),
+        I32(v) => Some(F32(v as f32)),
+        F32(v) if is_safe_f32(v) => Some(F32(v)),
+        Bool(v) => Some(F32(if v { 1.0 } else { 0.0 })),
+        Variable(input) if input.ty == TY_F32 => Some(Variable(input)),
+        _ => None,
+    }
+}
+
+fn try_reduce_convert_to_bool(val: MaybeConstantValue) -> Option<MaybeConstantValue> {
+    use MaybeConstantValue::*;
+
+    match val {
+        U32(v) => Some(Bool(v != 0)),
+        I32(v) => Some(Bool(v != 0)),
+        F32(v) if is_safe_f32(v) => Some(Bool(v != 0.0)),
+        Bool(v) => Some(Bool(v)),
+        Variable(input) if input.ty == TY_BOOL => Some(Variable(input)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use MaybeConstantValue::*;
 
     use super::*;
     use crate::rvsdg::ValueInput;
-    use crate::ty::{TY_DUMMY, TY_U32};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_F32, TY_I32, TY_U32};
     use crate::{FnSig, Function, Symbol};
 
     #[test]
@@ -651,15 +734,16 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_add() {
+    fn test_try_reduce_binary_add() {
         use BinaryOperator::*;
         assert_eq!(try_reduce_binary(Add, U32(1), U32(2)), Some(U32(3)));
         assert_eq!(try_reduce_binary(Add, I32(1), I32(2)), Some(I32(3)));
         assert_eq!(try_reduce_binary(Add, F32(1.0), F32(2.0)), Some(F32(3.0)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Add, var, U32(0)), Some(var));
         assert_eq!(try_reduce_binary(Add, U32(0), var), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Add, var, I32(0)), Some(var));
         assert_eq!(try_reduce_binary(Add, I32(0), var), Some(var));
 
@@ -676,15 +760,16 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_sub() {
+    fn test_try_reduce_binary_sub() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Sub, U32(5), U32(3)), Some(U32(2)));
         assert_eq!(try_reduce_binary(Sub, I32(5), I32(3)), Some(I32(2)));
         assert_eq!(try_reduce_binary(Sub, F32(5.0), F32(3.0)), Some(F32(2.0)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Sub, var, U32(0)), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Sub, var, I32(0)), Some(var));
 
         // F32 safety
@@ -696,20 +781,23 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_mul() {
+    fn test_try_reduce_binary_mul() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Mul, U32(2), U32(3)), Some(U32(6)));
         assert_eq!(try_reduce_binary(Mul, I32(2), I32(3)), Some(I32(6)));
         assert_eq!(try_reduce_binary(Mul, F32(2.0), F32(3.0)), Some(F32(6.0)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Mul, var, U32(1)), Some(var));
         assert_eq!(try_reduce_binary(Mul, U32(1), var), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Mul, var, I32(1)), Some(var));
         assert_eq!(try_reduce_binary(Mul, I32(1), var), Some(var));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Mul, var, U32(0)), Some(U32(0)));
         assert_eq!(try_reduce_binary(Mul, U32(0), var), Some(U32(0)));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Mul, var, I32(0)), Some(I32(0)));
         assert_eq!(try_reduce_binary(Mul, I32(0), var), Some(I32(0)));
 
@@ -721,15 +809,16 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_div() {
+    fn test_try_reduce_binary_div() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Div, U32(6), U32(2)), Some(U32(3)));
         assert_eq!(try_reduce_binary(Div, I32(6), I32(2)), Some(I32(3)));
         assert_eq!(try_reduce_binary(Div, F32(6.0), F32(2.0)), Some(F32(3.0)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Div, var, U32(1)), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Div, var, I32(1)), Some(var));
 
         assert_eq!(try_reduce_binary(Div, U32(1), U32(0)), None);
@@ -745,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_mod() {
+    fn test_try_reduce_binary_mod() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Mod, U32(5), U32(3)), Some(U32(2)));
@@ -761,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_bit_and() {
+    fn test_try_reduce_binary_bit_and() {
         use BinaryOperator::*;
 
         assert_eq!(
@@ -773,15 +862,16 @@ mod tests {
             Some(I32(0b1000))
         );
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(BitAnd, var, U32(0)), Some(U32(0)));
         assert_eq!(try_reduce_binary(BitAnd, U32(0), var), Some(U32(0)));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(BitAnd, var, I32(0)), Some(I32(0)));
         assert_eq!(try_reduce_binary(BitAnd, I32(0), var), Some(I32(0)));
     }
 
     #[test]
-    fn test_try_reduce_bit_or() {
+    fn test_try_reduce_binary_bit_or() {
         use BinaryOperator::*;
 
         assert_eq!(
@@ -793,15 +883,16 @@ mod tests {
             Some(I32(0b1110))
         );
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(BitOr, var, U32(0)), Some(var));
         assert_eq!(try_reduce_binary(BitOr, U32(0), var), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(BitOr, var, I32(0)), Some(var));
         assert_eq!(try_reduce_binary(BitOr, I32(0), var), Some(var));
     }
 
     #[test]
-    fn test_try_reduce_bit_xor() {
+    fn test_try_reduce_binary_bit_xor() {
         use BinaryOperator::*;
 
         assert_eq!(
@@ -813,50 +904,57 @@ mod tests {
             Some(I32(0b0110))
         );
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(BitXor, var, U32(0)), Some(var));
         assert_eq!(try_reduce_binary(BitXor, U32(0), var), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(BitXor, var, I32(0)), Some(var));
         assert_eq!(try_reduce_binary(BitXor, I32(0), var), Some(var));
     }
 
     #[test]
-    fn test_try_reduce_shl() {
+    fn test_try_reduce_binary_shl() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Shl, U32(1), U32(2)), Some(U32(4)));
         assert_eq!(try_reduce_binary(Shl, I32(1), I32(2)), Some(I32(4)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Shl, var, U32(0)), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Shl, var, I32(0)), Some(var));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Shl, U32(0), var), Some(U32(0)));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Shl, I32(0), var), Some(I32(0)));
     }
 
     #[test]
-    fn test_try_reduce_shr() {
+    fn test_try_reduce_binary_shr() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Shr, U32(4), U32(2)), Some(U32(1)));
         assert_eq!(try_reduce_binary(Shr, I32(4), I32(2)), Some(I32(1)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Shr, var, U32(0)), Some(var));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Shr, var, I32(0)), Some(var));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Shr, U32(0), var), Some(U32(0)));
+        let var = Variable(ValueInput::argument(TY_I32, 0));
         assert_eq!(try_reduce_binary(Shr, I32(0), var), Some(I32(0)));
     }
 
     #[test]
-    fn test_try_reduce_lt() {
+    fn test_try_reduce_binary_lt() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Lt, U32(1), U32(2)), Some(Bool(true)));
         assert_eq!(try_reduce_binary(Lt, I32(1), I32(2)), Some(Bool(true)));
         assert_eq!(try_reduce_binary(Lt, F32(1.0), F32(2.0)), Some(Bool(true)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Lt, var, U32(0)), Some(Bool(false)));
 
         // F32 safety
@@ -864,13 +962,13 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_lt_eq() {
+    fn test_try_reduce_binary_lt_eq() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(LtEq, U32(1), U32(2)), Some(Bool(true)));
         assert_eq!(try_reduce_binary(LtEq, U32(2), U32(2)), Some(Bool(true)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(LtEq, U32(0), var), Some(Bool(true)));
 
         // F32 safety
@@ -878,12 +976,12 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_gt() {
+    fn test_try_reduce_binary_gt() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Gt, U32(2), U32(1)), Some(Bool(true)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(Gt, U32(0), var), Some(Bool(false)));
 
         // F32 safety
@@ -891,13 +989,13 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_gt_eq() {
+    fn test_try_reduce_binary_gt_eq() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(GtEq, U32(2), U32(1)), Some(Bool(true)));
         assert_eq!(try_reduce_binary(GtEq, U32(2), U32(2)), Some(Bool(true)));
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_binary(GtEq, var, U32(0)), Some(Bool(true)));
 
         // F32 safety
@@ -908,7 +1006,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_eq() {
+    fn test_try_reduce_binary_eq() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(Eq, U32(1), U32(1)), Some(Bool(true)));
@@ -922,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_not_eq() {
+    fn test_try_reduce_binary_not_eq() {
         use BinaryOperator::*;
 
         assert_eq!(try_reduce_binary(NotEq, U32(1), U32(2)), Some(Bool(true)));
@@ -936,7 +1034,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_and() {
+    fn test_try_reduce_binary_and() {
         use BinaryOperator::*;
 
         assert_eq!(
@@ -944,7 +1042,7 @@ mod tests {
             Some(Bool(false))
         );
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_BOOL, 0));
         assert_eq!(try_reduce_binary(And, var, Bool(true)), Some(var));
         assert_eq!(try_reduce_binary(And, Bool(true), var), Some(var));
         assert_eq!(try_reduce_binary(And, var, Bool(false)), Some(Bool(false)));
@@ -952,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_or() {
+    fn test_try_reduce_binary_or() {
         use BinaryOperator::*;
 
         assert_eq!(
@@ -960,7 +1058,7 @@ mod tests {
             Some(Bool(true))
         );
 
-        let var = Variable(ValueOrigin::Argument(0));
+        let var = Variable(ValueInput::argument(TY_BOOL, 0));
         assert_eq!(try_reduce_binary(Or, var, Bool(true)), Some(Bool(true)));
         assert_eq!(try_reduce_binary(Or, Bool(true), var), Some(Bool(true)));
         assert_eq!(try_reduce_binary(Or, var, Bool(false)), Some(var));
@@ -968,12 +1066,67 @@ mod tests {
     }
 
     #[test]
-    fn test_try_reduce_unary_folding() {
+    fn test_try_reduce_unary() {
         use UnaryOperator::*;
 
         assert_eq!(try_reduce_unary(Not, Bool(true)), Some(Bool(false)));
         assert_eq!(try_reduce_unary(Neg, I32(5)), Some(I32(-5)));
         assert_eq!(try_reduce_unary(Neg, F32(1.0)), Some(F32(-1.0)));
         assert_eq!(try_reduce_unary(Neg, F32(f32::NAN)), None);
+    }
+
+    #[test]
+    fn test_try_reduce_convert_to_u32() {
+        assert_eq!(try_reduce_convert_to_u32(U32(1)), Some(U32(1)));
+        assert_eq!(try_reduce_convert_to_u32(I32(1)), Some(U32(1)));
+        assert_eq!(try_reduce_convert_to_u32(F32(1.0)), Some(U32(1)));
+        assert_eq!(try_reduce_convert_to_u32(Bool(true)), Some(U32(1)));
+
+        let var_u32 = Variable(ValueInput::argument(TY_U32, 0));
+        let var_i32 = Variable(ValueInput::argument(TY_I32, 0));
+        assert_eq!(try_reduce_convert_to_u32(var_u32), Some(var_u32));
+        assert_eq!(try_reduce_convert_to_u32(var_i32), None);
+    }
+
+    #[test]
+    fn test_try_reduce_convert_to_i32() {
+        assert_eq!(try_reduce_convert_to_i32(U32(1)), Some(I32(1)));
+        assert_eq!(try_reduce_convert_to_i32(I32(1)), Some(I32(1)));
+        assert_eq!(try_reduce_convert_to_i32(F32(1.0)), Some(I32(1)));
+        assert_eq!(try_reduce_convert_to_i32(Bool(true)), Some(I32(1)));
+
+        let var_i32 = Variable(ValueInput::argument(TY_I32, 0));
+        let var_u32 = Variable(ValueInput::argument(TY_U32, 0));
+        assert_eq!(try_reduce_convert_to_i32(var_i32), Some(var_i32));
+        assert_eq!(try_reduce_convert_to_i32(var_u32), None);
+    }
+
+    #[test]
+    fn test_try_reduce_convert_to_f32() {
+        assert_eq!(try_reduce_convert_to_f32(U32(1)), Some(F32(1.0)));
+        assert_eq!(try_reduce_convert_to_f32(I32(1)), Some(F32(1.0)));
+        assert_eq!(try_reduce_convert_to_f32(F32(1.0)), Some(F32(1.0)));
+        assert_eq!(try_reduce_convert_to_f32(Bool(true)), Some(F32(1.0)));
+
+        let var_f32 = Variable(ValueInput::argument(TY_F32, 0));
+        let var_u32 = Variable(ValueInput::argument(TY_U32, 0));
+        assert_eq!(try_reduce_convert_to_f32(var_f32), Some(var_f32));
+        assert_eq!(try_reduce_convert_to_f32(var_u32), None);
+    }
+
+    #[test]
+    fn test_try_reduce_convert_to_bool() {
+        assert_eq!(try_reduce_convert_to_bool(U32(1)), Some(Bool(true)));
+        assert_eq!(try_reduce_convert_to_bool(U32(0)), Some(Bool(false)));
+        assert_eq!(try_reduce_convert_to_bool(I32(1)), Some(Bool(true)));
+        assert_eq!(try_reduce_convert_to_bool(I32(0)), Some(Bool(false)));
+        assert_eq!(try_reduce_convert_to_bool(F32(1.0)), Some(Bool(true)));
+        assert_eq!(try_reduce_convert_to_bool(F32(0.0)), Some(Bool(false)));
+        assert_eq!(try_reduce_convert_to_bool(Bool(true)), Some(Bool(true)));
+
+        let var_bool = Variable(ValueInput::argument(TY_BOOL, 0));
+        let var_u32 = Variable(ValueInput::argument(TY_U32, 0));
+        assert_eq!(try_reduce_convert_to_bool(var_bool), Some(var_bool));
+        assert_eq!(try_reduce_convert_to_bool(var_u32), None);
     }
 }
