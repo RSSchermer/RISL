@@ -16,6 +16,7 @@ pub mod invalid_ptr_replacement;
 pub mod loop_passthrough_elimination;
 pub mod memory_promotion_and_legalization;
 pub mod memory_transform;
+pub mod node_reduction;
 pub mod offset_slice_elaboration;
 pub mod offset_slice_replacement;
 pub mod pred_to_case_extraction;
@@ -47,6 +48,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     switchify_pred_to_case::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
     const_dependency_inlining::transform_entry_points(module, rvsdg);
+    node_reduction::transform_entry_points(module, rvsdg);
     invalid_ptr_replacement::transform_entry_points(module, rvsdg);
     switch_arg_reduction::transform_entry_points(module, rvsdg);
     const_switch_inlining::transform_entry_points(module, rvsdg);
