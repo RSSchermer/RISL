@@ -77,6 +77,7 @@ pub trait BuilderMethods<'a>:
     fn switch(
         &mut self,
         v: Self::Value,
+        layout: &TyAndLayout,
         else_llbb: Self::BasicBlock,
         cases: impl IntoIterator<Item = (u128, Self::BasicBlock)>,
     );

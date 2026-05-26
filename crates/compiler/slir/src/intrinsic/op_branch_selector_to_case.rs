@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::intrinsic::{Intrinsic, expect_one_arg};
-use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
+use crate::ty::{Int, TY_PREDICATE, Type, TypeRegistry};
 
 /// Converts a branch selector predicate into a `u32` value selected from a list of cases.
 ///
@@ -32,7 +32,8 @@ use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeRegistry};
 /// [2]: crate::rvsdg::transform::switch_merging
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpBranchSelectorToCase {
-    pub cases: Vec<u32>,
+    pub encoding: Int,
+    pub cases: Vec<u128>,
 }
 
 impl Intrinsic for OpBranchSelectorToCase {
@@ -50,7 +51,7 @@ impl Intrinsic for OpBranchSelectorToCase {
             ));
         }
 
-        Ok(Some(TY_U32))
+        Ok(Some(self.encoding.backend_ty()))
     }
 
     fn affects_state(&self) -> bool {

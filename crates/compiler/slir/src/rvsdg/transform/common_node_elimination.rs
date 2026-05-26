@@ -5,7 +5,7 @@ use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, visit,
 };
-use crate::ty::{Matrix, Type, Vector};
+use crate::ty::{Int, Matrix, Type, Vector};
 use crate::{BinaryOperator, UnaryOperator};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -63,9 +63,9 @@ enum SimpleNodeMetadata {
     OpToDegrees,
     OpVector(Vector),
     OpMatrix(Matrix),
-    OpCaseToBranchSelector(Vec<u32>),
+    OpCaseToBranchSelector(Int, Vec<u128>),
     OpBoolToBranchSelector,
-    OpBranchSelectorToCase(Vec<u32>),
+    OpBranchSelectorToCase(Int, Vec<u128>),
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,
@@ -134,11 +134,11 @@ impl SimpleNodeMetadata {
             SimpleNode::OpVector(n) => SimpleNodeMetadata::OpVector(n.intrinsic().ty),
             SimpleNode::OpMatrix(n) => SimpleNodeMetadata::OpMatrix(n.intrinsic().ty),
             SimpleNode::OpCaseToBranchSelector(n) => {
-                SimpleNodeMetadata::OpCaseToBranchSelector(n.cases().to_vec())
+                SimpleNodeMetadata::OpCaseToBranchSelector(n.encoding(), n.cases().to_vec())
             }
             SimpleNode::OpBoolToBranchSelector(_) => SimpleNodeMetadata::OpBoolToBranchSelector,
             SimpleNode::OpBranchSelectorToCase(n) => {
-                SimpleNodeMetadata::OpBranchSelectorToCase(n.cases().to_vec())
+                SimpleNodeMetadata::OpBranchSelectorToCase(n.encoding(), n.cases().to_vec())
             }
             SimpleNode::OpConvertToU32(_) => SimpleNodeMetadata::OpConvertToU32,
             SimpleNode::OpConvertToI32(_) => SimpleNodeMetadata::OpConvertToI32,

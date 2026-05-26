@@ -20,7 +20,7 @@ use crate::cfg_to_rvsdg::control_tree::{
 };
 use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
+use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
 use crate::{Function, Module, rvsdg};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -179,9 +179,14 @@ impl<'a> RegionBuilder<'a> {
             BranchSelector::Bool(value) => self
                 .rvsdg
                 .add_op_bool_to_branch_selector(self.region, self.input_state_tracker[*value]),
-            BranchSelector::Case { value, cases } => self.rvsdg.add_op_case_to_branch_selector(
+            BranchSelector::Case {
+                encoding,
+                value,
+                cases,
+            } => self.rvsdg.add_op_case_to_branch_selector(
                 self.region,
                 self.input_state_tracker[*value],
+                *encoding,
                 cases.iter().copied(),
             ),
             // We represent a `U32` branch-selector as a "case" selector where the cases are
@@ -190,7 +195,8 @@ impl<'a> RegionBuilder<'a> {
             BranchSelector::U32(value) => self.rvsdg.add_op_case_to_branch_selector(
                 self.region,
                 self.input_state_tracker[*value],
-                0..(data.branches.len() as u32 - 1),
+                Int::U32,
+                0..(data.branches.len() as u128 - 1),
             ),
             BranchSelector::Single => unreachable!(
                 "a basic-block with a single branch terminator should not lead into a branching \
@@ -838,8 +844,12 @@ mod tests {
 
         let (_, region) = expected.register_function(&module, function, iter::empty());
 
-        let predicate_node =
-            expected.add_op_case_to_branch_selector(region, ValueInput::argument(TY_U32, 0), [0]);
+        let predicate_node = expected.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 0),
+            Int::U32,
+            [0],
+        );
         let switch_node = expected.add_switch(
             region,
             vec![

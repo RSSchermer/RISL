@@ -639,7 +639,12 @@ impl<'a> Renderer<'a> {
     ) -> std::io::Result<()> {
         write!(writer, "[")?;
         self.write_node_id(writer, node)?;
-        write!(writer, "] OpCaseToBranchSelector{{cases: {:?}}}", n.cases())?;
+        write!(
+            writer,
+            "] OpCaseToBranchSelector{{encoding: {:?}, cases: {:?}}}",
+            n.encoding(),
+            n.cases()
+        )?;
         self.write_node_io_signature(writer, node)
     }
 
@@ -651,7 +656,12 @@ impl<'a> Renderer<'a> {
     ) -> std::io::Result<()> {
         write!(writer, "[")?;
         self.write_node_id(writer, node)?;
-        write!(writer, "] OpBranchSelectorToCase{{cases: {:?}}}", n.cases())?;
+        write!(
+            writer,
+            "] OpBranchSelectorToCase{{encoding: {:?}, cases: {:?}}}",
+            n.encoding(),
+            n.cases()
+        )?;
         self.write_node_io_signature(writer, node)
     }
 

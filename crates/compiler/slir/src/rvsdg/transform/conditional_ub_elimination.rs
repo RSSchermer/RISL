@@ -239,6 +239,7 @@ fn apply_elimination(
                     let new_node = rvsdg.add_op_case_to_branch_selector(
                         region,
                         rvsdg[producer].value_inputs()[0],
+                        n.encoding(),
                         new_cases,
                     );
 
@@ -290,7 +291,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueInput, ValueOutput};
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TY_U32};
+    use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TY_U32};
     use crate::{FnSig, Function, Symbol};
 
     #[test]
@@ -404,6 +405,7 @@ mod tests {
         let selector = rvsdg.add_op_case_to_branch_selector(
             body,
             ValueInput::output(TY_U32, val, 0),
+            Int::U32,
             vec![2, 0, 1],
         );
 

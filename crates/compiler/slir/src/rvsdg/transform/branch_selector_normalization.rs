@@ -23,13 +23,17 @@ use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, visit,
 };
-use crate::ty::{TY_BOOL, TY_U32};
+use crate::ty::{Int, TY_BOOL, TY_U32};
 
 #[derive(Clone, Debug)]
 enum ResolvedValue {
     Fallback,
     Bool(ValueInput),
-    Case { value: ValueInput, cases: Vec<u32> },
+    Case {
+        encoding: Int,
+        value: ValueInput,
+        cases: Vec<u128>,
+    },
 }
 
 impl ResolvedValue {
@@ -45,7 +49,13 @@ impl ResolvedValue {
         match self {
             ResolvedValue::Fallback => ResolvedValue::Fallback,
             ResolvedValue::Bool(_) => ResolvedValue::Bool(value),
-            ResolvedValue::Case { cases, .. } => ResolvedValue::Case { value, cases },
+            ResolvedValue::Case {
+                encoding, cases, ..
+            } => ResolvedValue::Case {
+                encoding,
+                value,
+                cases,
+            },
         }
     }
 
@@ -56,13 +66,19 @@ impl ResolvedValue {
             (ResolvedValue::Bool(a), ResolvedValue::Bool(_)) => ResolvedValue::Bool(a),
             (
                 ResolvedValue::Case {
+                    encoding: a_encoding,
                     value: a,
                     cases: a_cases,
                 },
-                ResolvedValue::Case { cases: b_cases, .. },
+                ResolvedValue::Case {
+                    encoding: b_encoding,
+                    cases: b_cases,
+                    ..
+                },
             ) => {
-                if a_cases == b_cases {
+                if a_encoding == b_encoding && a_cases == b_cases {
                     ResolvedValue::Case {
+                        encoding: a_encoding,
                         value: a,
                         cases: a_cases,
                     }
@@ -168,6 +184,7 @@ impl BranchSelectorNormalizer {
         let op = rvsdg[node].expect_op_case_to_branch_selector();
 
         ResolvedValue::Case {
+            encoding: op.encoding(),
             value: rvsdg[node].value_inputs()[0],
             cases: op.cases().to_vec(),
         }
@@ -422,9 +439,11 @@ impl BranchSelectorNormalizer {
 
             let normalization_node = match resolved {
                 ResolvedValue::Bool(value) => rvsdg.add_op_bool_to_branch_selector(region, value),
-                ResolvedValue::Case { value, cases } => {
-                    rvsdg.add_op_case_to_branch_selector(region, value, cases)
-                }
+                ResolvedValue::Case {
+                    encoding,
+                    value,
+                    cases,
+                } => rvsdg.add_op_case_to_branch_selector(region, value, encoding, cases),
                 ResolvedValue::Fallback => panic!("cannot normalize a fallback value"),
             };
 

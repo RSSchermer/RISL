@@ -10,7 +10,7 @@ use smallvec::{SmallVec, smallvec};
 use thin_vec::{ThinVec, thin_vec};
 
 use crate::intrinsic::Intrinsic;
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{
     BinaryOperator, Constant, Function, Module, StorageBinding, UnaryOperator, UniformBinding,
     WorkgroupBinding, intrinsic,
@@ -698,7 +698,11 @@ impl OpBoolToBranchSelector {
 pub type OpCaseToBranchSelector = IntrinsicOp<intrinsic::OpCaseToBranchSelector>;
 
 impl OpCaseToBranchSelector {
-    pub fn cases(&self) -> &[u32] {
+    pub fn encoding(&self) -> Int {
+        self.intrinsic.encoding
+    }
+
+    pub fn cases(&self) -> &[u128] {
         &self.intrinsic.cases
     }
 
@@ -870,8 +874,9 @@ pub enum BranchSelector {
     /// For a `cases` list with `N` cases, the terminator must have at least `N+1` branches,
     /// otherwise the terminator should be considered "invalid".
     Case {
+        encoding: Int,
         value: LocalBinding,
-        cases: Vec<u32>,
+        cases: Vec<u128>,
     },
 
     /// Selects the branch corresponding to the value.
@@ -920,12 +925,14 @@ impl Branch {
     }
 
     pub fn case(
+        encoding: Int,
         value: LocalBinding,
-        cases: impl IntoIterator<Item = u32>,
+        cases: impl IntoIterator<Item = u128>,
         targets: impl IntoIterator<Item = BasicBlock>,
     ) -> Self {
         Branch {
             selector: BranchSelector::Case {
+                encoding,
                 value,
                 cases: cases.into_iter().collect(),
             },
@@ -970,11 +977,12 @@ impl Terminator {
     }
 
     pub fn branch_case(
+        encoding: Int,
         value: LocalBinding,
-        cases: impl IntoIterator<Item = u32>,
+        cases: impl IntoIterator<Item = u128>,
         targets: impl IntoIterator<Item = BasicBlock>,
     ) -> Self {
-        Terminator::Branch(Branch::case(value, cases, targets))
+        Terminator::Branch(Branch::case(encoding, value, cases, targets))
     }
 
     pub fn return_value(value: Value) -> Self {

@@ -97,7 +97,8 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         targets: &SwitchTargets,
     ) {
         let discr = self.codegen_operand(bx, discr);
-        let switch_ty = discr.layout.ty;
+        let layout = discr.layout.clone();
+        let switch_ty = layout.ty;
         let discr_value = discr.immediate();
 
         // If our discriminant is a constant we can branch directly
@@ -143,6 +144,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         } else {
             bx.switch(
                 discr_value,
+                &layout,
                 self.llbb(targets.otherwise()),
                 targets
                     .branches()

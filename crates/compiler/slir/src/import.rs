@@ -120,7 +120,12 @@ impl FunctionImporter {
                     self.dst_bb(t.targets()[0]),
                     self.dst_bb(t.targets()[1]),
                 ),
-                BranchSelector::Case { value, cases } => Terminator::branch_case(
+                BranchSelector::Case {
+                    encoding,
+                    value,
+                    cases,
+                } => Terminator::branch_case(
+                    *encoding,
                     self.dst_local_value(*value),
                     cases.clone(),
                     t.targets().iter().map(|&bb| self.dst_bb(bb)),

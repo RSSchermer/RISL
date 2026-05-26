@@ -40,7 +40,7 @@ impl CasesMatcher {
         }
     }
 
-    fn match_cases(&mut self, pred_to_case: &[u32], case_to_pred: &[u32]) -> CasesMatch<'_> {
+    fn match_cases(&mut self, pred_to_case: &[u128], case_to_pred: &[u128]) -> CasesMatch<'_> {
         self.permutation.clear();
 
         for i in 0..pred_to_case.len() {
@@ -144,6 +144,7 @@ impl Merger {
                 input: 0,
             } = user
                 && let Simple(OpCaseToBranchSelector(n)) = rvsdg[case_to_pred].kind()
+                && data.encoding().backend_ty() == n.encoding().backend_ty()
             {
                 let case_match = self.case_matcher.match_cases(data.cases(), n.cases());
 
@@ -233,55 +234,55 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{ValueInput, ValueOutput};
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_U32};
+    use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_U32};
     use crate::{FnSig, Symbol};
 
     #[test]
     fn test_case_match() {
         let mut matcher = CasesMatcher::new();
 
-        let cases_0 = [1, 2, 3];
-        let cases_1 = [1, 2, 3];
+        let cases_0 = [1u128, 2, 3];
+        let cases_1 = [1u128, 2, 3];
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1, 2])
         );
 
-        let cases_0 = [1, 2, 3];
-        let cases_1 = [3, 1, 2];
+        let cases_0 = [1u128, 2, 3];
+        let cases_1 = [3u128, 1, 2];
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[1, 2, 0])
         );
 
-        let cases_0 = [1, 2, 3];
-        let cases_1 = [1, 2, 4];
+        let cases_0 = [1u128, 2, 3];
+        let cases_1 = [1u128, 2, 4];
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1, 3])
         );
 
-        let cases_0 = [1, 2, 3];
-        let cases_1 = [1, 2];
+        let cases_0 = [1u128, 2, 3];
+        let cases_1 = [1u128, 2];
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1, 2])
         );
 
-        let cases_0 = [1, 2];
-        let cases_1 = [1, 2, 3];
+        let cases_0 = [1u128, 2];
+        let cases_1 = [1u128, 2, 3];
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1])
         );
 
-        let cases_0 = [1, 2, 1];
-        let cases_1 = [1, 2, 3];
+        let cases_0 = [1u128, 2, 1];
+        let cases_1 = [1u128, 2, 3];
 
         assert_eq!(matcher.match_cases(&cases_0, &cases_1), CasesMatch::NoMatch);
     }
@@ -314,11 +315,13 @@ mod tests {
         let pred_to_case_node = rvsdg.add_op_branch_selector_to_case(
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
+            Int::U32,
             [0, 1],
         );
         let case_to_pred_node = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, pred_to_case_node, 0),
+            Int::U32,
             [0, 1],
         );
         let switch_node = rvsdg.add_switch(
@@ -414,11 +417,13 @@ mod tests {
         let pred_to_case_node = rvsdg.add_op_branch_selector_to_case(
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
+            Int::U32,
             [0, 1],
         );
         let case_to_pred_node = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, pred_to_case_node, 0),
+            Int::U32,
             [1, 0],
         );
         let switch_node = rvsdg.add_switch(

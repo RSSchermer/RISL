@@ -10,8 +10,7 @@ use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Rvsdg, SimpleNode, ValueOrigin, ValueOutput, visit,
 };
-use crate::ty::TY_U32;
-use crate::{Function, Module};
+use crate::{Function, Module, ty};
 
 struct NodeCollector<'a> {
     candidates: &'a mut Vec<Node>,
@@ -36,24 +35,29 @@ fn try_switchify_pred_to_case(rvsdg: &mut Rvsdg, node: Node) {
     use SimpleNode::*;
 
     let region = rvsdg[node].region();
-    let cases = {
+    let (encoding, cases) = {
         let Simple(OpBranchSelectorToCase(data)) = rvsdg[node].kind() else {
             return;
         };
-        data.cases().to_vec()
+        (data.encoding(), data.cases().to_vec())
     };
     let predicate_input = rvsdg[node].value_inputs()[0];
 
     let switch_node = rvsdg.add_switch(
         region,
         vec![predicate_input],
-        vec![ValueOutput::new(TY_U32)],
+        vec![ValueOutput::new(encoding.backend_ty())],
         None,
     );
 
     for case_value in cases {
         let branch_region = rvsdg.add_switch_branch(switch_node);
-        let const_node = rvsdg.add_const_u32(branch_region, case_value);
+
+        let const_node = match encoding.backend_ty() {
+            ty::TY_U32 => rvsdg.add_const_u32(branch_region, case_value as u32),
+            ty::TY_I32 => rvsdg.add_const_i32(branch_region, case_value as i32),
+            _ => panic!("invalid backend ty"),
+        };
 
         rvsdg.reconnect_region_result(
             branch_region,
@@ -150,10 +154,11 @@ mod tests {
         let bool_pred_node =
             rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_node, 0));
 
-        let cases = [10, 20, 30];
+        let cases = [10u128, 20, 30];
         let pred_to_case_node = rvsdg.add_op_branch_selector_to_case(
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
+            ty::Int::U32,
             cases,
         );
 
@@ -196,7 +201,7 @@ mod tests {
 
             let const_data = rvsdg[const_node].expect_const_u32();
 
-            assert_eq!(const_data.value(), expected_case);
+            assert_eq!(const_data.value() as u128, expected_case);
         }
 
         assert!(

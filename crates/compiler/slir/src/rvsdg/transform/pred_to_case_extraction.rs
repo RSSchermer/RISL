@@ -1,6 +1,7 @@
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Rvsdg, SimpleNode, ValueOrigin, visit};
-use crate::{Function, Module};
+use crate::ty::Int;
+use crate::{Function, Module, ty};
 
 struct NodeCollector<'a> {
     candidates: &'a mut Vec<Node>,
@@ -36,20 +37,34 @@ fn try_extract_pred_to_case(rvsdg: &mut Rvsdg, switch_node: Node) {
 
         let data = rvsdg[switch_node].expect_switch();
 
+        let encoding = match data.value_outputs()[output].ty {
+            ty::TY_U32 => Int::U32,
+            ty::TY_I32 => Int::I32,
+            // Only integer outputs can be cases, so skip this output
+            _ => continue,
+        };
+
         for branch in data.branches() {
             if let ValueOrigin::Output {
                 producer,
                 output: 0,
             } = rvsdg[*branch].value_results()[output].origin
-                && let Simple(ConstU32(n)) = rvsdg[producer].kind()
             {
-                cases.push(n.value());
+                match rvsdg[producer].kind() {
+                    Simple(ConstU32(n)) => cases.push(n.value() as u128),
+                    Simple(ConstI32(n)) => cases.push(n.value() as u128),
+                    _ => {}
+                }
             }
         }
 
         if cases.len() == branch_count {
-            let cases = cases.clone();
-            let pred_to_case = rvsdg.add_op_branch_selector_to_case(region, predicate_input, cases);
+            let pred_to_case = rvsdg.add_op_branch_selector_to_case(
+                region,
+                predicate_input,
+                encoding,
+                cases.clone(),
+            );
 
             rvsdg.reconnect_value_users(
                 region,

@@ -1052,6 +1052,7 @@ mod tests {
         let switch_1_predicate = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, get_discr_node, 0),
+            Int::U32,
             [0],
         );
         let switch_1_node = rvsdg.add_switch(

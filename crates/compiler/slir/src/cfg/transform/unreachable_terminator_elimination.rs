@@ -62,6 +62,7 @@
 use crate::Function;
 use crate::cfg::analyze::predecessors::predecessors;
 use crate::cfg::{BranchSelector, Cfg, Terminator};
+use crate::ty::Int;
 
 pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
     loop {
@@ -106,7 +107,11 @@ pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
                     new_targets.remove(target_index);
 
                     match branch.selector().clone() {
-                        BranchSelector::Case { value, mut cases } => {
+                        BranchSelector::Case {
+                            encoding,
+                            value,
+                            mut cases,
+                        } => {
                             if target_index < cases.len() {
                                 cases.remove(target_index);
                             } else {
@@ -116,7 +121,7 @@ pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
 
                             cfg.set_terminator(
                                 predecessor,
-                                Terminator::branch_case(value, cases, new_targets),
+                                Terminator::branch_case(encoding, value, cases, new_targets),
                             );
                         }
                         BranchSelector::U32(value) => {
@@ -130,12 +135,12 @@ pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
                                 // The unreachable block is not the last target, convert to a Case
                                 // selector.
 
-                                let mut cases: Vec<u32> = (0..targets.len() as u32 - 1).collect();
+                                let mut cases: Vec<u128> = (0..targets.len() as u128 - 1).collect();
                                 cases.remove(target_index);
 
                                 cfg.set_terminator(
                                     predecessor,
-                                    Terminator::branch_case(value, cases, new_targets),
+                                    Terminator::branch_case(Int::U32, value, cases, new_targets),
                                 );
                             }
                         }
@@ -293,7 +298,7 @@ mod tests {
 
         cfg.set_terminator(
             bb_entry,
-            Terminator::branch_case(arg0, [0, 1], [bb0, bb1, bb_unreachable]),
+            Terminator::branch_case(Int::U32, arg0, [0, 1], [bb0, bb1, bb_unreachable]),
         );
         cfg.set_terminator(bb0, Terminator::return_void());
         cfg.set_terminator(bb1, Terminator::return_void());
@@ -306,7 +311,7 @@ mod tests {
         let branch = cfg[bb_entry].terminator().expect_branch();
 
         if let BranchSelector::Case { cases, .. } = branch.selector() {
-            assert_eq!(cases.as_slice(), &[0]);
+            assert_eq!(cases.as_slice(), &[0u128]);
             assert_eq!(branch.targets(), &[bb0, bb1]);
         } else {
             panic!("expected case selector");
@@ -348,7 +353,7 @@ mod tests {
 
         cfg.set_terminator(
             bb_entry,
-            Terminator::branch_case(arg0, [0, 1, 2], [bb0, bb_unreachable, bb2, bb3]),
+            Terminator::branch_case(Int::U32, arg0, [0, 1, 2], [bb0, bb_unreachable, bb2, bb3]),
         );
         cfg.set_terminator(bb0, Terminator::return_void());
         cfg.set_terminator(bb_unreachable, Terminator::Unreachable);
@@ -362,7 +367,7 @@ mod tests {
         let branch = cfg[bb_entry].terminator().expect_branch();
 
         if let BranchSelector::Case { cases, .. } = branch.selector() {
-            assert_eq!(cases.as_slice(), &[0, 2]);
+            assert_eq!(cases.as_slice(), &[0u128, 2]);
             assert_eq!(branch.targets(), &[bb0, bb2, bb3]);
         } else {
             panic!("expected case selector");
@@ -468,7 +473,7 @@ mod tests {
         let branch = cfg[bb_entry].terminator().expect_branch();
 
         if let BranchSelector::Case { cases, .. } = branch.selector() {
-            assert_eq!(cases.as_slice(), &[0, 2]);
+            assert_eq!(cases.as_slice(), &[0u128, 2]);
             assert_eq!(branch.targets(), &[bb0, bb2, bb3]);
         } else {
             panic!("expected case selector");

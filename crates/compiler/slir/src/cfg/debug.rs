@@ -1006,7 +1006,7 @@ fn write_terminator_branch<W: Write>(w: &mut W, _cfg: &Cfg, branch: &Branch) -> 
         BranchSelector::U32(val) => {
             write_branch_selector_u32(w, *val, branch)?;
         }
-        BranchSelector::Case { value, cases } => {
+        BranchSelector::Case { value, cases, .. } => {
             write_branch_selector_case(w, *value, cases, branch)?;
         }
     }
@@ -1051,7 +1051,7 @@ fn write_branch_selector_u32<W: Write>(w: &mut W, val: LocalBinding, branch: &Br
 fn write_branch_selector_case<W: Write>(
     w: &mut W,
     value: LocalBinding,
-    cases: &[u32],
+    cases: &[u128],
     branch: &Branch,
 ) -> Result {
     write!(w, "case ")?;

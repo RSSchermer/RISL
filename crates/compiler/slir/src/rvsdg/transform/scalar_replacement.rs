@@ -192,7 +192,7 @@ use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
     ValueOutput, ValueUser, visit,
 };
-use crate::ty::{TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::ty::{Int, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{AllocId, Constant, ConstantKind, Module};
 
 enum SwitchOutputSplitKind {
@@ -741,7 +741,8 @@ impl Replacer<'_, '_, '_> {
                         ty: selector_ty,
                         origin: selector,
                     },
-                    0..(split_input.len() as u32 - 1),
+                    Int::U32,
+                    0..(split_input.len() as u128 - 1),
                 );
                 let mut switch_inputs = Vec::with_capacity(split_input.len() + 1);
 
@@ -829,7 +830,8 @@ impl Replacer<'_, '_, '_> {
                         ty: selector_ty,
                         origin: selector,
                     },
-                    0..(split_input.len() as u32 - 1),
+                    Int::U32,
+                    0..(split_input.len() as u128 - 1),
                 );
                 let mut switch_inputs = Vec::with_capacity(split_input.len() + 1);
 

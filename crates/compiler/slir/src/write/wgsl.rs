@@ -748,7 +748,11 @@ impl WgslModuleWriter {
         for case in switch_stmt.cases() {
             self.write_newline();
             self.w.push_str("case ");
-            self.write_u32(case.case());
+            if switch_stmt.encoding().signed {
+                self.write_i32(case.case() as i32);
+            } else {
+                self.write_u32(case.case() as u32);
+            }
             self.w.push_str(":");
             self.write_optional_space();
             self.write_block(cx, case.block());

@@ -497,6 +497,15 @@ pub struct Int {
 }
 
 impl Int {
+    pub const I32: Int = Int {
+        size: IntSize::I32,
+        signed: true,
+    };
+    pub const U32: Int = Int {
+        size: IntSize::I32,
+        signed: false,
+    };
+
     pub fn backend_ty(&self) -> Type {
         if self.signed { TY_I32 } else { TY_U32 }
     }

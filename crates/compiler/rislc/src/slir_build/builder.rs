@@ -6,7 +6,9 @@ use std::{io, mem};
 
 use rustc_middle::bug;
 use rustc_public::abi;
-use rustc_public::abi::{ArgAbi, FnAbi, PassMode, ValueAbi, VariantsShape};
+use rustc_public::abi::{
+    ArgAbi, FnAbi, IntegerLength, PassMode, Primitive, ValueAbi, VariantsShape,
+};
 use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::target::MachineSize;
 use rustc_public::ty::{Align, Span, VariantIdx};
@@ -23,7 +25,7 @@ use crate::stable_cg::traits::{
 };
 use crate::stable_cg::{
     AtomicOrdering, AtomicRmwBinOp, IntPredicate, OperandRef, OperandValue, PlaceRef, PlaceValue,
-    RealPredicate, SynchronizationScope, TyAndLayout,
+    RealPredicate, ScalarExt, SynchronizationScope, TyAndLayout,
 };
 
 pub struct Builder<'a, 'tcx> {
@@ -308,6 +310,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     fn switch(
         &mut self,
         v: Self::Value,
+        layout: &TyAndLayout,
         else_llbb: Self::BasicBlock,
         cases: impl IntoIterator<Item = (u128, Self::BasicBlock)>,
     ) {
@@ -318,10 +321,6 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         // actually call [Builder::append_block], which will also want to borrow the `cfg`, leading
         // to an "already borrowed" error.
         for (case, branch) in cases {
-            let Ok(case) = u32::try_from(case) else {
-                bug!("validation should not have allowed a case that does not fit a `u32`");
-            };
-
             predicate_cases.push(case);
             branches.push(branch);
         }
@@ -330,6 +329,24 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         // RVSDG construction algorithm doesn't like. Figure our if we can just always omit the else
         // block or if we need to handle unreachable blocks.
         branches.push(else_llbb);
+
+        let abi::ValueAbi::Scalar(scalar) = layout.layout.abi else {
+            bug!("expected scalar layout for switch discriminant");
+        };
+
+        let encoding = match scalar.primitive() {
+            Primitive::Int { length, signed } => slir::ty::Int {
+                size: match length {
+                    IntegerLength::I8 => slir::ty::IntSize::I8,
+                    IntegerLength::I16 => slir::ty::IntSize::I16,
+                    IntegerLength::I32 => slir::ty::IntSize::I32,
+                    IntegerLength::I64 => slir::ty::IntSize::I64,
+                    IntegerLength::I128 => slir::ty::IntSize::I128,
+                },
+                signed: *signed,
+            },
+            _ => bug!("expected integer primitive for switch discriminant"),
+        };
 
         let mut cfg = self.cfg.borrow_mut();
 
@@ -345,7 +362,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
 
         cfg.set_terminator(
             self.basic_block,
-            slir::cfg::Terminator::branch_case(value, predicate_cases, branches),
+            slir::cfg::Terminator::branch_case(encoding, value, predicate_cases, branches),
         );
     }
 

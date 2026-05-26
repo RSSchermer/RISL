@@ -13,7 +13,7 @@ use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::intrinsic::Intrinsic;
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::util::thin_set::ThinSet;
 use crate::{
     BinaryOperator, Constant, Function, Module, StorageBinding, UnaryOperator, UniformBinding,
@@ -1690,7 +1690,11 @@ impl OpMatrix {
 pub type OpCaseToBranchSelector = IntrinsicNode<intrinsic::OpCaseToBranchSelector>;
 
 impl OpCaseToBranchSelector {
-    pub fn cases(&self) -> &[u32] {
+    pub fn encoding(&self) -> Int {
+        self.intrinsic.encoding
+    }
+
+    pub fn cases(&self) -> &[u128] {
         &self.intrinsic.cases
     }
 
@@ -1708,7 +1712,11 @@ impl OpBoolToBranchSelector {
 pub type OpBranchSelectorToCase = IntrinsicNode<intrinsic::OpBranchSelectorToCase>;
 
 impl OpBranchSelectorToCase {
-    pub fn cases(&self) -> &[u32] {
+    pub fn encoding(&self) -> Int {
+        self.intrinsic.encoding
+    }
+
+    pub fn cases(&self) -> &[u128] {
         &self.intrinsic.cases
     }
 
@@ -3624,11 +3632,13 @@ impl Rvsdg {
         &mut self,
         region: Region,
         input: ValueInput,
-        cases: impl IntoIterator<Item = u32>,
+        encoding: Int,
+        cases: impl IntoIterator<Item = u128>,
     ) -> Node {
         self.add_intrinsic_op(
             region,
             intrinsic::OpCaseToBranchSelector {
+                encoding,
                 cases: cases.into_iter().collect(),
             },
             [input],
@@ -3657,11 +3667,13 @@ impl Rvsdg {
         &mut self,
         region: Region,
         input: ValueInput,
-        cases: impl IntoIterator<Item = u32>,
+        encoding: Int,
+        cases: impl IntoIterator<Item = u128>,
     ) -> Node {
         self.add_intrinsic_op(
             region,
             intrinsic::OpBranchSelectorToCase {
+                encoding,
                 cases: cases.into_iter().collect(),
             },
             [input],

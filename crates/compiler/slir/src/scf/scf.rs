@@ -9,7 +9,7 @@ use slotmap::{Key, SlotMap};
 use smallvec::SmallVec;
 
 use crate::intrinsic::Intrinsic;
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
+use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{
     BinaryOperator, Constant, ConstantRegistry, Function, Module, StorageBinding,
     StorageBindingRegistry, UnaryOperator, UniformBinding, UniformBindingRegistry,
@@ -886,12 +886,12 @@ impl If {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SwitchCase {
-    case: u32,
+    case: u128,
     block: Block,
 }
 
 impl SwitchCase {
-    pub fn case(&self) -> u32 {
+    pub fn case(&self) -> u128 {
         self.case
     }
 
@@ -902,6 +902,7 @@ impl SwitchCase {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Switch {
+    encoding: Int,
     on: LocalBinding,
     cases: Vec<SwitchCase>,
     default: Block,
@@ -909,6 +910,10 @@ pub struct Switch {
 }
 
 impl Switch {
+    pub fn encoding(&self) -> Int {
+        self.encoding
+    }
+
     pub fn on(&self) -> LocalBinding {
         self.on
     }
@@ -2127,6 +2132,7 @@ impl Scf {
         &mut self,
         block: Block,
         position: BlockPosition,
+        encoding: Int,
         on: LocalBinding,
     ) -> Statement {
         let default = self.blocks.insert(BlockData::new());
@@ -2134,6 +2140,7 @@ impl Scf {
         let statement = self.statements.insert(StatementData {
             block,
             kind: StatementKind::Switch(Switch {
+                encoding,
                 on,
                 cases: vec![],
                 default,
@@ -2197,7 +2204,7 @@ impl Scf {
         }
     }
 
-    pub fn add_switch_case(&mut self, switch_statement: Statement, case: u32) -> Block {
+    pub fn add_switch_case(&mut self, switch_statement: Statement, case: u128) -> Block {
         let stmt = self.statements[switch_statement].kind.expect_switch_mut();
 
         if stmt.cases.iter().any(|c| c.case == case) {
@@ -2225,7 +2232,7 @@ impl Scf {
         case_block
     }
 
-    pub fn remove_switch_case(&mut self, switch_statement: Statement, case: u32) -> bool {
+    pub fn remove_switch_case(&mut self, switch_statement: Statement, case: u128) -> bool {
         let stmt = self.statements[switch_statement].kind.expect_switch_mut();
 
         if let Some(index) = stmt.cases.iter().position(|c| c.case == case) {

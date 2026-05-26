@@ -38,7 +38,7 @@ pub fn Terminator(cfg: StoredValue<Cfg>, terminator: slir::cfg::Terminator) -> i
                     "branch_bool("<Value cfg value=value.into()/>")" {targets}
                 }
                 .into_any(),
-                BranchSelector::Case { value, cases } => {
+                BranchSelector::Case { value, cases, .. } => {
                     let cases = cases
                         .iter()
                         .map(|x| x.to_string())

@@ -7,6 +7,7 @@ use crate::intrinsic::Intrinsic;
 use crate::rvsdg::analyse::region_stratification::RegionStratifier;
 use crate::rvsdg::{Connectivity, NodeKind, Rvsdg, SimpleNode, ValueOrigin};
 use crate::scf::{BlockPosition, LocalBinding, LoopControl, Scf};
+use crate::ty::Int;
 use crate::{Function, Module, rvsdg, scf};
 
 #[derive(Clone, Debug)]
@@ -120,11 +121,11 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
 
         match predicate_origin {
             ValueOrigin::Argument(_) => {
-                self.generate_switch(node, predicate_binding, None);
+                self.generate_switch(node, predicate_binding, Int::U32, None);
             }
             ValueOrigin::Output { producer, .. } => match self.rvsdg[producer].kind() {
                 Simple(OpCaseToBranchSelector(op)) => {
-                    self.generate_switch(node, predicate_binding, Some(op.cases()));
+                    self.generate_switch(node, predicate_binding, op.encoding(), Some(op.cases()));
                 }
                 Simple(OpBoolToBranchSelector(_)) => {
                     self.generate_if(node, predicate_binding);
@@ -175,13 +176,14 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         &mut self,
         switch_node: rvsdg::Node,
         on: scf::LocalBinding,
-        cases: Option<&[u32]>,
+        encoding: Int,
+        cases: Option<&[u128]>,
     ) {
         let data = self.rvsdg[switch_node].expect_switch();
 
         let switch_stmt = self
             .scf
-            .add_switch(self.dst_block, BlockPosition::Append, on);
+            .add_switch(self.dst_block, BlockPosition::Append, encoding, on);
         let default_block = self.scf[switch_stmt].kind().expect_switch().default();
 
         // Add out variables to the switch statement and record them in the value mapping.
@@ -208,7 +210,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             let branch_block = if is_last {
                 default_block
             } else {
-                let case = cases.map(|cases| cases[i]).unwrap_or(i as u32);
+                let case = cases.map(|cases| cases[i]).unwrap_or(i as u128);
 
                 self.scf.add_switch_case(switch_stmt, case)
             };
