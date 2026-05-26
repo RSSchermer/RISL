@@ -693,7 +693,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                         },
                     )
                     .codegen_get_discr(bx);
-                let ty = Ty::unsigned_ty(UintTy::U32);
+                let ty = rvalue.ty(self.mir.locals()).unwrap();
 
                 OperandRef {
                     val: OperandValue::Immediate(discr),
