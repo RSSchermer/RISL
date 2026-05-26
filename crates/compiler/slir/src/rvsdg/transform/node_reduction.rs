@@ -5,7 +5,7 @@ use crate::rvsdg::visit::reverse_value_flow::{ReverseValueFlowVisitor, visit_reg
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
-use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_U32};
+use crate::ty::{Int, IntSize, TY_BOOL, TY_F32, TY_I32, TY_U32};
 use crate::{BinaryOperator, Module, UnaryOperator};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -115,6 +115,11 @@ impl NodeReducer {
                 let encoding = n.encoding();
                 let cases = n.cases();
                 let val = self.resolve_value(rvsdg, node, 0);
+
+                println!(
+                    "try reduce OpCaseToBranchSelector: encoding {:?} - cases {:?} - resolved_val {:?} ",
+                    encoding, cases, val
+                );
 
                 if let Some(reduced) = try_reduce_op_case_to_branch_selector(encoding, cases, val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
@@ -252,13 +257,10 @@ impl ReverseValueFlowVisitor for ValueResolver {
     }
 
     fn visit_region_argument(&mut self, rvsdg: &Rvsdg, region: Region, argument: u32) {
-        if self.result.is_some() {
-            return;
-        }
-
         let owner = rvsdg[region].owner();
 
         use NodeKind::*;
+
         match rvsdg[owner].kind() {
             Switch(_) => {
                 visit_region_argument(self, rvsdg, region, argument);
@@ -273,35 +275,18 @@ impl ReverseValueFlowVisitor for ValueResolver {
                 // connects directly to the argument.
                 if result_origin == ValueOrigin::Argument(argument) {
                     visit_region_argument(self, rvsdg, region, argument);
-                } else {
-                    let ty = rvsdg[region].value_arguments()[argument as usize].ty;
-
-                    self.result = Some(MaybeConstantValue::Variable(ValueInput::argument(
-                        ty, argument,
-                    )));
                 }
             }
-            Function(_) => {
-                let ty = rvsdg[region].value_arguments()[argument as usize].ty;
-
-                self.result = Some(MaybeConstantValue::Variable(ValueInput::argument(
-                    ty, argument,
-                )));
-            }
+            Function(_) => {}
             _ => unreachable!(),
         }
     }
 
-    fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, output: u32) {
-        if self.result.is_some() {
-            return;
-        }
-
+    fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, _output: u32) {
         use NodeKind::*;
         use SimpleNode::*;
 
-        let node_data = &rvsdg[node];
-        match node_data.kind() {
+        match rvsdg[node].kind() {
             Simple(ConstU32(c)) => {
                 self.result = Some(MaybeConstantValue::U32(c.value()));
             }
@@ -320,13 +305,7 @@ impl ReverseValueFlowVisitor for ValueResolver {
             Simple(ValueProxy(_)) => {
                 self.visit_value_input(rvsdg, node, 0);
             }
-            _ => {
-                let ty = rvsdg[node].value_outputs()[output as usize].ty;
-
-                self.result = Some(MaybeConstantValue::Variable(ValueInput::output(
-                    ty, node, output,
-                )));
-            }
+            _ => {}
         }
     }
 }
@@ -706,10 +685,32 @@ fn try_reduce_op_case_to_branch_selector(
 ) -> Option<MaybeConstantValue> {
     use MaybeConstantValue::*;
 
-    let val_bits = match (encoding, val) {
-        (Int::U32, U32(v)) => v as u128,
-        (Int::I32, I32(v)) => v as u32 as u128,
-        _ => return None,
+    let val_bits = match val {
+        U32(v) => v as u128,
+
+        // For negative integers we'll need to truncate (for integer encodings with fewer bits) or
+        // sign-extend (for integer encodings with more bits) to ensure would match the bit pattern
+        // of a u128 case encoding.
+        I32(v) => match encoding.size {
+            IntSize::I8 => {
+                // Truncate to 8 bits, zero-extend to 128 bits
+                v as u8 as u128
+            }
+            IntSize::I16 => {
+                // Truncate to 16 bits, zero-extend to 128 bits
+                v as u16 as u128
+            }
+            IntSize::I32 => {
+                // Zero-extend to 128 bits
+                v as u32 as u128
+            }
+            IntSize::I64 => {
+                // Sign-extend to 64 bits, zero-extend to 128 bits
+                v as i64 as u64 as u128
+            }
+            IntSize::I128 => v as i128 as u128,
+        },
+        _ => panic!("op-case-to-branch-selector input value must be an integer"),
     };
 
     let branch_index = cases
