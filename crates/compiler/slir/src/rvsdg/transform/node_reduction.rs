@@ -5,7 +5,7 @@ use crate::rvsdg::visit::reverse_value_flow::{ReverseValueFlowVisitor, visit_reg
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
 };
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32};
+use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_U32};
 use crate::{BinaryOperator, Module, UnaryOperator};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -14,6 +14,7 @@ enum MaybeConstantValue {
     I32(i32),
     F32(f32),
     Bool(bool),
+    Predicate(u32),
     Variable(ValueInput),
 }
 
@@ -110,6 +111,15 @@ impl NodeReducer {
                     self.apply_reduction(rvsdg, node, region, reduced);
                 }
             }
+            Simple(OpCaseToBranchSelector(n)) => {
+                let encoding = n.encoding();
+                let cases = n.cases();
+                let val = self.resolve_value(rvsdg, node, 0);
+
+                if let Some(reduced) = try_reduce_op_case_to_branch_selector(encoding, cases, val) {
+                    self.apply_reduction(rvsdg, node, region, reduced);
+                }
+            }
             _ => {}
         }
     }
@@ -154,6 +164,14 @@ impl NodeReducer {
                     output: 0,
                 }
             }
+            MaybeConstantValue::Predicate(v) => {
+                let const_node = rvsdg.add_const_predicate(region, v);
+
+                ValueOrigin::Output {
+                    producer: const_node,
+                    output: 0,
+                }
+            }
             MaybeConstantValue::Variable(input) => input.origin,
         };
 
@@ -164,12 +182,21 @@ impl NodeReducer {
 
         for user in &rvsdg[node].value_outputs()[0].users {
             if let ValueUser::Input { consumer, .. } = user {
-                match rvsdg[*consumer].kind() {
-                    NodeKind::Simple(SimpleNode::OpBinary(_))
-                    | NodeKind::Simple(SimpleNode::OpUnary(_)) => {
-                        self.worklist.insert(*consumer);
+                if let NodeKind::Simple(simple) = rvsdg[*consumer].kind() {
+                    use SimpleNode::*;
+
+                    match simple {
+                        OpBinary(_)
+                        | OpUnary(_)
+                        | OpConvertToU32(_)
+                        | OpConvertToI32(_)
+                        | OpConvertToF32(_)
+                        | OpConvertToBool(_)
+                        | OpCaseToBranchSelector(_) => {
+                            self.worklist.insert(*consumer);
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
@@ -199,8 +226,13 @@ impl<'a> RegionNodesVisitor for CandidateCollector<'a> {
         use SimpleNode::*;
 
         if let Simple(
-            OpBinary(_) | OpUnary(_) | OpConvertToU32(_) | OpConvertToI32(_) | OpConvertToF32(_)
-            | OpConvertToBool(_),
+            OpBinary(_)
+            | OpUnary(_)
+            | OpConvertToU32(_)
+            | OpConvertToI32(_)
+            | OpConvertToF32(_)
+            | OpConvertToBool(_)
+            | OpCaseToBranchSelector(_),
         ) = rvsdg[node].kind()
         {
             self.worklist.insert(node);
@@ -281,6 +313,9 @@ impl ReverseValueFlowVisitor for ValueResolver {
             }
             Simple(ConstBool(c)) => {
                 self.result = Some(MaybeConstantValue::Bool(c.value()));
+            }
+            Simple(ConstPredicate(c)) => {
+                self.result = Some(MaybeConstantValue::Predicate(c.value()));
             }
             Simple(ValueProxy(_)) => {
                 self.visit_value_input(rvsdg, node, 0);
@@ -662,6 +697,27 @@ fn try_reduce_convert_to_bool(val: MaybeConstantValue) -> Option<MaybeConstantVa
         Variable(input) if input.ty == TY_BOOL => Some(Variable(input)),
         _ => None,
     }
+}
+
+fn try_reduce_op_case_to_branch_selector(
+    encoding: Int,
+    cases: &[u128],
+    val: MaybeConstantValue,
+) -> Option<MaybeConstantValue> {
+    use MaybeConstantValue::*;
+
+    let val_bits = match (encoding, val) {
+        (Int::U32, U32(v)) => v as u128,
+        (Int::I32, I32(v)) => v as u32 as u128,
+        _ => return None,
+    };
+
+    let branch_index = cases
+        .iter()
+        .position(|&case| case == val_bits)
+        .unwrap_or(cases.len());
+
+    Some(Predicate(branch_index as u32))
 }
 
 #[cfg(test)]
@@ -1128,5 +1184,35 @@ mod tests {
         let var_u32 = Variable(ValueInput::argument(TY_U32, 0));
         assert_eq!(try_reduce_convert_to_bool(var_bool), Some(var_bool));
         assert_eq!(try_reduce_convert_to_bool(var_u32), None);
+    }
+
+    #[test]
+    fn test_try_reduce_op_case_to_branch_selector() {
+        use crate::ty::Int;
+
+        let cases = [10u128, 20, 30];
+
+        // Match case 0
+        assert_eq!(
+            try_reduce_op_case_to_branch_selector(Int::U32, &cases, U32(10)),
+            Some(Predicate(0))
+        );
+        // Match case 1
+        assert_eq!(
+            try_reduce_op_case_to_branch_selector(Int::I32, &cases, I32(20)),
+            Some(Predicate(1))
+        );
+        // No match -> default branch (cases.len())
+        assert_eq!(
+            try_reduce_op_case_to_branch_selector(Int::U32, &cases, U32(40)),
+            Some(Predicate(3))
+        );
+
+        // I32
+        let cases_neg = [(-1i32 as u32 as u128)];
+        assert_eq!(
+            try_reduce_op_case_to_branch_selector(Int::I32, &cases_neg, I32(-1)),
+            Some(Predicate(0))
+        );
     }
 }
