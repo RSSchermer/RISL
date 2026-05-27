@@ -116,11 +116,6 @@ impl NodeReducer {
                 let cases = n.cases();
                 let val = self.resolve_value(rvsdg, node, 0);
 
-                println!(
-                    "try reduce OpCaseToBranchSelector: encoding {:?} - cases {:?} - resolved_val {:?} ",
-                    encoding, cases, val
-                );
-
                 if let Some(reduced) = try_reduce_op_case_to_branch_selector(encoding, cases, val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
                 }
@@ -710,6 +705,7 @@ fn try_reduce_op_case_to_branch_selector(
             }
             IntSize::I128 => v as i128 as u128,
         },
+        Variable(_) => return None,
         _ => panic!("op-case-to-branch-selector input value must be an integer"),
     };
 
