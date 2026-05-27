@@ -4,15 +4,6 @@ use std::ops::Try;
 use risl_macros::gpu;
 
 #[gpu]
-#[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::size_hint"))]
-pub fn iterator_size_hint<I>(_: &I) -> (usize, Option<usize>)
-where
-    I: Iterator + ?Sized,
-{
-    (0, None)
-}
-
-#[gpu]
 #[cfg_attr(rislc, rislc::core_shim("core::iter::Iterator::fold"))]
 pub fn iterator_fold<I, B, F>(mut iter: I, init: B, mut f: F) -> B
 where
