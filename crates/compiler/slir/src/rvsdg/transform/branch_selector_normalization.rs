@@ -206,7 +206,7 @@ impl BranchSelectorNormalizer {
 
         let value_ty = match folded_value {
             ResolvedValue::Bool(_) => TY_BOOL,
-            ResolvedValue::Case { .. } => TY_U32,
+            ResolvedValue::Case { encoding, .. } => encoding.backend_ty(),
             ResolvedValue::Fallback => {
                 panic!("folded value must resolve to something other than a fallback value")
             }
@@ -353,14 +353,14 @@ impl BranchSelectorNormalizer {
                 // `resolve_value` caches its results, this is not as expensive as it might seem.
                 match self.resolve_value(rvsdg, loop_region, result_origin) {
                     ResolvedValue::Bool(_) => TY_BOOL,
-                    ResolvedValue::Case { .. } => TY_U32,
+                    ResolvedValue::Case { encoding, .. } => encoding.backend_ty(),
                     ResolvedValue::Fallback => {
                         panic!("a loop result should not resolve to a fallback predicate");
                     }
                 }
             }
             ResolvedValue::Bool(_) => TY_BOOL,
-            ResolvedValue::Case { .. } => TY_U32,
+            ResolvedValue::Case { encoding, .. } => encoding.backend_ty(),
         };
 
         // Add the new loop-value.
