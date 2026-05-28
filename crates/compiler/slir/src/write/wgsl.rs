@@ -808,7 +808,10 @@ impl WgslModuleWriter {
                 // condition wants to re-enter on `true`, so we exit on `false`.
                 self.write_newline();
                 self.w.push_str("if !");
-                self.write_local_value(cx, condition, InlineContext::None);
+                // Note that we're negating the reentry condition here, so we need to specify an
+                // `UnOp` context to ensure that the condition gets properly parenthesized if
+                // necessary.
+                self.write_local_value(cx, condition, InlineContext::UnOp);
                 self.write_optional_space();
                 self.w.push_str("{");
                 self.increment_indent();
