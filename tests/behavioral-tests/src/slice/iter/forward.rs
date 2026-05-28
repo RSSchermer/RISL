@@ -1,4 +1,4 @@
-#![cfg(feature = "test_slice_iter_iter_mut")]
+#![cfg(feature = "test_slice_iter_forward")]
 
 use std::error::Error;
 
@@ -8,21 +8,17 @@ use futures::FutureExt;
 test_runner! {
     name: Runner,
     inputs: {
-        VALUES: [u32] as StorageMut<[u32]>,
+        VALUES: [u32] as Storage<[u32]>,
     },
     result: u32,
     shader: {
+        let mut sum = 0;
+
+        for value in &*VALUES {
+            sum += value;
+        }
+
         unsafe {
-            for value in VALUES.as_mut_unchecked() {
-                *value += 1;
-            }
-
-            let mut sum = 0;
-
-            for value in VALUES.as_ref_unchecked() {
-                sum += value;
-            }
-
             *RESULT.as_mut_unchecked() = sum;
         }
     },
@@ -31,7 +27,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    assert_eq!(runner.run(vec![10, 20, 30, 40]).await?, 104);
+    assert_eq!(runner.run(vec![10, 20, 30, 40]).await?, 100);
 
     Ok(())
 }

@@ -1,4 +1,4 @@
-#![cfg(feature = "test_slice_iter_iter_sub_slice")]
+#![cfg(feature = "test_slice_iter_forward_sub_slice")]
 
 use std::error::Error;
 

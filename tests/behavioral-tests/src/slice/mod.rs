@@ -6,6 +6,7 @@ mod first_mut;
 mod index;
 mod is_empty;
 mod iter;
+mod iter_mut;
 mod last;
 mod last_mut;
 mod len;
