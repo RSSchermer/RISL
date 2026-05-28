@@ -44,6 +44,24 @@ where
     unsafe { intrinsic::slice_iter_mut_new(slice) }
 }
 
+fn slice_iter_len<T>(iter: &Iter<'_, T>) -> usize {
+    unsafe {
+        let start = intrinsic::slice_iter_start(iter);
+        let end = intrinsic::slice_iter_end(iter);
+
+        end - start
+    }
+}
+
+fn slice_iter_mut_len<T>(iter: &IterMut<'_, T>) -> usize {
+    unsafe {
+        let start = intrinsic::slice_iter_mut_start(iter);
+        let end = intrinsic::slice_iter_mut_end(iter);
+
+        end - start
+    }
+}
+
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -92,4 +110,32 @@ where
             None
         }
     }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::size_hint")
+)]
+pub fn slice_iter_iterator_size_hint<'a, T>(iter: &Iter<'a, T>) -> (usize, Option<usize>)
+where
+    T: 'a,
+{
+    let exact = slice_iter_len(iter);
+
+    (exact, Some(exact))
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::size_hint")
+)]
+pub fn slice_iter_iterator_mut_size_hint<'a, T>(iter: &IterMut<'a, T>) -> (usize, Option<usize>)
+where
+    T: 'a,
+{
+    let exact = slice_iter_mut_len(iter);
+
+    (exact, Some(exact))
 }
