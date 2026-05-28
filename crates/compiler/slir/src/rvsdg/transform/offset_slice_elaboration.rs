@@ -61,9 +61,12 @@ impl Collector {
 
 impl BottomUpVisitor for Collector {
     fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
+        if !self.seen.insert(node) {
+            return;
+        }
+
         if let Simple(OpElementPtr(op)) = rvsdg[node].kind()
             && is_slice_ptr_ty(rvsdg.ty(), op.ptr_input().ty)
-            && self.seen.insert(node)
         {
             self.queue.push(node);
         }
