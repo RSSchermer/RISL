@@ -175,3 +175,61 @@ where
 {
     slice_iter_mut_len(&iter)
 }
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::nth")
+)]
+pub fn slice_iter_iterator_nth<'a, T>(iter: &mut Iter<'a, T>, n: usize) -> Option<&'a T>
+where
+    T: 'a,
+{
+    unsafe {
+        let start = intrinsic::slice_iter_start(iter);
+        let end = intrinsic::slice_iter_end(iter);
+
+        let index = start + n;
+
+        if index < end {
+            let result = intrinsic::slice_iter_get_unchecked(iter, index);
+
+            intrinsic::slice_iter_set_start(iter, index + 1);
+
+            Some(result)
+        } else {
+            intrinsic::slice_iter_set_start(iter, end);
+
+            None
+        }
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::nth")
+)]
+pub fn slice_iter_mut_iterator_nth<'a, T>(iter: &mut IterMut<'a, T>, n: usize) -> Option<&'a mut T>
+where
+    T: 'a,
+{
+    unsafe {
+        let start = intrinsic::slice_iter_mut_start(iter);
+        let end = intrinsic::slice_iter_mut_end(iter);
+
+        let index = start + n;
+
+        if index < end {
+            let result = intrinsic::slice_iter_mut_get_unchecked(iter, index);
+
+            intrinsic::slice_iter_mut_set_start(iter, index + 1);
+
+            Some(result)
+        } else {
+            intrinsic::slice_iter_mut_set_start(iter, end);
+
+            None
+        }
+    }
+}
