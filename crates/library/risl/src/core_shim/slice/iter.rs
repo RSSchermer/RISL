@@ -292,3 +292,57 @@ where
         unsafe { Err(NonZero::new_unchecked(rem)) }
     }
 }
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::DoubleEndedIterator>::next_back")
+)]
+pub fn slice_iter_iterator_next_back<'a, T>(iter: &mut Iter<'a, T>) -> Option<&'a T>
+where
+    T: 'a,
+{
+    unsafe {
+        let start = intrinsic::slice_iter_start(iter);
+        let end = intrinsic::slice_iter_end(iter);
+
+        if start < end {
+            let index = end - 1;
+            let result = intrinsic::slice_iter_get_unchecked(iter, index);
+
+            intrinsic::slice_iter_set_end(iter, index);
+
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim(
+        "<core::slice::IterMut<'a, T> as core::iter::DoubleEndedIterator>::next_back"
+    )
+)]
+pub fn slice_iter_mut_iterator_next_back<'a, T>(iter: &mut IterMut<'a, T>) -> Option<&'a mut T>
+where
+    T: 'a,
+{
+    unsafe {
+        let start = intrinsic::slice_iter_mut_start(iter);
+        let end = intrinsic::slice_iter_mut_end(iter);
+
+        if start < end {
+            let index = end - 1;
+            let result = intrinsic::slice_iter_mut_get_unchecked(iter, index);
+
+            intrinsic::slice_iter_mut_set_end(iter, index);
+
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
