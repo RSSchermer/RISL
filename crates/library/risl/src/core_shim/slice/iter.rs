@@ -139,3 +139,27 @@ where
 
     (exact, Some(exact))
 }
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::count")
+)]
+pub fn slice_iter_iterator_count<'a, T>(iter: Iter<'a, T>) -> usize
+where
+    T: 'a,
+{
+    slice_iter_len(&iter)
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::count")
+)]
+pub fn slice_iter_mut_iterator_count<'a, T>(iter: IterMut<'a, T>) -> usize
+where
+    T: 'a,
+{
+    slice_iter_mut_len(&iter)
+}
