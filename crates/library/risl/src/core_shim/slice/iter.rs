@@ -346,3 +346,62 @@ where
         }
     }
 }
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::DoubleEndedIterator>::nth_back")
+)]
+pub fn slice_iter_iterator_nth_back<'a, T>(iter: &mut Iter<'a, T>, n: usize) -> Option<&'a T>
+where
+    T: 'a,
+{
+    unsafe {
+        let start = intrinsic::slice_iter_start(iter);
+        let end = intrinsic::slice_iter_end(iter);
+
+        if n < end - start {
+            let index = end - 1 - n;
+            let result = intrinsic::slice_iter_get_unchecked(iter, index);
+
+            intrinsic::slice_iter_set_end(iter, index);
+
+            Some(result)
+        } else {
+            intrinsic::slice_iter_set_end(iter, start);
+
+            None
+        }
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::DoubleEndedIterator>::nth_back")
+)]
+pub fn slice_iter_mut_iterator_nth_back<'a, T>(
+    iter: &mut IterMut<'a, T>,
+    n: usize,
+) -> Option<&'a mut T>
+where
+    T: 'a,
+{
+    unsafe {
+        let start = intrinsic::slice_iter_mut_start(iter);
+        let end = intrinsic::slice_iter_mut_end(iter);
+
+        if n < end - start {
+            let index = end - 1 - n;
+            let result = intrinsic::slice_iter_mut_get_unchecked(iter, index);
+
+            intrinsic::slice_iter_mut_set_end(iter, index);
+
+            Some(result)
+        } else {
+            intrinsic::slice_iter_mut_set_end(iter, start);
+
+            None
+        }
+    }
+}
