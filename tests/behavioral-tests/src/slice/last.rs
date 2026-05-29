@@ -27,7 +27,7 @@ test_runner! {
         let result = if let Some(last) = slice.last() {
             *last
         } else {
-            99
+            u32::MAX
         };
 
         unsafe {
@@ -40,8 +40,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
     let values = vec![10, 20, 30, 40];
 
-    // Case 1: Sub-slice [] -> last: 99
-    assert_eq!(runner.run(0, values.clone()).await?, 99);
+    // Case 1: Sub-slice [] -> last: u32::MAX
+    assert_eq!(runner.run(0, values.clone()).await?, u32::MAX);
 
     // Case 2: Sub-slice [10] -> last: 10
     assert_eq!(runner.run(1, values.clone()).await?, 10);
@@ -52,8 +52,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
     // Case 4: Sub-slice [10, 20, 30, 40] -> last: 40
     assert_eq!(runner.run(4, values.clone()).await?, 40);
 
-    // Case 5: Out of bounds -> last: 99
-    assert_eq!(runner.run(5, values.clone()).await?, 99);
+    // Case 5: Out of bounds -> last: u32::MAX
+    assert_eq!(runner.run(5, values.clone()).await?, u32::MAX);
 
     Ok(())
 }
