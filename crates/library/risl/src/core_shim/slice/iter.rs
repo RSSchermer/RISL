@@ -65,6 +65,18 @@ fn slice_iter_mut_len<T>(iter: &IterMut<'_, T>) -> usize {
 #[gpu]
 #[cfg_attr(
     rislc,
+    rislc::core_shim("<core::slice::Iter<'_, T> as core::clone::Clone>::clone")
+)]
+pub fn slice_iter_iterator_clone<'a, T>(iter: &Iter<'a, T>) -> Iter<'a, T>
+where
+    T: 'a,
+{
+    unsafe { intrinsic::slice_iter_clone(iter) }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
     rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::next")
 )]
 pub fn slice_iter_iterator_next<'a, T>(iter: &mut Iter<'a, T>) -> Option<&'a T>

@@ -30,6 +30,7 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::SliceIterSetStart => define_slice_iter_set_start(instance, cx),
             RislIntrinsic::SliceIterEnd => define_slice_iter_end(instance, cx),
             RislIntrinsic::SliceIterSetEnd => define_slice_iter_set_end(instance, cx),
+            RislIntrinsic::SliceIterClone => define_slice_iter_clone(instance, cx),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
@@ -94,6 +95,7 @@ pub enum RislIntrinsic {
     SliceIterSetStart,
     SliceIterEnd,
     SliceIterSetEnd,
+    SliceIterClone,
     MemResourceAsRef,
     NonZeroNew,
     NonZeroNewUnchecked,
@@ -162,6 +164,7 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(slice_iter_set_start)]" => RislIntrinsic::SliceIterSetStart,
         "#[rislc::intrinsic(slice_iter_end)]" => RislIntrinsic::SliceIterEnd,
         "#[rislc::intrinsic(slice_iter_set_end)]" => RislIntrinsic::SliceIterSetEnd,
+        "#[rislc::intrinsic(slice_iter_clone)]" => RislIntrinsic::SliceIterClone,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
@@ -1046,6 +1049,29 @@ fn define_slice_iter_set_end(instance: Instance, cx: &CodegenContext) {
 
     let (_, end_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), 2);
     cfg.add_stmt_op_store(bb, BlockPosition::Append, end_ptr.into(), end.into());
+
+    cfg.set_terminator(bb, Terminator::return_void());
+}
+
+fn define_slice_iter_clone(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+    let fn_abi = instance
+        .fn_abi()
+        .expect("should have a known ABI during codegen");
+    let ret_mode = &fn_abi.ret.mode;
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+
+    let bb = body.entry_block();
+
+    let ret_ptr = body.argument_values()[0];
+    let iter_ptr = body.argument_values()[1];
+
+    let (_, val) = cfg.add_stmt_op_load(bb, BlockPosition::Append, iter_ptr.into());
+    cfg.add_stmt_op_store(bb, BlockPosition::Append, ret_ptr.into(), val.into());
 
     cfg.set_terminator(bb, Terminator::return_void());
 }

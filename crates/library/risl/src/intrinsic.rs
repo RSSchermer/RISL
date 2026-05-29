@@ -39,6 +39,7 @@ gen_intrinsic!(slice_iter_start: fn slice_iter_start<T>(slice: &core::slice::Ite
 gen_intrinsic!(slice_iter_set_start: fn slice_iter_set_start<T>(slice: &mut core::slice::Iter<'_, T>, start: usize));
 gen_intrinsic!(slice_iter_end: fn slice_iter_end<T>(slice: &core::slice::Iter<'_, T>) -> usize);
 gen_intrinsic!(slice_iter_set_end: fn slice_iter_set_end<T>(slice: &mut core::slice::Iter<'_, T>, end: usize));
+gen_intrinsic!(slice_iter_clone: fn slice_iter_clone<'a, T>(iter: &core::slice::Iter<'a, T>) -> core::slice::Iter<'a, T>);
 
 gen_intrinsic!(slice_iter_new: fn slice_iter_mut_new<T>(slice: &mut [T]) -> core::slice::IterMut<'_, T>);
 gen_intrinsic!(slice_iter_get_unchecked: fn slice_iter_mut_get_unchecked<'a, T>(slice: &core::slice::IterMut<'a, T>, index: usize) -> &'a mut T);
