@@ -1,4 +1,5 @@
 use core::slice::{Iter, IterMut};
+use std::num::NonZero;
 
 use risl_macros::gpu;
 
@@ -231,5 +232,63 @@ where
 
             None
         }
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::advance_by")
+)]
+pub fn slice_iter_iterator_advance_by<'a, T>(
+    iter: &mut Iter<'a, T>,
+    n: usize,
+) -> Result<(), NonZero<usize>>
+where
+    T: 'a,
+{
+    let len = slice_iter_len(iter);
+    let advance = usize::min(n, len);
+    let rem = n - advance;
+
+    unsafe {
+        let start = intrinsic::slice_iter_start(iter);
+        intrinsic::slice_iter_set_start(iter, start + advance);
+    }
+
+    if rem == 0 {
+        Ok(())
+    } else {
+        // SAFETY: the condition guards against zero values
+        unsafe { Err(NonZero::new_unchecked(rem)) }
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::advance_by")
+)]
+pub fn slice_iter_mut_iterator_advance_by<'a, T>(
+    iter: &mut IterMut<'a, T>,
+    n: usize,
+) -> Result<(), NonZero<usize>>
+where
+    T: 'a,
+{
+    let len = slice_iter_mut_len(iter);
+    let advance = usize::min(n, len);
+    let rem = n - advance;
+
+    unsafe {
+        let start = intrinsic::slice_iter_mut_start(iter);
+        intrinsic::slice_iter_mut_set_start(iter, start + advance);
+    }
+
+    if rem == 0 {
+        Ok(())
+    } else {
+        // SAFETY: the condition guards against zero values
+        unsafe { Err(NonZero::new_unchecked(rem)) }
     }
 }

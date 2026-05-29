@@ -1,3 +1,4 @@
+mod advance_by;
 mod count;
 mod forward;
 mod forward_sub_slice;
