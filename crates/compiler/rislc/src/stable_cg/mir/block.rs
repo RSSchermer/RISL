@@ -433,9 +433,31 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         };
 
         match &terminator.kind {
-            mir::TerminatorKind::Assert { .. }
-            | mir::TerminatorKind::InlineAsm { .. }
-            | mir::TerminatorKind::Abort => bug!("`{:?}` not supported by RISL", terminator.kind),
+            mir::TerminatorKind::Assert { target, msg, .. } => {
+                // RISL generally does not allow panics or aborts, but these terminator kinds we
+                // effectively ignore and treat as Goto terminators. This avoids the need to shim a
+                // lot of basic arithmetic operations in core::ops. These terminators should only
+                // originate from `core`, user-defined code is not currently allowed to produce
+                // assert terminators.
+
+                if matches!(
+                    msg,
+                    mir::AssertMessage::Overflow(..)
+                        | mir::AssertMessage::OverflowNeg(_)
+                        | mir::AssertMessage::DivisionByZero(_)
+                        | mir::AssertMessage::RemainderByZero(_)
+                ) {
+                    let mergeable_succ = mergeable_succ();
+
+                    funclet_br(self, bx, *target, mergeable_succ)
+                } else {
+                    bug!("`{:?}` not supported by RISL", terminator.kind)
+                }
+            }
+
+            mir::TerminatorKind::InlineAsm { .. } | mir::TerminatorKind::Abort => {
+                bug!("`{:?}` not supported by RISL", terminator.kind)
+            }
 
             mir::TerminatorKind::Goto { target } => {
                 let mergeable_succ = mergeable_succ();

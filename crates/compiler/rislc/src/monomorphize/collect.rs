@@ -478,10 +478,22 @@ impl<'a, 'tcx> MirVisitor for MirUsedCollector<'a, 'tcx> {
                 visit_drop_use(self.cx, ty, true, source, self.used_items);
             }
 
-            mir::TerminatorKind::InlineAsm { .. }
-            | mir::TerminatorKind::Abort
-            | mir::TerminatorKind::Assert { .. } => {
+            mir::TerminatorKind::InlineAsm { .. } | mir::TerminatorKind::Abort => {
                 bug!("terminator not supported by RISL: {:?}", &terminator.kind);
+            }
+            mir::TerminatorKind::Assert { msg, .. } => {
+                // RISL generally does not allow panics or aborts, but these terminator kinds we
+                // effectively ignore and treat as Goto terminators during codegen. This avoids the
+                // need to shim a lot of basic arithmetic operations in core::ops.
+                if !matches!(
+                    msg,
+                    mir::AssertMessage::Overflow(..)
+                        | mir::AssertMessage::OverflowNeg(_)
+                        | mir::AssertMessage::DivisionByZero(_)
+                        | mir::AssertMessage::RemainderByZero(_)
+                ) {
+                    bug!("terminator not supported by RISL: {:?}", &terminator.kind);
+                }
             }
 
             mir::TerminatorKind::Goto { .. }
