@@ -2,6 +2,7 @@ mod advance_back_by;
 mod advance_by;
 mod clone;
 mod count;
+mod fold;
 mod forward;
 mod forward_sub_slice;
 mod last;

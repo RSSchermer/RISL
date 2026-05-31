@@ -296,6 +296,76 @@ where
 #[gpu]
 #[cfg_attr(
     rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::fold")
+)]
+pub fn slice_iter_iterator_fold<'a, T, B, F>(iter: Iter<'a, T>, init: B, mut f: F) -> B
+where
+    F: FnMut(B, &'a T) -> B,
+    T: 'a,
+{
+    unsafe {
+        let mut i = intrinsic::slice_iter_start(&iter);
+        let end = intrinsic::slice_iter_end(&iter);
+
+        if i >= end {
+            return init;
+        }
+
+        let mut acc = init;
+
+        loop {
+            let value = intrinsic::slice_iter_get_unchecked(&iter, i);
+
+            acc = f(acc, value);
+            i += 1;
+
+            if i == end {
+                break;
+            }
+        }
+
+        acc
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::fold")
+)]
+pub fn slice_iter_mut_iterator_fold<'a, T, B, F>(iter: IterMut<'a, T>, init: B, mut f: F) -> B
+where
+    F: FnMut(B, &'a mut T) -> B,
+    T: 'a,
+{
+    unsafe {
+        let mut i = intrinsic::slice_iter_mut_start(&iter);
+        let end = intrinsic::slice_iter_mut_end(&iter);
+
+        if i >= end {
+            return init;
+        }
+
+        let mut acc = init;
+
+        loop {
+            let value = intrinsic::slice_iter_mut_get_unchecked(&iter, i);
+
+            acc = f(acc, value);
+            i += 1;
+
+            if i == end {
+                break;
+            }
+        }
+
+        acc
+    }
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
     rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::DoubleEndedIterator>::next_back")
 )]
 pub fn slice_iter_iterator_next_back<'a, T>(iter: &mut Iter<'a, T>) -> Option<&'a T>
