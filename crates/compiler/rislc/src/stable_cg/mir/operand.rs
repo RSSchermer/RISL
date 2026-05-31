@@ -331,7 +331,6 @@ impl<'a, V: CodegenObject> OperandRef<V> {
         i: usize,
     ) -> Self {
         let field = self.layout.field(i);
-        let is_first_field = self.layout.layout.fields.fields_by_offset_order()[0] == i;
 
         let mut val = match (self.val, &self.layout.layout.abi) {
             // If the field is ZST, it has no data.
@@ -346,6 +345,8 @@ impl<'a, V: CodegenObject> OperandRef<V> {
 
             // Extract a scalar component from a pair.
             (OperandValue::Pair(a_llval, b_llval), ValueAbi::ScalarPair(..)) => {
+                let is_first_field = self.layout.layout.fields.fields_by_offset_order()[0] == i;
+
                 if is_first_field {
                     OperandValue::Immediate(a_llval)
                 } else {
