@@ -653,13 +653,35 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         debug!("codegen_operand(operand={:?})", operand);
 
         match operand {
-            mir::Operand::Copy(place) | mir::Operand::Move(place) => self.codegen_consume(
-                bx,
-                mir::visit::PlaceRef {
-                    local: place.local,
-                    projection: &place.projection,
-                },
-            ),
+            mir::Operand::Copy(place) | mir::Operand::Move(place) => {
+                let mut o = self.codegen_consume(
+                    bx,
+                    mir::visit::PlaceRef {
+                        local: place.local,
+                        projection: &place.projection,
+                    },
+                );
+
+                if matches!(operand, mir::Operand::Copy(_)) {
+                    match &mut o.val {
+                        OperandValue::Immediate(val) => {
+                            let local = bx.local_copy(*val);
+
+                            *val = bx.local_value(local);
+                        }
+                        OperandValue::Pair(a, b) => {
+                            let a_local = bx.local_copy(*a);
+                            let b_local = bx.local_copy(*b);
+
+                            *a = bx.local_value(a_local);
+                            *b = bx.local_value(b_local);
+                        }
+                        _ => {}
+                    }
+                }
+
+                o
+            }
             mir::Operand::Constant(constant) => OperandRef::from_const(bx, &constant.const_),
         }
     }

@@ -59,7 +59,14 @@ pub trait BuilderMethods<'a>:
 
     fn append_sibling_block(&mut self, name: &str) -> Self::BasicBlock;
 
+    /// If the value is a local value, returns the local value; otherwise binds a copy of the value
+    /// to a new local value.
     fn as_local(&mut self, val: Self::Value) -> Self::Local;
+
+    /// Binds a copy of the given `val` to a new local value, even if the value is already a local
+    /// value.
+    fn local_copy(&mut self, val: Self::Value) -> Self::Local;
+
     fn local_value(&mut self, local: Self::Local) -> Self::Value;
 
     fn switch_to_block(&mut self, llbb: Self::BasicBlock);

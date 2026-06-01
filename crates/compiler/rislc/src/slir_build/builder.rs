@@ -243,6 +243,17 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         local
     }
 
+    fn local_copy(&mut self, val: Self::Value) -> Self::Local {
+        let val = val.expect_value();
+
+        let (_, local) =
+            self.cfg
+                .borrow_mut()
+                .add_stmt_bind(self.basic_block, BlockPosition::Append, val);
+
+        local
+    }
+
     fn local_value(&mut self, local: Self::Local) -> Self::Value {
         Value::Value(slir::cfg::Value::Local(local))
     }
