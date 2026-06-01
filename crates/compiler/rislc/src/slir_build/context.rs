@@ -984,7 +984,19 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn const_int(&self, t: Self::Type, i: i64) -> Self::Value {
-        todo!()
+        let slir_ty = t.expect_slir_type();
+        let module = self.module.borrow();
+        let kind = module.ty.kind(slir_ty);
+
+        match &*kind {
+            slir::ty::TypeKind::Scalar(slir::ty::ScalarKind::I32) => {
+                slir::cfg::Value::InlineConst(slir::cfg::InlineConst::I32(i as i32)).into()
+            }
+            slir::ty::TypeKind::Scalar(slir::ty::ScalarKind::U32) => {
+                slir::cfg::Value::InlineConst(slir::cfg::InlineConst::U32(i as u32)).into()
+            }
+            _ => todo!("unsupported integer type for const_int"),
+        }
     }
 
     fn const_u8(&self, i: u8) -> Self::Value {
@@ -1008,7 +1020,19 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn const_uint(&self, t: Self::Type, i: u64) -> Self::Value {
-        slir::cfg::Value::InlineConst(slir::cfg::InlineConst::U32(i as u32)).into()
+        let slir_ty = t.expect_slir_type();
+        let module = self.module.borrow();
+        let kind = module.ty.kind(slir_ty);
+
+        match &*kind {
+            slir::ty::TypeKind::Scalar(slir::ty::ScalarKind::U32) => {
+                slir::cfg::Value::InlineConst(slir::cfg::InlineConst::U32(i as u32)).into()
+            }
+            slir::ty::TypeKind::Scalar(slir::ty::ScalarKind::I32) => {
+                slir::cfg::Value::InlineConst(slir::cfg::InlineConst::I32(i as i32)).into()
+            }
+            _ => todo!("unsupported integer type for const_uint"),
+        }
     }
 
     fn const_uint_big(&self, t: Self::Type, u: u128) -> Self::Value {
@@ -1294,7 +1318,31 @@ impl<'a, 'tcx> BaseTypeCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn type_kind(&self, ty: Self::Type) -> TypeKind {
-        todo!()
+        let slir_ty = ty.expect_slir_type();
+        let module = self.module.borrow();
+        let kind = module.ty.kind(slir_ty);
+
+        match &*kind {
+            slir::ty::TypeKind::Scalar(s) => {
+                if s.is_integer() {
+                    TypeKind::Integer
+                } else if *s == slir::ty::ScalarKind::F32 {
+                    TypeKind::Float
+                } else if *s == slir::ty::ScalarKind::Bool {
+                    TypeKind::Integer
+                } else {
+                    todo!()
+                }
+            }
+            slir::ty::TypeKind::Vector(_) => TypeKind::Vector,
+            slir::ty::TypeKind::Matrix(_) => TypeKind::Vector,
+            slir::ty::TypeKind::Array { .. } => TypeKind::Array,
+            slir::ty::TypeKind::Struct(_) => TypeKind::Struct,
+            slir::ty::TypeKind::Enum(_) => TypeKind::Struct,
+            slir::ty::TypeKind::Ptr(_) => TypeKind::Pointer,
+            slir::ty::TypeKind::Function(_) => TypeKind::Function,
+            _ => todo!(),
+        }
     }
 
     fn type_ptr(&self) -> Self::Type {
@@ -1302,11 +1350,23 @@ impl<'a, 'tcx> BaseTypeCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn element_type(&self, ty: Self::Type) -> Self::Type {
-        todo!()
+        let slir_ty = ty.expect_slir_type();
+        let module = self.module.borrow();
+        let kind = module.ty.kind(slir_ty);
+        match &*kind {
+            slir::ty::TypeKind::Vector(v) => v.scalar.ty().into(),
+            slir::ty::TypeKind::Array { element_ty, .. } => (*element_ty).into(),
+            slir::ty::TypeKind::Slice { element_ty, .. } => (*element_ty).into(),
+            slir::ty::TypeKind::Ptr(pointee) => (*pointee).into(),
+            _ => todo!(),
+        }
     }
 
     fn vector_length(&self, ty: Self::Type) -> usize {
-        todo!()
+        let slir_ty = ty.expect_slir_type();
+        let module = self.module.borrow();
+        let kind = module.ty.kind(slir_ty);
+        kind.expect_vector().size.to_usize()
     }
 
     fn float_width(&self, ty: Self::Type) -> usize {
@@ -1314,10 +1374,24 @@ impl<'a, 'tcx> BaseTypeCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn int_width(&self, ty: Self::Type) -> u64 {
-        todo!()
+        let slir_ty = ty.expect_slir_type();
+        let module = self.module.borrow();
+        let kind = module.ty.kind(slir_ty);
+        match &*kind {
+            slir::ty::TypeKind::Scalar(s) => match s {
+                slir::ty::ScalarKind::I32 | slir::ty::ScalarKind::U32 => 32,
+                _ => todo!(),
+            },
+            _ => todo!(),
+        }
     }
 
     fn val_ty(&self, v: Self::Value) -> Self::Type {
-        todo!()
+        match v {
+            Value::Value(v) => self.cfg.borrow().value_ty(&v).into(),
+            Value::Constant(c) => self.module.borrow().constants[c].ty().into(),
+            Value::FnAddr(_) => todo!("function pointers are not supported by SLIR"),
+            Value::Void => todo!(),
+        }
     }
 }

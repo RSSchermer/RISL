@@ -492,11 +492,33 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn lshr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let lhs = lhs.expect_value();
+        let rhs = rhs.expect_value();
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
+            self.basic_block,
+            BlockPosition::Append,
+            slir::BinaryOperator::Shr,
+            lhs,
+            rhs,
+        );
+
+        result.into()
     }
 
     fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        let lhs = lhs.expect_value();
+        let rhs = rhs.expect_value();
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
+            self.basic_block,
+            BlockPosition::Append,
+            slir::BinaryOperator::Shr,
+            lhs,
+            rhs,
+        );
+
+        result.into()
     }
 
     fn unchecked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
@@ -761,7 +783,17 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let val = val.expect_value();
+        let dest_ty = dest_ty.expect_slir_type();
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_cast(
+            self.basic_block,
+            BlockPosition::Append,
+            val,
+            dest_ty,
+        );
+
+        result.into()
     }
 
     fn sext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -1003,7 +1035,17 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        todo!()
+        let val = val.expect_value();
+        let dest_ty = dest_ty.expect_slir_type();
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_cast(
+            self.basic_block,
+            BlockPosition::Append,
+            val,
+            dest_ty,
+        );
+
+        result.into()
     }
 
     fn debug_write_body<W: Write>(&self, w: &mut W) {

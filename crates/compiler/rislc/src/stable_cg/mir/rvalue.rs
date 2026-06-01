@@ -77,7 +77,7 @@ pub(crate) fn build_shift_expr_rhs<'a, Bx: BuilderMethods<'a>>(
     let mask = shift_mask_val(bx, lhs_llty, rhs_llty, false);
 
     if !is_unchecked {
-        rhs = bx.and(rhs, mask);
+        rhs = bx.bit_and(rhs, mask);
     }
 
     if bx.type_kind(rhs_llty) == TypeKind::Vector {
