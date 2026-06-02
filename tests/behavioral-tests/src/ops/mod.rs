@@ -10,6 +10,8 @@ mod div;
 mod div_assign;
 mod mul;
 mod mul_assign;
+mod rem;
+mod rem_assign;
 mod shl;
 mod shl_assign;
 mod shr;

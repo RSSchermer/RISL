@@ -423,7 +423,12 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         udiv => Div,
         sdiv => Div,
         fdiv => Div,
+        urem => Mod,
+        srem => Mod,
+        frem => Mod,
         shl => Shl,
+        lshr => Shr,
+        ashr => Shr,
         and => And,
         or => Or,
         bit_and => BitAnd,
@@ -471,54 +476,12 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         todo!()
     }
 
-    fn urem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
-    }
-
-    fn srem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
-    }
-
-    fn frem(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
-    }
-
     fn frem_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         todo!()
     }
 
     fn frem_algebraic(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         todo!()
-    }
-
-    fn lshr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let lhs = lhs.expect_value();
-        let rhs = rhs.expect_value();
-
-        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
-            self.basic_block,
-            BlockPosition::Append,
-            slir::BinaryOperator::Shr,
-            lhs,
-            rhs,
-        );
-
-        result.into()
-    }
-
-    fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let lhs = lhs.expect_value();
-        let rhs = rhs.expect_value();
-
-        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
-            self.basic_block,
-            BlockPosition::Append,
-            slir::BinaryOperator::Shr,
-            lhs,
-            rhs,
-        );
-
-        result.into()
     }
 
     fn unchecked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
