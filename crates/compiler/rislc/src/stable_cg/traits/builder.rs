@@ -121,14 +121,10 @@ pub trait BuilderMethods<'a>:
     /// Generate a left-shift. Both operands must have the same size. The right operand must be
     /// interpreted as unsigned and can be assumed to be less than the size of the left operand.
     fn shl(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
-    /// Generate a logical right-shift. Both operands must have the same size. The right operand
+    /// Generate a right-shift. Both operands must have the same size. The right operand
     /// must be interpreted as unsigned and can be assumed to be less than the size of the left
     /// operand.
-    fn lshr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
-    /// Generate an arithmetic right-shift. Both operands must have the same size. The right operand
-    /// must be interpreted as unsigned and can be assumed to be less than the size of the left
-    /// operand.
-    fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
+    fn shr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
     fn unchecked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
     fn unchecked_uadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
     fn unchecked_ssub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;

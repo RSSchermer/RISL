@@ -920,11 +920,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             mir::BinOp::Shr | mir::BinOp::ShrUnchecked => {
                 let rhs = build_shift_expr_rhs(bx, lhs, rhs, op == mir::BinOp::ShrUnchecked);
 
-                if is_signed {
-                    bx.ashr(lhs, rhs)
-                } else {
-                    bx.lshr(lhs, rhs)
-                }
+                bx.shr(lhs, rhs)
             }
             mir::BinOp::Ne
             | mir::BinOp::Lt

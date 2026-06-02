@@ -468,24 +468,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         result.into()
     }
 
-    fn lshr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        let lhs = lhs.expect_value();
-        let rhs = rhs.expect_value();
-
-        let rhs = self.cast_shift_rhs(rhs);
-
-        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
-            self.basic_block,
-            BlockPosition::Append,
-            slir::BinaryOperator::Shr,
-            lhs,
-            rhs,
-        );
-
-        result.into()
-    }
-
-    fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+    fn shr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
         let lhs = lhs.expect_value();
         let rhs = rhs.expect_value();
 
