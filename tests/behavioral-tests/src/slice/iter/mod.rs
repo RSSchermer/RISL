@@ -3,6 +3,7 @@ mod advance_by;
 mod clone;
 mod count;
 mod fold;
+mod for_each;
 mod forward;
 mod forward_sub_slice;
 mod last;

@@ -363,6 +363,42 @@ where
     }
 }
 
+// Note: we shim `Iter::for_each` because the default implementation in `core` calls `next`. Since
+// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
+// pointer arithmetic that are not supported by RISL.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::for_each")
+)]
+pub fn slice_iter_iterator_for_each<'a, T, F>(mut iter: Iter<'a, T>, mut f: F)
+where
+    F: FnMut(&'a T),
+    T: 'a,
+{
+    while let Some(value) = iter.next() {
+        f(value);
+    }
+}
+
+// Note: we shim `IterMut::for_each` because the default implementation in `core` calls `next`.
+// Since`core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes
+// and pointer arithmetic that are not supported by RISL.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::for_each")
+)]
+pub fn slice_iter_mut_iterator_for_each<'a, T, F>(mut iter: IterMut<'a, T>, mut f: F)
+where
+    F: FnMut(&'a mut T),
+    T: 'a,
+{
+    while let Some(value) = iter.next() {
+        f(value);
+    }
+}
+
 #[gpu]
 #[cfg_attr(
     rislc,
