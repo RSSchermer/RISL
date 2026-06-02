@@ -4,6 +4,7 @@ mod all;
 mod any;
 mod count;
 mod find;
+mod find_map;
 mod fold;
 mod for_each;
 mod forward;

@@ -528,6 +528,51 @@ where
     None
 }
 
+// Note: we shim `Iter::find_map` because the default implementation in `core` calls `next`. Since
+// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
+// pointer arithmetic that are not supported by RISL.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::find_map")
+)]
+pub fn slice_iter_iterator_find_map<'a, T, B, F>(iter: &mut Iter<'a, T>, mut f: F) -> Option<B>
+where
+    F: FnMut(&'a T) -> Option<B>,
+    T: 'a,
+{
+    while let Some(value) = iter.next() {
+        if let Some(result) = f(value) {
+            return Some(result);
+        }
+    }
+    None
+}
+
+// Note: we shim `IterMut::find_map` because the default implementation in `core` calls `next`.
+// Since `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes
+// and pointer arithmetic that are not supported by RISL.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::find_map")
+)]
+pub fn slice_iter_mut_iterator_find_map<'a, T, B, F>(
+    iter: &mut IterMut<'a, T>,
+    mut f: F,
+) -> Option<B>
+where
+    F: FnMut(&'a mut T) -> Option<B>,
+    T: 'a,
+{
+    while let Some(value) = iter.next() {
+        if let Some(result) = f(value) {
+            return Some(result);
+        }
+    }
+    None
+}
+
 #[gpu]
 #[cfg_attr(
     rislc,
