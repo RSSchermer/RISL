@@ -795,17 +795,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn trunc(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        let val = val.expect_value();
-        let dest_ty = dest_ty.expect_slir_type();
-
-        let (_, result) = self.cfg.borrow_mut().add_stmt_cast(
-            self.basic_block,
-            BlockPosition::Append,
-            val,
-            dest_ty,
-        );
-
-        result.into()
+        todo!()
     }
 
     fn sext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
@@ -1047,17 +1037,7 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     }
 
     fn zext(&mut self, val: Self::Value, dest_ty: Self::Type) -> Self::Value {
-        let val = val.expect_value();
-        let dest_ty = dest_ty.expect_slir_type();
-
-        let (_, result) = self.cfg.borrow_mut().add_stmt_cast(
-            self.basic_block,
-            BlockPosition::Append,
-            val,
-            dest_ty,
-        );
-
-        result.into()
+        todo!()
     }
 
     fn debug_write_body<W: Write>(&self, w: &mut W) {
