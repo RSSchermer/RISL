@@ -33,6 +33,24 @@ pub struct Builder<'a, 'tcx> {
     basic_block: slir::cfg::BasicBlock,
 }
 
+impl<'a, 'tcx> Builder<'a, 'tcx> {
+    fn cast_shift_rhs(&mut self, rhs: slir::cfg::Value) -> slir::cfg::Value {
+        let ty = self.cfg.borrow().value_ty(&rhs);
+
+        if ty == slir::ty::TY_U32 {
+            rhs
+        } else {
+            let (_, result) = self.cfg.borrow_mut().add_stmt_op_convert_to_u32(
+                self.basic_block,
+                BlockPosition::Append,
+                rhs,
+            );
+
+            slir::cfg::Value::Local(result)
+        }
+    }
+}
+
 impl<'a, 'tcx> Deref for Builder<'a, 'tcx> {
     type Target = Cx<'a, 'tcx>;
 
@@ -426,14 +444,62 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         urem => Mod,
         srem => Mod,
         frem => Mod,
-        shl => Shl,
-        lshr => Shr,
-        ashr => Shr,
         and => And,
         or => Or,
         bit_and => BitAnd,
         bit_or => BitOr,
         bit_xor => BitXor,
+    }
+
+    fn shl(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = lhs.expect_value();
+        let rhs = rhs.expect_value();
+
+        let rhs = self.cast_shift_rhs(rhs);
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
+            self.basic_block,
+            BlockPosition::Append,
+            slir::BinaryOperator::Shl,
+            lhs,
+            rhs,
+        );
+
+        result.into()
+    }
+
+    fn lshr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = lhs.expect_value();
+        let rhs = rhs.expect_value();
+
+        let rhs = self.cast_shift_rhs(rhs);
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
+            self.basic_block,
+            BlockPosition::Append,
+            slir::BinaryOperator::Shr,
+            lhs,
+            rhs,
+        );
+
+        result.into()
+    }
+
+    fn ashr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
+        let lhs = lhs.expect_value();
+        let rhs = rhs.expect_value();
+
+        let rhs = self.cast_shift_rhs(rhs);
+
+        let (_, result) = self.cfg.borrow_mut().add_stmt_op_binary(
+            self.basic_block,
+            BlockPosition::Append,
+            slir::BinaryOperator::Shr,
+            lhs,
+            rhs,
+        );
+
+        result.into()
     }
 
     fn fadd_fast(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
