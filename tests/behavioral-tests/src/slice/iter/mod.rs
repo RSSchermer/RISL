@@ -4,6 +4,7 @@ mod all;
 mod any;
 mod clone;
 mod count;
+mod find;
 mod fold;
 mod for_each;
 mod forward;
