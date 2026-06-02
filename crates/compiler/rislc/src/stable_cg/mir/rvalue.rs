@@ -2,7 +2,7 @@ use arrayvec::ArrayVec;
 use rustc_middle::bug;
 use rustc_public::abi::ValueAbi;
 use rustc_public::mir::{AggregateKind, CastKind, PointerCoercion, Rvalue};
-use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
+use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, VariantIdx};
 use rustc_public::{abi, mir};
 use rustc_public_bridge::IndexedVal;
 use tracing::{debug, instrument, trace};
@@ -14,71 +14,14 @@ use crate::stable_cg::common::{IntPredicate, RealPredicate, TypeKind};
 use crate::stable_cg::layout::{ScalarExt, TyAndLayout};
 use crate::stable_cg::traits::*;
 
-pub(crate) fn shift_mask_val<'a, Bx: BuilderMethods<'a>>(
-    bx: &mut Bx,
-    llty: Bx::Type,
-    mask_llty: Bx::Type,
-    invert: bool,
-) -> Bx::Value {
-    let kind = bx.type_kind(llty);
-
-    match kind {
-        TypeKind::Integer => {
-            // i8/u8 can shift by at most 7, i16/u16 by at most 15, etc.
-            let val = bx.int_width(llty) - 1;
-
-            if invert {
-                bx.const_int(mask_llty, !val as i64)
-            } else {
-                bx.const_uint(mask_llty, val)
-            }
-        }
-        TypeKind::Vector => {
-            let mask = shift_mask_val(
-                bx,
-                bx.element_type(llty),
-                bx.element_type(mask_llty),
-                invert,
-            );
-            bx.vector_splat(bx.vector_length(mask_llty), mask)
-        }
-        _ => bug!(
-            "shift_mask_val: expected Integer or Vector, found {:?}",
-            kind
-        ),
-    }
-}
-
-/// Returns `rhs` sufficiently masked, truncated, and/or extended so that it can be used to shift
-/// `lhs`: it has the same size as `lhs`, and the value, when interpreted unsigned (no matter its
-/// type), will not exceed the size of `lhs`.
-///
-/// Shifts in MIR are all allowed to have mismatched LHS & RHS types, and signed RHS.
-/// The shift methods in `BuilderMethods`, however, are fully homogeneous
-/// (both parameters and the return type are all the same size) and assume an unsigned RHS.
-///
-/// If `is_unchecked` is false, this masks the RHS to ensure it stays in-bounds,
-/// as the `BuilderMethods` shifts are UB for out-of-bounds shift amounts.
-/// For 32- and 64-bit types, this matches the semantics
-/// of Java. (See related discussion on #1877 and #10183.)
-///
-/// If `is_unchecked` is true, this does no masking, and adds sufficient `assume`
-/// calls or operation flags to preserve as much freedom to optimize as possible.
 pub(crate) fn build_shift_expr_rhs<'a, Bx: BuilderMethods<'a>>(
     bx: &mut Bx,
     lhs: Bx::Value,
     mut rhs: Bx::Value,
-    is_unchecked: bool,
 ) -> Bx::Value {
     // Shifts may have any size int on the rhs
     let mut rhs_llty = bx.cx().val_ty(rhs);
     let mut lhs_llty = bx.cx().val_ty(lhs);
-
-    let mask = shift_mask_val(bx, lhs_llty, rhs_llty, false);
-
-    if !is_unchecked {
-        rhs = bx.bit_and(rhs, mask);
-    }
 
     if bx.type_kind(rhs_llty) == TypeKind::Vector {
         rhs_llty = bx.element_type(rhs_llty)
@@ -913,12 +856,12 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 }
             }
             mir::BinOp::Shl | mir::BinOp::ShlUnchecked => {
-                let rhs = build_shift_expr_rhs(bx, lhs, rhs, op == mir::BinOp::ShlUnchecked);
+                let rhs = build_shift_expr_rhs(bx, lhs, rhs);
 
                 bx.shl(lhs, rhs)
             }
             mir::BinOp::Shr | mir::BinOp::ShrUnchecked => {
-                let rhs = build_shift_expr_rhs(bx, lhs, rhs, op == mir::BinOp::ShrUnchecked);
+                let rhs = build_shift_expr_rhs(bx, lhs, rhs);
 
                 bx.shr(lhs, rhs)
             }
