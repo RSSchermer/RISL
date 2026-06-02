@@ -399,6 +399,50 @@ where
     }
 }
 
+// Note: we shim `Iter::all` because the default implementation in `core` calls `next`. Since
+// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
+// pointer arithmetic that are not supported by RISL. Even though we disable inlining during the
+// RISL pass, the precompiled MIR for `all` may already have `next` inlined.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::all")
+)]
+pub fn slice_iter_iterator_all<'a, T, F>(iter: &mut Iter<'a, T>, mut f: F) -> bool
+where
+    F: FnMut(&'a T) -> bool,
+    T: 'a,
+{
+    while let Some(value) = iter.next() {
+        if !f(value) {
+            return false;
+        }
+    }
+    true
+}
+
+// Note: we shim `IterMut::all` because the default implementation in `core` calls `next`. Since
+// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
+// pointer arithmetic that are not supported by RISL. Even though we disable inlining during the
+// RISL pass, the precompiled MIR for `all` may already have `next` inlined.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::all")
+)]
+pub fn slice_iter_mut_iterator_all<'a, T, F>(iter: &mut IterMut<'a, T>, mut f: F) -> bool
+where
+    F: FnMut(&'a mut T) -> bool,
+    T: 'a,
+{
+    while let Some(value) = iter.next() {
+        if !f(value) {
+            return false;
+        }
+    }
+    true
+}
+
 #[gpu]
 #[cfg_attr(
     rislc,
