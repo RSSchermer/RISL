@@ -14,4 +14,5 @@ mod next_back;
 mod nth;
 mod nth_back;
 mod position;
+mod rposition;
 mod size_hint;
