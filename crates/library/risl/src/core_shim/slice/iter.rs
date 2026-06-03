@@ -364,8 +364,9 @@ where
 }
 
 // Note: we shim `Iter::for_each` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -382,8 +383,9 @@ where
 }
 
 // Note: we shim `IterMut::for_each` because the default implementation in `core` calls `next`.
-// Since`core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes
-// and pointer arithmetic that are not supported by RISL.
+// Since `next` is `#[inline]`, the precompiled `core` implementation may have it inlined,
+// bypassing our `next` shim. The core implementation of `next` is problematic because it contains
+// transmutes and pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -400,8 +402,9 @@ where
 }
 
 // Note: we shim `Iter::all` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -421,8 +424,9 @@ where
 }
 
 // Note: we shim `IterMut::all` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -442,8 +446,9 @@ where
 }
 
 // Note: we shim `Iter::any` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -463,8 +468,9 @@ where
 }
 
 // Note: we shim `IterMut::any` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -484,8 +490,9 @@ where
 }
 
 // Note: we shim `Iter::find` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -505,8 +512,9 @@ where
 }
 
 // Note: we shim `IterMut::find` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -529,8 +537,9 @@ where
 }
 
 // Note: we shim `Iter::find_map` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
+// `next` is `#[inline]`, the precompiled `core` implementation may have it inlined, bypassing our
+// `next` shim. The core implementation of `next` is problematic because it contains transmutes and
+// pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -550,8 +559,9 @@ where
 }
 
 // Note: we shim `IterMut::find_map` because the default implementation in `core` calls `next`.
-// Since `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes
-// and pointer arithmetic that are not supported by RISL.
+// Since `next` is `#[inline]`, the precompiled `core` implementation may have it inlined,
+// bypassing our `next` shim. The core implementation of `next` is problematic because it contains
+// transmutes and pointer arithmetic, which `rislc` does not support.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -573,9 +583,6 @@ where
     None
 }
 
-// Note: we shim `Iter::position` because the default implementation in `core` calls `next`. Since
-// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
-// pointer arithmetic that are not supported by RISL.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -599,9 +606,6 @@ where
     None
 }
 
-// Note: we shim `IterMut::position` because the default implementation in `core` calls `next`.
-// Since `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes
-// and pointer arithmetic that are not supported by RISL.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -625,9 +629,6 @@ where
     None
 }
 
-// Note: we shim `Iter::rposition` because the default implementation in `core` calls `next_back`.
-// Since `core` is precompiled, it uses the `core` implementation of `next_back`, which uses
-// transmutes and pointer arithmetic that are not supported by RISL.
 #[gpu]
 #[cfg_attr(
     rislc,
@@ -651,9 +652,6 @@ where
     None
 }
 
-// Note: we shim `IterMut::rposition` because the default implementation in `core` calls
-// `next_back`. Since `core` is precompiled, it uses the `core` implementation of `next_back`, which
-// uses transmutes and pointer arithmetic that are not supported by RISL.
 #[gpu]
 #[cfg_attr(
     rislc,
