@@ -573,6 +573,58 @@ where
     None
 }
 
+// Note: we shim `Iter::position` because the default implementation in `core` calls `next`. Since
+// `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes and
+// pointer arithmetic that are not supported by RISL.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::position")
+)]
+pub fn slice_iter_iterator_position<'a, T, P>(
+    iter: &mut Iter<'a, T>,
+    mut predicate: P,
+) -> Option<usize>
+where
+    P: FnMut(&'a T) -> bool,
+    T: 'a,
+{
+    let mut i = 0;
+    while let Some(value) = iter.next() {
+        if predicate(value) {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+// Note: we shim `IterMut::position` because the default implementation in `core` calls `next`.
+// Since `core` is precompiled, it uses the `core` implementation of `next`, which uses transmutes
+// and pointer arithmetic that are not supported by RISL.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'a, T> as core::iter::Iterator>::position")
+)]
+pub fn slice_iter_mut_iterator_position<'a, T, P>(
+    iter: &mut IterMut<'a, T>,
+    mut predicate: P,
+) -> Option<usize>
+where
+    P: FnMut(&'a mut T) -> bool,
+    T: 'a,
+{
+    let mut i = 0;
+    while let Some(value) = iter.next() {
+        if predicate(value) {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
 #[gpu]
 #[cfg_attr(
     rislc,
