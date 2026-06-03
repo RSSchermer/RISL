@@ -28,7 +28,7 @@ test_runner! {
 async fn run() -> Result<(), Box<dyn Error>> {
     let runner = Runner::init().await?;
 
-    assert_eq!(runner.run(vec![1, 3, 5, 7, 9]).await?, 3);
+    assert_eq!(runner.run(vec![1, 3, 5, 7, 9, 7, 2]).await?, 3);
     assert_eq!(runner.run(vec![1, 3, 5, 8, 9]).await?, u32::MAX);
 
     Ok(())
