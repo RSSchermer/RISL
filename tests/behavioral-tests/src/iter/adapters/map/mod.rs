@@ -1,1 +1,9 @@
+mod fold;
+mod is_empty;
+mod len;
 mod next;
+mod next_back;
+mod rfold;
+mod size_hint;
+mod try_fold;
+mod try_rfold;

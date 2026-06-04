@@ -156,6 +156,54 @@ where
 #[gpu]
 #[cfg_attr(
     rislc,
+    rislc::core_shim("<core::slice::Iter<'_, T> as core::iter::ExactSizeIterator>::len")
+)]
+pub fn slice_iter_exact_size_iterator_len<'a, T>(iter: &Iter<'a, T>) -> usize
+where
+    T: 'a,
+{
+    slice_iter_len(iter)
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'_, T> as core::iter::ExactSizeIterator>::len")
+)]
+pub fn slice_iter_mut_exact_size_iterator_len<'a, T>(iter: &IterMut<'a, T>) -> usize
+where
+    T: 'a,
+{
+    slice_iter_mut_len(iter)
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::Iter<'_, T> as core::iter::ExactSizeIterator>::is_empty")
+)]
+pub fn slice_iter_exact_size_iterator_is_empty<'a, T>(iter: &Iter<'a, T>) -> bool
+where
+    T: 'a,
+{
+    slice_iter_len(iter) == 0
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("<core::slice::IterMut<'_, T> as core::iter::ExactSizeIterator>::is_empty")
+)]
+pub fn slice_iter_mut_exact_size_iterator_is_empty<'a, T>(iter: &IterMut<'a, T>) -> bool
+where
+    T: 'a,
+{
+    slice_iter_mut_len(iter) == 0
+}
+
+#[gpu]
+#[cfg_attr(
+    rislc,
     rislc::core_shim("<core::slice::Iter<'a, T> as core::iter::Iterator>::count")
 )]
 pub fn slice_iter_iterator_count<'a, T>(iter: Iter<'a, T>) -> usize
