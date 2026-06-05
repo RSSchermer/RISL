@@ -363,18 +363,18 @@ impl BranchSelectorNormalizer {
         let input = arg + 1;
         let input_origin = rvsdg[node].value_inputs()[input as usize].origin;
         let resolved_value = self.resolve_value(rvsdg, outer_region, input_origin);
-        let value_input = resolved_value
-            .value_input()
-            .expect("a switch input should not connect a fallback predicate");
 
-        let new_input = rvsdg.add_switch_input(node, value_input);
-        let new_arg = new_input - 1;
+        let branch_resolved_value = if let Some(value_input) = resolved_value.value_input() {
+            let new_input = rvsdg.add_switch_input(node, value_input);
+            let new_arg = new_input - 1;
+
+            resolved_value.with_input(ValueInput::argument(value_input.ty, new_arg))
+        } else {
+            resolved_value
+        };
 
         let branch_count = rvsdg[node].expect_switch().branches().len();
-
         let predicate_arg = ValueOrigin::Argument(arg);
-        let branch_resolved_value =
-            resolved_value.with_input(ValueInput::argument(value_input.ty, new_arg));
 
         for i in 0..branch_count {
             let branch_region = rvsdg[node].expect_switch().branches()[i];
