@@ -53,6 +53,9 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     switch_arg_reduction::transform_entry_points(module, rvsdg);
     const_switch_inlining::transform_entry_points(module, rvsdg);
     switch_merging::transform_entry_points(module, rvsdg);
+
+    rvsdg.dump_to_file("rvsdg.dump").unwrap();
+
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
     switch_passthrough_elimination::transform_entry_points(module, rvsdg);

@@ -34,14 +34,17 @@ enum ResolvedValue {
         value: ValueInput,
         cases: Vec<u128>,
     },
+    Constant(u32),
+    Index(ValueInput),
 }
 
 impl ResolvedValue {
     fn value_input(&self) -> Option<ValueInput> {
         match self {
-            ResolvedValue::Fallback => None,
+            ResolvedValue::Fallback | ResolvedValue::Constant(_) => None,
             ResolvedValue::Bool(value) => Some(*value),
             ResolvedValue::Case { value, .. } => Some(*value),
+            ResolvedValue::Index(value) => Some(*value),
         }
     }
 
@@ -56,10 +59,19 @@ impl ResolvedValue {
                 value,
                 cases,
             },
+            ResolvedValue::Constant(n) => ResolvedValue::Constant(n),
+            ResolvedValue::Index(_) => ResolvedValue::Index(value),
         }
     }
 
     fn fold(self, other: ResolvedValue) -> ResolvedValue {
+        // Note that the value-input does not actually matter here. We use this method to decide
+        // the ResolvedValue kind for switch outputs and loop-values. For switch outputs, this will
+        // result in the creation of a new switch output values, with which we later overwrite the
+        // ResolvedValue's value-input using ResolvedValue::with_input. For loop-values, this will
+        // result in a new loop-region argument and a new loop-output, for which we similarly
+        // overwrite the ResolvedValue's value-input using ResolvedValue::with_input.
+
         match (self, other) {
             (ResolvedValue::Fallback, value) => value,
             (value, ResolvedValue::Fallback) => value,
@@ -82,13 +94,62 @@ impl ResolvedValue {
                         value: a,
                         cases: a_cases,
                     }
+                } else if is_identity_mapping(&a_cases) && is_identity_mapping(&b_cases) {
+                    ResolvedValue::Index(a)
                 } else {
                     ResolvedValue::Fallback
                 }
             }
+            (ResolvedValue::Constant(a), ResolvedValue::Constant(b)) => {
+                if a == b {
+                    ResolvedValue::Constant(a)
+                } else {
+                    // Two different constants can be represented by a raw index value.
+                    // We don't have a ValueInput yet, so we use a dummy one that will be
+                    // overwritten later.
+                    ResolvedValue::Index(ValueInput::output(TY_U32, slotmap::Key::null(), 0))
+                }
+            }
+            (ResolvedValue::Constant(n), ResolvedValue::Bool(v))
+            | (ResolvedValue::Bool(v), ResolvedValue::Constant(n)) => {
+                if n <= 1 {
+                    ResolvedValue::Bool(v)
+                } else {
+                    ResolvedValue::Fallback
+                }
+            }
+            (ResolvedValue::Constant(_), ResolvedValue::Case { value, cases, .. })
+            | (ResolvedValue::Case { value, cases, .. }, ResolvedValue::Constant(_)) => {
+                if is_identity_mapping(&cases) {
+                    ResolvedValue::Index(value)
+                } else {
+                    ResolvedValue::Fallback
+                }
+            }
+            (ResolvedValue::Index(a), ResolvedValue::Index(_)) => ResolvedValue::Index(a),
+            (ResolvedValue::Index(v), ResolvedValue::Case { cases, .. })
+            | (ResolvedValue::Case { cases, .. }, ResolvedValue::Index(v)) => {
+                if is_identity_mapping(&cases) {
+                    ResolvedValue::Index(v)
+                } else {
+                    ResolvedValue::Fallback
+                }
+            }
+            (ResolvedValue::Index(v), ResolvedValue::Constant(_))
+            | (ResolvedValue::Constant(_), ResolvedValue::Index(v)) => ResolvedValue::Index(v),
             _ => ResolvedValue::Fallback,
         }
     }
+}
+
+fn is_identity_mapping(cases: &[u128]) -> bool {
+    for (i, &case) in cases.iter().enumerate() {
+        if case != i as u128 {
+            return false;
+        }
+    }
+
+    true
 }
 
 pub struct BranchSelectorNormalizer {
@@ -157,6 +218,11 @@ impl BranchSelectorNormalizer {
             NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(_)) => {
                 self.route_op_case_to_branch_selector_output(rvsdg, node)
             }
+            NodeKind::Simple(SimpleNode::ConstPredicate(_)) => {
+                let value = rvsdg[node].expect_const_predicate().value();
+
+                ResolvedValue::Constant(value)
+            }
             NodeKind::Simple(SimpleNode::ConstFallback(_)) => ResolvedValue::Fallback,
             NodeKind::Switch(_) => self.route_switch_output(rvsdg, node, output),
             NodeKind::Loop(_) => self.route_loop_output(rvsdg, node, output),
@@ -192,7 +258,7 @@ impl BranchSelectorNormalizer {
 
     fn route_switch_output(&mut self, rvsdg: &mut Rvsdg, node: Node, output: u32) -> ResolvedValue {
         let branch_count = rvsdg[node].expect_switch().branches().len();
-        let mut resolved_origins = Vec::with_capacity(branch_count);
+        let mut resolved_values = Vec::with_capacity(branch_count);
         let mut folded_value = ResolvedValue::Fallback;
 
         for i in 0..branch_count {
@@ -200,13 +266,14 @@ impl BranchSelectorNormalizer {
             let branch_origin = rvsdg[branch_region].value_results()[output as usize].origin;
             let resolved = self.resolve_value(rvsdg, branch_region, branch_origin);
 
-            resolved_origins.push(resolved.value_input().map(|v| v.origin));
+            resolved_values.push(resolved.clone());
             folded_value = folded_value.fold(resolved);
         }
 
         let value_ty = match folded_value {
             ResolvedValue::Bool(_) => TY_BOOL,
             ResolvedValue::Case { encoding, .. } => encoding.backend_ty(),
+            ResolvedValue::Constant(_) | ResolvedValue::Index(_) => TY_U32,
             ResolvedValue::Fallback => {
                 panic!("folded value must resolve to something other than a fallback value")
             }
@@ -217,22 +284,41 @@ impl BranchSelectorNormalizer {
         for i in 0..branch_count {
             let branch_region = rvsdg[node].expect_switch().branches()[i];
 
-            let origin = resolved_origins[i].unwrap_or_else(|| {
-                // Apparently, the original predicate result for this branch connects to a fallback
-                // node. We assume the value will never actually be used and may provide any value
-                // as a valid value.
+            let origin = match &resolved_values[i] {
+                ResolvedValue::Fallback => {
+                    // Apparently, the original predicate result for this branch connects to a fallback
+                    // node. We assume the value will never actually be used and may provide any value
+                    // as a valid value.
 
-                let node = if value_ty == TY_BOOL {
-                    rvsdg.add_const_bool(branch_region, false)
-                } else {
-                    rvsdg.add_const_u32(branch_region, 0)
-                };
+                    let node = if value_ty == TY_BOOL {
+                        rvsdg.add_const_bool(branch_region, false)
+                    } else {
+                        rvsdg.add_const_u32(branch_region, 0)
+                    };
 
-                ValueOrigin::Output {
-                    producer: node,
-                    output: 0,
+                    ValueOrigin::Output {
+                        producer: node,
+                        output: 0,
+                    }
                 }
-            });
+                ResolvedValue::Bool(v)
+                | ResolvedValue::Case { value: v, .. }
+                | ResolvedValue::Index(v) => v.origin,
+                ResolvedValue::Constant(n) => {
+                    let node = if value_ty == TY_BOOL {
+                        // Constant(0) maps to true, Constant(1) maps to false for Bool results.
+                        // This matches how OpBoolToBranchSelector works (true -> 0, false -> 1).
+                        rvsdg.add_const_bool(branch_region, *n == 0)
+                    } else {
+                        rvsdg.add_const_u32(branch_region, *n)
+                    };
+
+                    ValueOrigin::Output {
+                        producer: node,
+                        output: 0,
+                    }
+                }
+            };
 
             rvsdg.reconnect_region_result(branch_region, new_output, origin);
         }
@@ -354,6 +440,7 @@ impl BranchSelectorNormalizer {
                 match self.resolve_value(rvsdg, loop_region, result_origin) {
                     ResolvedValue::Bool(_) => TY_BOOL,
                     ResolvedValue::Case { encoding, .. } => encoding.backend_ty(),
+                    ResolvedValue::Constant(_) | ResolvedValue::Index(_) => TY_U32,
                     ResolvedValue::Fallback => {
                         panic!("a loop result should not resolve to a fallback predicate");
                     }
@@ -361,14 +448,27 @@ impl BranchSelectorNormalizer {
             }
             ResolvedValue::Bool(_) => TY_BOOL,
             ResolvedValue::Case { encoding, .. } => encoding.backend_ty(),
+            ResolvedValue::Constant(_) | ResolvedValue::Index(_) => TY_U32,
         };
 
         // Add the new loop-value.
-        let value_input = input_resolved.value_input().unwrap_or_else(|| {
-            let node = rvsdg.add_const_fallback(outer_region, ty);
-
-            ValueInput::output(ty, node, 0)
-        });
+        let value_input = match &input_resolved {
+            ResolvedValue::Fallback => {
+                let node = rvsdg.add_const_fallback(outer_region, ty);
+                ValueInput::output(ty, node, 0)
+            }
+            ResolvedValue::Bool(v)
+            | ResolvedValue::Case { value: v, .. }
+            | ResolvedValue::Index(v) => *v,
+            ResolvedValue::Constant(n) => {
+                let node = if ty == TY_BOOL {
+                    rvsdg.add_const_bool(outer_region, *n == 0)
+                } else {
+                    rvsdg.add_const_u32(outer_region, *n)
+                };
+                ValueInput::output(ty, node, 0)
+            }
+        };
         let new_index = rvsdg.add_loop_input(node, value_input);
 
         // Register the mapping from the original predicate argument to the new loop-argument that
@@ -386,11 +486,23 @@ impl BranchSelectorNormalizer {
 
         // Replace the initial placeholder input that the new loop-result was created with, with the
         // value we just resolved.
-        let result_origin = result_resolved
-            .value_input()
-            .expect("a loop result should not resolve to a fallback predicate")
-            .origin;
-        rvsdg.reconnect_region_result(loop_region, new_index + 1, result_origin);
+        let result_input = match &result_resolved {
+            ResolvedValue::Fallback => {
+                panic!("a loop result should not resolve to a fallback predicate");
+            }
+            ResolvedValue::Bool(v)
+            | ResolvedValue::Case { value: v, .. }
+            | ResolvedValue::Index(v) => *v,
+            ResolvedValue::Constant(n) => {
+                let node = if ty == TY_BOOL {
+                    rvsdg.add_const_bool(loop_region, *n == 0)
+                } else {
+                    rvsdg.add_const_u32(loop_region, *n)
+                };
+                ValueInput::output(ty, node, 0)
+            }
+        };
+        rvsdg.reconnect_region_result(loop_region, new_index + 1, result_input.origin);
 
         // Register the mapping from the original predicate output to the new loop-output that
         // we've just added.
@@ -436,6 +548,7 @@ impl BranchSelectorNormalizer {
 
         if needs_normalization {
             let resolved = self.resolve_value(rvsdg, region, origin);
+            let branch_count = rvsdg[switch_node].expect_switch().branches().len() as u32;
 
             let normalization_node = match resolved {
                 ResolvedValue::Bool(value) => rvsdg.add_op_bool_to_branch_selector(region, value),
@@ -444,6 +557,30 @@ impl BranchSelectorNormalizer {
                     value,
                     cases,
                 } => rvsdg.add_op_case_to_branch_selector(region, value, encoding, cases),
+                ResolvedValue::Constant(n) => {
+                    if branch_count == 2 {
+                        let value = rvsdg.add_const_bool(region, n == 0);
+                        rvsdg.add_op_bool_to_branch_selector(
+                            region,
+                            ValueInput::output(TY_BOOL, value, 0),
+                        )
+                    } else {
+                        let value = rvsdg.add_const_u32(region, n);
+                        let cases: Vec<_> = (0..branch_count - 1).map(|i| i as u128).collect();
+
+                        rvsdg.add_op_case_to_branch_selector(
+                            region,
+                            ValueInput::output(TY_U32, value, 0),
+                            Int::U32,
+                            cases,
+                        )
+                    }
+                }
+                ResolvedValue::Index(value) => {
+                    let cases: Vec<_> = (0..branch_count - 1).map(|i| i as u128).collect();
+
+                    rvsdg.add_op_case_to_branch_selector(region, value, Int::U32, cases)
+                }
                 ResolvedValue::Fallback => panic!("cannot normalize a fallback value"),
             };
 
@@ -605,6 +742,67 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn test_normalize_switch_const_predicate() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let const_pred = rvsdg.add_const_predicate(region, 0);
+
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, const_pred, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(switch_node);
+        rvsdg.add_switch_branch(switch_node);
+
+        let mut normalizer = BranchSelectorNormalizer::new();
+        normalizer.transform_region(&mut rvsdg, region);
+
+        let branch_selector = rvsdg[switch_node].expect_switch().branch_selector();
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = branch_selector.origin
+        else {
+            panic!("expected output origin");
+        };
+
+        // It should be normalized to OpBoolToBranchSelector because it has 2 branches
+        assert!(rvsdg[producer].is_op_bool_to_branch_selector());
+
+        let bool_input = rvsdg[producer].value_inputs()[0];
+        let ValueOrigin::Output {
+            producer: bool_producer,
+            output: 0,
+        } = bool_input.origin
+        else {
+            panic!("expected output origin for bool input");
+        };
+
+        // The bool input should be a ConstBool(true) because n=0
+        assert_eq!(rvsdg[bool_producer].expect_const_bool().value(), true);
     }
 
     #[test]
@@ -809,5 +1007,503 @@ mod tests {
             panic!("expected output origin for loop new input");
         };
         assert_eq!(loop_new_input_producer, bool_value);
+    }
+
+    #[test]
+    fn test_normalize_mixed_folding_bool_const() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let bool_val = rvsdg.add_const_bool(region, true);
+        let bool_pred =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_val, 0));
+
+        // Rename switch_inner/outer to switch_0/1 as they are not nested.
+        let switch_0 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, bool_pred, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+        let b0 = rvsdg.add_switch_branch(switch_0);
+        let c0 = rvsdg.add_const_predicate(b0, 0);
+        rvsdg.reconnect_region_result(
+            b0,
+            0,
+            ValueOrigin::Output {
+                producer: c0,
+                output: 0,
+            },
+        );
+
+        let b1 = rvsdg.add_switch_branch(switch_0);
+        let b1_val = rvsdg.add_const_bool(b1, false);
+        let b1_pred =
+            rvsdg.add_op_bool_to_branch_selector(b1, ValueInput::output(TY_BOOL, b1_val, 0));
+        rvsdg.reconnect_region_result(
+            b1,
+            0,
+            ValueOrigin::Output {
+                producer: b1_pred,
+                output: 0,
+            },
+        );
+
+        let switch_1 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, switch_0, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(switch_1);
+        rvsdg.add_switch_branch(switch_1);
+
+        let mut normalizer = BranchSelectorNormalizer::new();
+        normalizer.transform_region(&mut rvsdg, region);
+
+        let branch_selector = rvsdg[switch_1].expect_switch().branch_selector();
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = branch_selector.origin
+        else {
+            panic!("expected output origin");
+        };
+
+        assert!(rvsdg[producer].is_op_bool_to_branch_selector());
+        let input = rvsdg[producer].value_inputs()[0];
+        assert_eq!(input.ty, TY_BOOL);
+        let ValueOrigin::Output {
+            producer,
+            output: 1,
+        } = input.origin
+        else {
+            panic!("expected output origin");
+        };
+        assert_eq!(producer, switch_0);
+
+        let b0_new_result = rvsdg[b0].value_results()[1].origin;
+        let ValueOrigin::Output {
+            producer: b0_new_producer,
+            ..
+        } = b0_new_result
+        else {
+            panic!("expected output origin in b0");
+        };
+        assert!(rvsdg[b0_new_producer].is_const_bool());
+        assert_eq!(rvsdg[b0_new_producer].expect_const_bool().value(), true);
+
+        let b1_new_result = rvsdg[b1].value_results()[1].origin;
+        assert_eq!(
+            b1_new_result,
+            ValueOrigin::Output {
+                producer: b1_val,
+                output: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_normalize_mixed_folding_const_const() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let bool_val = rvsdg.add_const_bool(region, true);
+        let bool_pred =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_val, 0));
+
+        let switch_0 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, bool_pred, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+        let b0 = rvsdg.add_switch_branch(switch_0);
+        let c0 = rvsdg.add_const_predicate(b0, 0);
+        rvsdg.reconnect_region_result(
+            b0,
+            0,
+            ValueOrigin::Output {
+                producer: c0,
+                output: 0,
+            },
+        );
+
+        let b1 = rvsdg.add_switch_branch(switch_0);
+        let c1 = rvsdg.add_const_predicate(b1, 1);
+        rvsdg.reconnect_region_result(
+            b1,
+            0,
+            ValueOrigin::Output {
+                producer: c1,
+                output: 0,
+            },
+        );
+
+        let switch_1 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, switch_0, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(switch_1);
+        rvsdg.add_switch_branch(switch_1);
+        rvsdg.add_switch_branch(switch_1);
+
+        let mut normalizer = BranchSelectorNormalizer::new();
+        normalizer.transform_region(&mut rvsdg, region);
+
+        let branch_selector = rvsdg[switch_1].expect_switch().branch_selector();
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = branch_selector.origin
+        else {
+            panic!("expected output origin");
+        };
+
+        // Folded value should be Index (because 0 != 1)
+        assert!(rvsdg[producer].is_op_case_to_branch_selector());
+        let input = rvsdg[producer].value_inputs()[0];
+        assert_eq!(input.ty, TY_U32);
+        let ValueOrigin::Output {
+            producer: input_producer,
+            output: 1,
+        } = input.origin
+        else {
+            panic!("expected output origin");
+        };
+        assert_eq!(input_producer, switch_0);
+
+        let b0_new_result = rvsdg[b0].value_results()[1].origin;
+        let ValueOrigin::Output {
+            producer: b0_new_producer,
+            output: 0,
+        } = b0_new_result
+        else {
+            panic!("expected output origin in b0");
+        };
+        assert!(rvsdg[b0_new_producer].is_const_u32());
+        assert_eq!(rvsdg[b0_new_producer].expect_const_u32().value(), 0);
+
+        let b1_new_result = rvsdg[b1].value_results()[1].origin;
+        let ValueOrigin::Output {
+            producer: b1_new_producer,
+            output: 0,
+        } = b1_new_result
+        else {
+            panic!("expected output origin in b1");
+        };
+        assert!(rvsdg[b1_new_producer].is_const_u32());
+        assert_eq!(rvsdg[b1_new_producer].expect_const_u32().value(), 1);
+    }
+
+    #[test]
+    fn test_normalize_mixed_folding_case_const() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let bool_val = rvsdg.add_const_bool(region, true);
+        let bool_pred =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_val, 0));
+
+        let switch_0 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, bool_pred, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+        let b0 = rvsdg.add_switch_branch(switch_0);
+        let c0 = rvsdg.add_const_predicate(b0, 0);
+        rvsdg.reconnect_region_result(
+            b0,
+            0,
+            ValueOrigin::Output {
+                producer: c0,
+                output: 0,
+            },
+        );
+
+        let b1 = rvsdg.add_switch_branch(switch_0);
+        let b1_val = rvsdg.add_const_u32(b1, 5);
+        let b1_pred = rvsdg.add_op_case_to_branch_selector(
+            b1,
+            ValueInput::output(TY_U32, b1_val, 0),
+            Int::U32,
+            vec![0],
+        );
+        rvsdg.reconnect_region_result(
+            b1,
+            0,
+            ValueOrigin::Output {
+                producer: b1_pred,
+                output: 0,
+            },
+        );
+
+        let switch_1 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, switch_0, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(switch_1);
+        rvsdg.add_switch_branch(switch_1);
+
+        let mut normalizer = BranchSelectorNormalizer::new();
+        normalizer.transform_region(&mut rvsdg, region);
+
+        let branch_selector = rvsdg[switch_1].expect_switch().branch_selector();
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = branch_selector.origin
+        else {
+            panic!("expected output origin");
+        };
+
+        // Folded value should be Index
+        assert!(rvsdg[producer].is_op_case_to_branch_selector());
+        let cases = rvsdg[producer].expect_op_case_to_branch_selector().cases();
+        assert_eq!(cases, &[0]);
+        let input = rvsdg[producer].value_inputs()[0];
+        assert_eq!(input.ty, TY_U32);
+        let ValueOrigin::Output {
+            producer: input_producer,
+            output: 1,
+        } = input.origin
+        else {
+            panic!("expected output origin");
+        };
+        assert_eq!(input_producer, switch_0);
+
+        let b0_new_result = rvsdg[b0].value_results()[1].origin;
+        let ValueOrigin::Output {
+            producer: b0_new_producer,
+            output: 0,
+        } = b0_new_result
+        else {
+            panic!("expected output origin in b0");
+        };
+        assert!(rvsdg[b0_new_producer].is_const_u32());
+        assert_eq!(rvsdg[b0_new_producer].expect_const_u32().value(), 0);
+
+        let b1_new_result = rvsdg[b1].value_results()[1].origin;
+        assert_eq!(
+            b1_new_result,
+            ValueOrigin::Output {
+                producer: b1_val,
+                output: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_normalize_mixed_folding_case_index() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let bool_val = rvsdg.add_const_bool(region, true);
+        let bool_pred =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_val, 0));
+
+        let switch_0 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, bool_pred, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+        let b0 = rvsdg.add_switch_branch(switch_0);
+        // Nested switch in b0 to produce an Index
+        let b0_bool_val = rvsdg.add_const_bool(b0, true);
+        let b0_bool_pred =
+            rvsdg.add_op_bool_to_branch_selector(b0, ValueInput::output(TY_BOOL, b0_bool_val, 0));
+        let nested_switch = rvsdg.add_switch(
+            b0,
+            vec![ValueInput::output(TY_PREDICATE, b0_bool_pred, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+        let nb0 = rvsdg.add_switch_branch(nested_switch);
+        let nc0 = rvsdg.add_const_predicate(nb0, 0);
+        rvsdg.reconnect_region_result(
+            nb0,
+            0,
+            ValueOrigin::Output {
+                producer: nc0,
+                output: 0,
+            },
+        );
+        let nb1 = rvsdg.add_switch_branch(nested_switch);
+        let nc1 = rvsdg.add_const_predicate(nb1, 1);
+        rvsdg.reconnect_region_result(
+            nb1,
+            0,
+            ValueOrigin::Output {
+                producer: nc1,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            b0,
+            0,
+            ValueOrigin::Output {
+                producer: nested_switch,
+                output: 0,
+            },
+        );
+
+        let b1 = rvsdg.add_switch_branch(switch_0);
+        let b1_val = rvsdg.add_const_u32(b1, 5);
+        let b1_pred = rvsdg.add_op_case_to_branch_selector(
+            b1,
+            ValueInput::output(TY_U32, b1_val, 0),
+            Int::U32,
+            vec![0, 1], // Identity mapping for 3 branches
+        );
+        rvsdg.reconnect_region_result(
+            b1,
+            0,
+            ValueOrigin::Output {
+                producer: b1_pred,
+                output: 0,
+            },
+        );
+
+        let switch_1 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, switch_0, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(switch_1);
+        rvsdg.add_switch_branch(switch_1);
+        rvsdg.add_switch_branch(switch_1);
+
+        let mut normalizer = BranchSelectorNormalizer::new();
+        normalizer.transform_region(&mut rvsdg, region);
+
+        let branch_selector = rvsdg[switch_1].expect_switch().branch_selector();
+        let ValueOrigin::Output { producer, .. } = branch_selector.origin else {
+            panic!("expected output origin");
+        };
+
+        // Folded value should be Index
+        assert!(rvsdg[producer].is_op_case_to_branch_selector());
+        let cases = rvsdg[producer].expect_op_case_to_branch_selector().cases();
+        assert_eq!(cases, &[0, 1]);
+        let input = rvsdg[producer].value_inputs()[0];
+        assert_eq!(input.ty, TY_U32);
+        let ValueOrigin::Output {
+            producer: input_producer,
+            output: 1,
+        } = input.origin
+        else {
+            panic!("expected output origin");
+        };
+        assert_eq!(input_producer, switch_0);
+
+        let b0_new_result = rvsdg[b0].value_results()[1].origin;
+        assert_eq!(
+            b0_new_result,
+            ValueOrigin::Output {
+                producer: nested_switch,
+                output: 1
+            }
+        );
+
+        let nb0_new_result = rvsdg[nb0].value_results()[1].origin;
+        let ValueOrigin::Output {
+            producer: nb0_new_producer,
+            output: 0,
+        } = nb0_new_result
+        else {
+            panic!("expected output origin");
+        };
+        assert_eq!(rvsdg[nb0_new_producer].expect_const_u32().value(), 0);
+
+        let nb1_new_result = rvsdg[nb1].value_results()[1].origin;
+        let ValueOrigin::Output {
+            producer: nb1_new_producer,
+            output: 0,
+        } = nb1_new_result
+        else {
+            panic!("expected output origin");
+        };
+        assert_eq!(rvsdg[nb1_new_producer].expect_const_u32().value(), 1);
+
+        let b1_new_result = rvsdg[b1].value_results()[1].origin;
+        assert_eq!(
+            b1_new_result,
+            ValueOrigin::Output {
+                producer: b1_val,
+                output: 0
+            }
+        );
     }
 }
