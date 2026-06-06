@@ -138,14 +138,14 @@ use crate::rvsdg::{
 use crate::ty::{TY_PREDICATE, TY_U32, Type};
 
 /// A variable pointer emulation program description.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct PointerEmulationInfo {
     pointer_ty: Type,
     emulation_root: EmulationTreeNode,
 }
 
 /// A node in a pointer emulation program description.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum EmulationTreeNode {
     Branching(BranchingNode),
     Leaf(LeafNode),
@@ -201,6 +201,14 @@ struct BranchingNode {
     child_inputs: IndexSet<ValueOrigin>,
 }
 
+impl PartialEq for BranchingNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.branch_selector == other.branch_selector && self.branches == other.branches
+    }
+}
+
+impl Eq for BranchingNode {}
+
 impl BranchingNode {
     fn assign_child_inputs(&mut self) {
         ChildInputAssigner.visit_branching_node(self)
@@ -232,7 +240,7 @@ impl Access {
 /// Represents a leaf node in a variable pointer emulation program description.
 ///
 /// A leaf node resolves to a pointer without any further branching.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct LeafNode {
     /// A pointer to the root identifier of the pointer that this leaf emulates.
     root_pointer: ValueOrigin,
@@ -762,6 +770,16 @@ impl EmulationContext {
                 });
 
             branches.push(info.emulation_root)
+        }
+
+        // Check if all branches produce identical pointer emulations. If all branches do produce
+        // identical pointer emulations, we don't need to create a new branching node to emulate
+        // the switch node's output.
+        if branches.iter().all(|b| b == &branches[0]) {
+            return PointerEmulationInfo {
+                pointer_ty,
+                emulation_root: branches.pop().unwrap(),
+            };
         }
 
         let mut branching_node = BranchingNode {
@@ -3480,5 +3498,222 @@ mod tests {
             }],
             "the second new switch output should connect to the fourth input of the emulation node"
         );
+    }
+
+    #[test]
+    fn test_emulate_identical_switch_branches_bypass() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_PREDICATE,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ptr_0 = rvsdg.add_op_alloca(region, TY_U32);
+
+        // TODO: use the predefined TY_PTR_U32
+        let ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(ptr_ty, ptr_0, 0),
+            ],
+            vec![ValueOutput::new(ptr_ty)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch_node);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueOrigin::Argument(0));
+
+        let branch_1 = rvsdg.add_switch_branch(switch_node);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueOrigin::Argument(0));
+
+        let load_op = rvsdg.add_op_load(
+            region,
+            ValueInput::output(ptr_ty, switch_node, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load_op,
+                output: 0,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+
+        emulation_context.emulate_op_load(&mut rvsdg, load_op);
+
+        let ValueOrigin::Output {
+            producer: emulation_load_node,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("the function result should connect to the first output of a node")
+        };
+
+        // It should NOT be a Switch node. It should be an OpLoad.
+        let op_load_data = rvsdg[emulation_load_node].expect_op_load();
+
+        // The pointer input of the load should be ptr_0.
+        assert_eq!(
+            op_load_data.ptr_input(),
+            &ValueInput::output(ptr_ty, ptr_0, 0)
+        );
+    }
+
+    #[test]
+    fn test_emulate_identical_switch_branches_with_access_bypass() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_PREDICATE,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let array_ty = module.ty.register(TypeKind::Array {
+            element_ty: TY_U32,
+            count: 2,
+            stride: 4,
+        });
+        let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let ptr_0 = rvsdg.add_op_alloca(region, array_ty);
+
+        let ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
+
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(array_ptr_ty, ptr_0, 0),
+            ],
+            vec![ValueOutput::new(ptr_ty)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch_node);
+        let index_0 = rvsdg.add_const_u32(branch_0, 0);
+        let element_ptr_0 = rvsdg.add_op_element_ptr(
+            branch_0,
+            ValueInput::argument(array_ptr_ty, 0),
+            ValueInput::output(TY_U32, index_0, 0),
+        );
+        rvsdg.reconnect_region_result(
+            branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: element_ptr_0,
+                output: 0,
+            },
+        );
+
+        let branch_1 = rvsdg.add_switch_branch(switch_node);
+        let index_1 = rvsdg.add_const_u32(branch_1, 0);
+        let element_ptr_1 = rvsdg.add_op_element_ptr(
+            branch_1,
+            ValueInput::argument(array_ptr_ty, 0),
+            ValueInput::output(TY_U32, index_1, 0),
+        );
+        rvsdg.reconnect_region_result(
+            branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: element_ptr_1,
+                output: 0,
+            },
+        );
+
+        let load_op = rvsdg.add_op_load(
+            region,
+            ValueInput::output(ptr_ty, switch_node, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load_op,
+                output: 0,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+
+        emulation_context.emulate_op_load(&mut rvsdg, load_op);
+
+        let ValueOrigin::Output {
+            producer: emulation_load_node,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("the function result should connect to the first output of a node")
+        };
+
+        // It should NOT be a Switch node. It should be an OpLoad.
+        let op_load_data = rvsdg[emulation_load_node].expect_op_load();
+
+        // The pointer input of the load should be an ElementPtr node (emulated).
+        let ValueOrigin::Output {
+            producer: element_ptr_node,
+            ..
+        } = op_load_data.ptr_input().origin
+        else {
+            panic!("expected Output origin");
+        };
+
+        let element_ptr_data = rvsdg[element_ptr_node].expect_op_element_ptr();
+        assert_eq!(
+            element_ptr_data.ptr_input(),
+            &ValueInput::output(array_ptr_ty, ptr_0, 0)
+        );
+
+        // The index input should be a constant 0
+        let index_origin = element_ptr_data.index_input().origin;
+        let ValueOrigin::Output {
+            producer: index_producer,
+            ..
+        } = index_origin
+        else {
+            panic!("expected Output origin for index")
+        };
+        assert_eq!(rvsdg[index_producer].expect_const_u32().value(), 0);
     }
 }
