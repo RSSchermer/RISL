@@ -16,34 +16,32 @@ fn canonical_cache_key<K: Key>(k0: K, k1: K) -> (KeyData, KeyData) {
 ///
 /// It performs a deep comparison of the regions by tracing their value and state results back to
 /// their arguments.
-pub struct RegionIdentityChecker<'a> {
-    rvsdg: &'a Rvsdg,
+pub struct RegionIdentityChecker {
     node_cache: FxHashMap<(KeyData, KeyData), bool>,
 }
 
-impl<'a> RegionIdentityChecker<'a> {
-    /// Creates a new [RegionIdentityChecker] for the given [Rvsdg].
-    pub fn new(rvsdg: &'a Rvsdg) -> Self {
+impl RegionIdentityChecker {
+    /// Creates a new [RegionIdentityChecker].
+    pub fn new() -> Self {
         Self {
-            rvsdg,
             node_cache: FxHashMap::default(),
         }
     }
 
     /// Returns `true` if the two regions are structurally identical.
-    pub fn compare_regions(&mut self, r0: Region, r1: Region) -> bool {
+    pub fn compare_regions(&mut self, rvsdg: &Rvsdg, r0: Region, r1: Region) -> bool {
         self.node_cache.clear();
 
-        self.compare_regions_internal(r0, r1)
+        self.compare_regions_internal(rvsdg, r0, r1)
     }
 
-    fn compare_regions_internal(&mut self, r0: Region, r1: Region) -> bool {
+    fn compare_regions_internal(&mut self, rvsdg: &Rvsdg, r0: Region, r1: Region) -> bool {
         if r0 == r1 {
             return true;
         }
 
-        let d0 = &self.rvsdg[r0];
-        let d1 = &self.rvsdg[r1];
+        let d0 = &rvsdg[r0];
+        let d1 = &rvsdg[r1];
 
         // Compare arguments count and types
         if d0.value_arguments().len() != d1.value_arguments().len() {
@@ -64,20 +62,20 @@ impl<'a> RegionIdentityChecker<'a> {
         for (res0, res1) in d0.value_results().iter().zip(d1.value_results()) {
             // This also checks type equivalence, so we don't compare the result types separately
             // here.
-            if !self.compare_value_inputs(res0, res1) {
+            if !self.compare_value_inputs(rvsdg, res0, res1) {
                 return false;
             }
         }
 
         // Compare state result
-        if !self.compare_state_origins(d0.state_result(), d1.state_result()) {
+        if !self.compare_state_origins(rvsdg, d0.state_result(), d1.state_result()) {
             return false;
         }
 
         true
     }
 
-    fn compare_nodes(&mut self, n0: Node, n1: Node) -> bool {
+    fn compare_nodes(&mut self, rvsdg: &Rvsdg, n0: Node, n1: Node) -> bool {
         if n0 == n1 {
             return true;
         }
@@ -92,16 +90,16 @@ impl<'a> RegionIdentityChecker<'a> {
         // within a region's value/state flow (though these are not expected in a valid RVSDG).
         self.node_cache.insert(key, false);
 
-        let identical = self.compare_nodes_internal(n0, n1);
+        let identical = self.compare_nodes_internal(rvsdg, n0, n1);
 
         self.node_cache.insert(key, identical);
 
         identical
     }
 
-    fn compare_nodes_internal(&mut self, n0: Node, n1: Node) -> bool {
-        let d0 = &self.rvsdg[n0];
-        let d1 = &self.rvsdg[n1];
+    fn compare_nodes_internal(&mut self, rvsdg: &Rvsdg, n0: Node, n1: Node) -> bool {
+        let d0 = &rvsdg[n0];
+        let d1 = &rvsdg[n1];
 
         // 1. Compare kind shallowly
         if !self.compare_kinds_shallow(d0.kind(), d1.kind()) {
@@ -117,7 +115,7 @@ impl<'a> RegionIdentityChecker<'a> {
         }
 
         for (i0, i1) in in0.iter().zip(in1) {
-            if !self.compare_value_inputs(i0, i1) {
+            if !self.compare_value_inputs(rvsdg, i0, i1) {
                 return false;
             }
         }
@@ -128,7 +126,7 @@ impl<'a> RegionIdentityChecker<'a> {
 
         match (s0, s1) {
             (Some(s0), Some(s1)) => {
-                if !self.compare_state_origins(&s0.origin, &s1.origin) {
+                if !self.compare_state_origins(rvsdg, &s0.origin, &s1.origin) {
                     return false;
                 }
             }
@@ -155,13 +153,13 @@ impl<'a> RegionIdentityChecker<'a> {
             (NodeKind::Switch(s0), NodeKind::Switch(s1)) => {
                 // Number of branches already checked in compare_kinds_shallow
                 for (b0, b1) in s0.branches().iter().zip(s1.branches()) {
-                    if !self.compare_regions_internal(*b0, *b1) {
+                    if !self.compare_regions_internal(rvsdg, *b0, *b1) {
                         return false;
                     }
                 }
             }
             (NodeKind::Loop(l0), NodeKind::Loop(l1)) => {
-                if !self.compare_regions_internal(l0.loop_region(), l1.loop_region()) {
+                if !self.compare_regions_internal(rvsdg, l0.loop_region(), l1.loop_region()) {
                     return false;
                 }
             }
@@ -171,15 +169,15 @@ impl<'a> RegionIdentityChecker<'a> {
         true
     }
 
-    fn compare_value_inputs(&mut self, i0: &ValueInput, i1: &ValueInput) -> bool {
+    fn compare_value_inputs(&mut self, rvsdg: &Rvsdg, i0: &ValueInput, i1: &ValueInput) -> bool {
         if i0.ty != i1.ty {
             return false;
         }
 
-        self.compare_value_origins(&i0.origin, &i1.origin)
+        self.compare_value_origins(rvsdg, &i0.origin, &i1.origin)
     }
 
-    fn compare_value_origins(&mut self, o0: &ValueOrigin, o1: &ValueOrigin) -> bool {
+    fn compare_value_origins(&mut self, rvsdg: &Rvsdg, o0: &ValueOrigin, o1: &ValueOrigin) -> bool {
         match (o0, o1) {
             (ValueOrigin::Argument(idx0), ValueOrigin::Argument(idx1)) => idx0 == idx1,
             (
@@ -191,15 +189,15 @@ impl<'a> RegionIdentityChecker<'a> {
                     producer: p1,
                     output: out1,
                 },
-            ) => *out0 == *out1 && self.compare_nodes(*p0, *p1),
+            ) => *out0 == *out1 && self.compare_nodes(rvsdg, *p0, *p1),
             _ => false,
         }
     }
 
-    fn compare_state_origins(&mut self, o0: &StateOrigin, o1: &StateOrigin) -> bool {
+    fn compare_state_origins(&mut self, rvsdg: &Rvsdg, o0: &StateOrigin, o1: &StateOrigin) -> bool {
         match (o0, o1) {
             (StateOrigin::Argument, StateOrigin::Argument) => true,
-            (StateOrigin::Node(p0), StateOrigin::Node(p1)) => self.compare_nodes(*p0, *p1),
+            (StateOrigin::Node(p0), StateOrigin::Node(p1)) => self.compare_nodes(rvsdg, *p0, *p1),
             _ => false,
         }
     }
@@ -411,9 +409,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(checker.compare_regions(r0, r1));
+        assert!(checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -477,9 +475,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(!checker.compare_regions(r0, r1));
+        assert!(!checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -544,9 +542,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(!checker.compare_regions(r0, r1));
+        assert!(!checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -596,9 +594,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(checker.compare_regions(r0, r1));
+        assert!(checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -652,9 +650,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(checker.compare_regions(r0, r1));
+        assert!(checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -727,9 +725,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(!checker.compare_regions(r0, r1));
+        assert!(!checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -790,9 +788,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(checker.compare_regions(r0, r1));
+        assert!(checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -876,9 +874,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(!checker.compare_regions(r0, r1));
+        assert!(!checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -952,9 +950,9 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(checker.compare_regions(r0, r1));
+        assert!(checker.compare_regions(&rvsdg, r0, r1));
     }
 
     #[test]
@@ -1062,8 +1060,8 @@ mod tests {
             );
         }
 
-        let mut checker = RegionIdentityChecker::new(&rvsdg);
+        let mut checker = RegionIdentityChecker::new();
 
-        assert!(!checker.compare_regions(r0, r1));
+        assert!(!checker.compare_regions(&rvsdg, r0, r1));
     }
 }
