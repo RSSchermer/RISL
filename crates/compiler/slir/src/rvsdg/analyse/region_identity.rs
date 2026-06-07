@@ -19,7 +19,6 @@ fn canonical_cache_key<K: Key>(k0: K, k1: K) -> (KeyData, KeyData) {
 pub struct RegionIdentityChecker<'a> {
     rvsdg: &'a Rvsdg,
     node_cache: FxHashMap<(KeyData, KeyData), bool>,
-    region_cache: FxHashMap<(KeyData, KeyData), bool>,
 }
 
 impl<'a> RegionIdentityChecker<'a> {
@@ -28,30 +27,21 @@ impl<'a> RegionIdentityChecker<'a> {
         Self {
             rvsdg,
             node_cache: FxHashMap::default(),
-            region_cache: FxHashMap::default(),
         }
     }
 
     /// Returns `true` if the two regions are structurally identical.
     pub fn compare_regions(&mut self, r0: Region, r1: Region) -> bool {
+        self.node_cache.clear();
+
+        self.compare_regions_internal(r0, r1)
+    }
+
+    fn compare_regions_internal(&mut self, r0: Region, r1: Region) -> bool {
         if r0 == r1 {
             return true;
         }
 
-        let key = canonical_cache_key(r0, r1);
-
-        if let Some(&identical) = self.region_cache.get(&key) {
-            return identical;
-        }
-
-        let identical = self.compare_regions_internal(r0, r1);
-
-        self.region_cache.insert(key, identical);
-
-        identical
-    }
-
-    fn compare_regions_internal(&mut self, r0: Region, r1: Region) -> bool {
         let d0 = &self.rvsdg[r0];
         let d1 = &self.rvsdg[r1];
 
@@ -165,13 +155,13 @@ impl<'a> RegionIdentityChecker<'a> {
             (NodeKind::Switch(s0), NodeKind::Switch(s1)) => {
                 // Number of branches already checked in compare_kinds_shallow
                 for (b0, b1) in s0.branches().iter().zip(s1.branches()) {
-                    if !self.compare_regions(*b0, *b1) {
+                    if !self.compare_regions_internal(*b0, *b1) {
                         return false;
                     }
                 }
             }
             (NodeKind::Loop(l0), NodeKind::Loop(l1)) => {
-                if !self.compare_regions(l0.loop_region(), l1.loop_region()) {
+                if !self.compare_regions_internal(l0.loop_region(), l1.loop_region()) {
                     return false;
                 }
             }
