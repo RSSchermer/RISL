@@ -218,137 +218,87 @@ impl RegionIdentityChecker {
     }
 
     fn compare_simple_nodes_shallow(&self, s0: &SimpleNode, s1: &SimpleNode) -> bool {
+        use SimpleNode::*;
+
         match (s0, s1) {
-            (SimpleNode::ConstU32(n0), SimpleNode::ConstU32(n1)) => n0.value() == n1.value(),
-            (SimpleNode::ConstI32(n0), SimpleNode::ConstI32(n1)) => n0.value() == n1.value(),
-            (SimpleNode::ConstF32(n0), SimpleNode::ConstF32(n1)) => {
+            (ConstU32(n0), ConstU32(n1)) => n0.value() == n1.value(),
+            (ConstI32(n0), ConstI32(n1)) => n0.value() == n1.value(),
+            (ConstF32(n0), ConstF32(n1)) => {
                 // We conservatively use bit-wise equality for now.
                 n0.value().to_bits() == n1.value().to_bits()
             }
-            (SimpleNode::ConstBool(n0), SimpleNode::ConstBool(n1)) => n0.value() == n1.value(),
-            (SimpleNode::ConstPredicate(n0), SimpleNode::ConstPredicate(n1)) => {
-                n0.value() == n1.value()
-            }
-            (SimpleNode::ConstFallback(_), SimpleNode::ConstFallback(_)) => true,
-            (SimpleNode::OpAlloca(n0), SimpleNode::OpAlloca(n1)) => {
+            (ConstBool(n0), ConstBool(n1)) => n0.value() == n1.value(),
+            (ConstPredicate(n0), ConstPredicate(n1)) => n0.value() == n1.value(),
+            (ConstFallback(_), ConstFallback(_)) => true,
+            (OpAlloca(n0), OpAlloca(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpLoad(n0), OpLoad(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpStore(n0), OpStore(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpExtractField(n0), OpExtractField(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpExtractElement(n0), OpExtractElement(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpFieldPtr(n0), OpFieldPtr(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpElementPtr(n0), OpElementPtr(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpDiscriminantPtr(n0), OpDiscriminantPtr(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpVariantPtr(n0), OpVariantPtr(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpGetDiscriminant(n0), OpGetDiscriminant(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpSetDiscriminant(n0), OpSetDiscriminant(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpOffsetSlice(n0), OpOffsetSlice(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpGetSliceOffset(n0), OpGetSliceOffset(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpUnary(n0), OpUnary(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpBinary(n0), OpBinary(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpMax(n0), OpMax(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpMin(n0), OpMin(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpRoundToEven(n0), OpRoundToEven(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpSaturate(n0), OpSaturate(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpFloor(n0), OpFloor(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpCeil(n0), OpCeil(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpClamp(n0), OpClamp(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpFract(n0), OpFract(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpFusedMulAdd(n0), OpFusedMulAdd(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpTrunc(n0), OpTrunc(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpSqrt(n0), OpSqrt(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpInverseSqrt(n0), OpInverseSqrt(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpExp(n0), OpExp(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpExp2(n0), OpExp2(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpLog(n0), OpLog(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpLog2(n0), OpLog2(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpPowf(n0), OpPowf(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpStep(n0), OpStep(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpSmoothStep(n0), OpSmoothStep(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpCos(n0), OpCos(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpAcos(n0), OpAcos(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpCosh(n0), OpCosh(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpAcosh(n0), OpAcosh(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpSin(n0), OpSin(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpAsin(n0), OpAsin(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpSinh(n0), OpSinh(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpAsinh(n0), OpAsinh(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpTan(n0), OpTan(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpAtan(n0), OpAtan(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpTanh(n0), OpTanh(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpAtanh(n0), OpAtanh(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpToRadians(n0), OpToRadians(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpToDegrees(n0), OpToDegrees(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpVector(n0), OpVector(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpMatrix(n0), OpMatrix(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpCaseToBranchSelector(n0), OpCaseToBranchSelector(n1)) => {
                 n0.intrinsic() == n1.intrinsic()
             }
-            (SimpleNode::OpLoad(n0), SimpleNode::OpLoad(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpStore(n0), SimpleNode::OpStore(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpExtractField(n0), SimpleNode::OpExtractField(n1)) => {
+            (OpBoolToBranchSelector(n0), OpBoolToBranchSelector(n1)) => {
                 n0.intrinsic() == n1.intrinsic()
             }
-            (SimpleNode::OpExtractElement(n0), SimpleNode::OpExtractElement(n1)) => {
+            (OpBranchSelectorToCase(n0), OpBranchSelectorToCase(n1)) => {
                 n0.intrinsic() == n1.intrinsic()
             }
-            (SimpleNode::OpFieldPtr(n0), SimpleNode::OpFieldPtr(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpElementPtr(n0), SimpleNode::OpElementPtr(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpDiscriminantPtr(n0), SimpleNode::OpDiscriminantPtr(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpVariantPtr(n0), SimpleNode::OpVariantPtr(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpGetDiscriminant(n0), SimpleNode::OpGetDiscriminant(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpSetDiscriminant(n0), SimpleNode::OpSetDiscriminant(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpOffsetSlice(n0), SimpleNode::OpOffsetSlice(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpGetSliceOffset(n0), SimpleNode::OpGetSliceOffset(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpUnary(n0), SimpleNode::OpUnary(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpBinary(n0), SimpleNode::OpBinary(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpMax(n0), SimpleNode::OpMax(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpMin(n0), SimpleNode::OpMin(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpRoundToEven(n0), SimpleNode::OpRoundToEven(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpSaturate(n0), SimpleNode::OpSaturate(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpFloor(n0), SimpleNode::OpFloor(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpCeil(n0), SimpleNode::OpCeil(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpClamp(n0), SimpleNode::OpClamp(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpFract(n0), SimpleNode::OpFract(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpFusedMulAdd(n0), SimpleNode::OpFusedMulAdd(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpTrunc(n0), SimpleNode::OpTrunc(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpSqrt(n0), SimpleNode::OpSqrt(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpInverseSqrt(n0), SimpleNode::OpInverseSqrt(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpExp(n0), SimpleNode::OpExp(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpExp2(n0), SimpleNode::OpExp2(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpLog(n0), SimpleNode::OpLog(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpLog2(n0), SimpleNode::OpLog2(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpPowf(n0), SimpleNode::OpPowf(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpStep(n0), SimpleNode::OpStep(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpSmoothStep(n0), SimpleNode::OpSmoothStep(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpCos(n0), SimpleNode::OpCos(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpAcos(n0), SimpleNode::OpAcos(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpCosh(n0), SimpleNode::OpCosh(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpAcosh(n0), SimpleNode::OpAcosh(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpSin(n0), SimpleNode::OpSin(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpAsin(n0), SimpleNode::OpAsin(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpSinh(n0), SimpleNode::OpSinh(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpAsinh(n0), SimpleNode::OpAsinh(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpTan(n0), SimpleNode::OpTan(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpAtan(n0), SimpleNode::OpAtan(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpTanh(n0), SimpleNode::OpTanh(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpAtanh(n0), SimpleNode::OpAtanh(n1)) => n0.intrinsic() == n1.intrinsic(),
-            (SimpleNode::OpToRadians(n0), SimpleNode::OpToRadians(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpToDegrees(n0), SimpleNode::OpToDegrees(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpVector(n0), SimpleNode::OpVector(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpMatrix(n0), SimpleNode::OpMatrix(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpCaseToBranchSelector(n0), SimpleNode::OpCaseToBranchSelector(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpBoolToBranchSelector(n0), SimpleNode::OpBoolToBranchSelector(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpBranchSelectorToCase(n0), SimpleNode::OpBranchSelectorToCase(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpConvertToU32(n0), SimpleNode::OpConvertToU32(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpConvertToI32(n0), SimpleNode::OpConvertToI32(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpConvertToF32(n0), SimpleNode::OpConvertToF32(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpConvertToBool(n0), SimpleNode::OpConvertToBool(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpArrayLength(n0), SimpleNode::OpArrayLength(n1)) => {
-                n0.intrinsic() == n1.intrinsic()
-            }
-            (SimpleNode::OpCall(_), SimpleNode::OpCall(_)) => true,
-            (SimpleNode::ValueProxy(_), SimpleNode::ValueProxy(_)) => true,
-            (SimpleNode::Reaggregation(_), SimpleNode::Reaggregation(_)) => true,
+            (OpConvertToU32(n0), OpConvertToU32(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpConvertToI32(n0), OpConvertToI32(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpConvertToF32(n0), OpConvertToF32(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpConvertToBool(n0), OpConvertToBool(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpArrayLength(n0), OpArrayLength(n1)) => n0.intrinsic() == n1.intrinsic(),
+            // OpCall nodes are entirely defined by their inputs (the first input is the function
+            // being called)
+            (OpCall(_), OpCall(_)) => true,
+            (ValueProxy(_), ValueProxy(_)) => true,
+            (Reaggregation(_), Reaggregation(_)) => true,
             _ => false,
         }
     }
