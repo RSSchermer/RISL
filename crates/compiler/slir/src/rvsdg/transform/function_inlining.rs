@@ -87,7 +87,18 @@ impl<'a> DependencyResolver<'a> {
                     .get_input_index(owner, dependency.origin)
                     .unwrap_or_else(|| match self.rvsdg[owner].kind() {
                         NodeKind::Switch(_) => self.rvsdg.add_switch_input(owner, *dependency),
-                        NodeKind::Loop(_) => self.rvsdg.add_loop_input(owner, *dependency),
+                        NodeKind::Loop(_) => {
+                            let input = self.rvsdg.add_loop_input(owner, *dependency);
+                            let region = self.rvsdg[owner].expect_loop().loop_region();
+
+                            self.rvsdg.reconnect_region_result(
+                                region,
+                                input + 1,
+                                ValueOrigin::Argument(input),
+                            );
+
+                            input
+                        }
                         _ => unreachable!("only switch and loop have been pushed to the stack"),
                     });
 
