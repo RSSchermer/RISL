@@ -1242,7 +1242,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::{TY_DUMMY, TypeKind};
+    use crate::ty::{TY_DUMMY, TypeKind, TY_PTR_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
@@ -3527,16 +3527,13 @@ mod tests {
 
         let ptr_0 = rvsdg.add_op_alloca(region, TY_U32);
 
-        // TODO: use the predefined TY_PTR_U32
-        let ptr_ty = module.ty.register(TypeKind::Ptr(TY_U32));
-
         let switch_node = rvsdg.add_switch(
             region,
             vec![
                 ValueInput::argument(TY_PREDICATE, 0),
-                ValueInput::output(ptr_ty, ptr_0, 0),
+                ValueInput::output(TY_PTR_U32, ptr_0, 0),
             ],
-            vec![ValueOutput::new(ptr_ty)],
+            vec![ValueOutput::new(TY_PTR_U32)],
             None,
         );
 
@@ -3548,7 +3545,7 @@ mod tests {
 
         let load_op = rvsdg.add_op_load(
             region,
-            ValueInput::output(ptr_ty, switch_node, 0),
+            ValueInput::output(TY_PTR_U32, switch_node, 0),
             StateOrigin::Argument,
         );
 
@@ -3579,7 +3576,7 @@ mod tests {
         // The pointer input of the load should be ptr_0.
         assert_eq!(
             op_load_data.ptr_input(),
-            &ValueInput::output(ptr_ty, ptr_0, 0)
+            &ValueInput::output(TY_PTR_U32, ptr_0, 0)
         );
     }
 
