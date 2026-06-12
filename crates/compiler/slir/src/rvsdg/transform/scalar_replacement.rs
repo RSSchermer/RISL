@@ -412,11 +412,27 @@ impl ValueFlowVisitor for JobAnalyzer {
                 // after memory promotion.
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
+            Simple(OpElementPtr(_)) => {
+                let node_data = rvsdg[node].expect_op_element_ptr();
+                if matches!(
+                    ElementIndex::from_origin(rvsdg, node_data.index_input().origin),
+                    ElementIndex::Dynamic(_)
+                ) {
+                    self.has_nonlocal_use = true;
+                }
+            }
+            Simple(OpExtractElement(_)) => {
+                let node_data = rvsdg[node].expect_op_extract_element();
+                if matches!(
+                    ElementIndex::from_origin(rvsdg, node_data.index_input().origin),
+                    ElementIndex::Dynamic(_)
+                ) {
+                    self.has_nonlocal_use = true;
+                }
+            }
             Simple(OpStore(_))
             | Simple(OpExtractField(_))
-            | Simple(OpExtractElement(_))
             | Simple(OpFieldPtr(_))
-            | Simple(OpElementPtr(_))
             | Simple(OpVariantPtr(_))
             | Simple(OpDiscriminantPtr(_))
             | Simple(OpGetDiscriminant(_))

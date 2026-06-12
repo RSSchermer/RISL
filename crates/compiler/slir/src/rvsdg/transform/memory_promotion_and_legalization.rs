@@ -199,18 +199,60 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
         self.visited.insert((region, origin))
     }
 
+    fn visit_region_argument(&mut self, rvsdg: &Rvsdg, region: Region, argument: u32) {
+        let owner = rvsdg[region].owner();
+
+        if let NodeKind::Loop(loop_data) = rvsdg[owner].kind() {
+            let result = argument + 1;
+            let result_origin = rvsdg[region].value_results()[result as usize].origin;
+            let arg_ty = rvsdg.value_origin_ty(region, ValueOrigin::Argument(argument));
+            let arg_is_ptr = rvsdg.ty().kind(arg_ty).is_ptr();
+
+            visit::reverse_value_flow::visit_value_input(self, rvsdg, owner, argument);
+
+            if arg_is_ptr
+                && !result_origin.is_placeholder()
+                && result_origin != ValueOrigin::Argument(argument)
+            {
+                visit::reverse_value_flow::visit_region_result(
+                    self,
+                    rvsdg,
+                    loop_data.loop_region(),
+                    result,
+                );
+            } else {
+                // TODO: I'm worried that this does not handle nested variable pointers correctly.
+                // We may need to pass over a loop's state-chain multiple times, and in that case,
+                // we should mark this pointer as "needing another pass".
+            }
+
+            return;
+        }
+
+        visit::reverse_value_flow::visit_region_argument(self, rvsdg, region, argument);
+    }
+
     fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, output: u32) {
         use NodeKind::*;
         use SimpleNode::*;
 
         match rvsdg[node].kind() {
             Switch(_) | Loop(_) => {
-                self.needs_emulation = true;
-                self.can_promote = false;
-
                 visit::reverse_value_flow::visit_value_output(self, rvsdg, node, output);
+
+                if self.promotion_candidate.is_none() {
+                    self.needs_emulation = true;
+                    self.can_promote = false;
+                }
             }
             Simple(OpAlloca(_)) => {
+                if let Some(candidate) = self.promotion_candidate
+                    && candidate != node
+                {
+                    self.needs_emulation = true;
+                    self.can_promote = false;
+                }
+
                 self.promotion_candidate = Some(node);
                 self.can_promote &= !self.aggregate_analyzer.is_aggregate(rvsdg, node);
             }
@@ -595,11 +637,9 @@ impl MemoryPromoterLegalizer {
                 // `self.state_origin`.
             }
             PointerAction::VariablePointerEmulation => {
-                self.emulation_context.emulate_op_store(rvsdg, op_store);
+                let emulated = self.emulation_context.emulate_op_store(rvsdg, op_store);
 
-                // Note that emulation will replace the OpStore in the state chain with the
-                // emulation node, so the "visit loop" will automatically visit the emulation node
-                // on the next iteration.
+                self.state_origin = (region, StateOrigin::Node(emulated));
             }
             PointerAction::Nothing => {
                 // Do nothing, except move the current state origin beyond the load
@@ -631,11 +671,9 @@ impl MemoryPromoterLegalizer {
                 // update `self.state_origin`.
             }
             PointerAction::VariablePointerEmulation => {
-                self.emulation_context.emulate_op_load(rvsdg, op_load);
+                let emulated = self.emulation_context.emulate_op_load(rvsdg, op_load);
 
-                // Note that emulation will replace the OpLoad in the state chain with the emulation
-                // node, so the "visit loop" will automatically visit the emulation node on the
-                // next iteration.
+                self.state_origin = (region, StateOrigin::Node(emulated));
             }
             PointerAction::Nothing => {
                 // Do nothing, except move the current state origin beyond the load

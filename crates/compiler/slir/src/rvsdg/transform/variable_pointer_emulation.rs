@@ -135,7 +135,7 @@ use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
     ValueOutput,
 };
-use crate::ty::{TY_PREDICATE, TY_U32, Type};
+use crate::ty::{Int, TY_PREDICATE, TY_U32, Type};
 
 /// A variable pointer emulation program description.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -350,16 +350,18 @@ impl ChildInputAssigner {
 
 pub struct EmulationContext {
     pointer_emulation_info: FxHashMap<(Region, ValueOrigin), PointerEmulationInfo>,
+    loop_pointer_routing_in_progress: IndexSet<(Node, u32)>,
 }
 
 impl EmulationContext {
     pub fn new() -> Self {
         EmulationContext {
             pointer_emulation_info: FxHashMap::default(),
+            loop_pointer_routing_in_progress: IndexSet::new(),
         }
     }
 
-    pub fn emulate_op_load(&mut self, rvsdg: &mut Rvsdg, op_load: Node) {
+    pub fn emulate_op_load(&mut self, rvsdg: &mut Rvsdg, op_load: Node) -> Node {
         let region = rvsdg[op_load].region();
         let data = rvsdg[op_load].expect_op_load();
         let output_ty = data.value_output().ty;
@@ -405,9 +407,11 @@ impl EmulationContext {
         }
 
         rvsdg.remove_node(op_load);
+
+        emulated
     }
 
-    pub fn emulate_op_store(&mut self, rvsdg: &mut Rvsdg, op_store: Node) {
+    pub fn emulate_op_store(&mut self, rvsdg: &mut Rvsdg, op_store: Node) -> Node {
         let outer_region = rvsdg[op_store].region();
         let data = rvsdg[op_store].expect_op_store();
         let state_origin = data.state().unwrap().origin;
@@ -432,13 +436,16 @@ impl EmulationContext {
             additional_values: &[value_input],
         };
 
-        emulator.emulate(&info.emulation_root);
+        let emulated = emulator.emulate(&info.emulation_root);
 
         rvsdg.remove_node(op_store);
+
+        emulated
     }
 
     pub fn clear(&mut self) {
         self.pointer_emulation_info.clear();
+        self.loop_pointer_routing_in_progress.clear();
     }
 
     fn resolve_pointer_emulation_info(
@@ -499,7 +506,7 @@ impl EmulationContext {
         let owner = rvsdg[region].owner();
 
         match rvsdg[owner].kind() {
-            NodeKind::Switch(_) => self.create_switch_argument_info(rvsdg, owner, argument),
+            NodeKind::Switch(_) => self.create_switch_argument_info(rvsdg, owner, region, argument),
             NodeKind::Loop(_) => self.create_loop_argument_info(rvsdg, owner, argument),
             NodeKind::Function(_) => {
                 let pointer_ty = rvsdg[region].value_arguments()[argument as usize].ty;
@@ -521,13 +528,25 @@ impl EmulationContext {
         &mut self,
         rvsdg: &mut Rvsdg,
         switch_node: Node,
+        branch_region: Region,
         argument: u32,
     ) -> PointerEmulationInfo {
         fn resolve_inner_origin(
             rvsdg: &mut Rvsdg,
             switch_node: Node,
+            branch_region: Region,
             outer_origin: ValueOrigin,
         ) -> ValueOrigin {
+            // When a branch result forwards one of the switch outputs through a pointer emulation tree,
+            // interpret that output from within the branch by following the corresponding branch result.
+            // This does not represent an RVSDG cycle: the switch output is the outside view of the
+            // branch result that is currently being analyzed.
+            if let ValueOrigin::Output { producer, output } = outer_origin
+                && producer == switch_node
+            {
+                return rvsdg[branch_region].value_results()[output as usize].origin;
+            }
+
             for (i, input) in rvsdg[switch_node].value_inputs()[1..].iter().enumerate() {
                 if input.origin == outer_origin {
                     return ValueOrigin::Argument(i as u32);
@@ -560,7 +579,8 @@ impl EmulationContext {
 
         info.emulation_root
             .visit_value_origins_mut(&mut |outer_origin| {
-                *outer_origin = resolve_inner_origin(rvsdg, switch_node, *outer_origin);
+                *outer_origin =
+                    resolve_inner_origin(rvsdg, switch_node, branch_region, *outer_origin);
             });
         info.emulation_root.assign_child_inputs();
 
@@ -573,6 +593,22 @@ impl EmulationContext {
         loop_node: Node,
         argument: u32,
     ) -> PointerEmulationInfo {
+        self.route_loop_pointer_value(rvsdg, loop_node, argument);
+
+        let loop_region = rvsdg[loop_node].expect_loop().loop_region();
+
+        self.pointer_emulation_info
+            .get(&(loop_region, ValueOrigin::Argument(argument)))
+            .expect("loop pointer argument should be cached by route_loop_pointer_value")
+            .clone()
+    }
+
+    fn route_loop_pointer_value(
+        &mut self,
+        rvsdg: &mut Rvsdg,
+        loop_node: Node,
+        loop_value_index: u32,
+    ) {
         fn resolve_inner_origin(
             rvsdg: &mut Rvsdg,
             loop_node: Node,
@@ -586,10 +622,7 @@ impl EmulationContext {
 
             let region = rvsdg[loop_node].region();
             let loop_region = rvsdg[loop_node].expect_loop().loop_region();
-
-            // The index for the new input/argument that we'll add is the count before adding.
             let argument = rvsdg[loop_node].value_inputs().len() as u32;
-            // The corresponding result index is 1 greater than the argument index.
             let result = argument + 1;
             let ty = rvsdg.value_origin_ty(region, outer_origin);
 
@@ -600,29 +633,212 @@ impl EmulationContext {
                     origin: outer_origin,
                 },
             );
-
-            // Connect the new result to the new argument to ensure the value is available on all
-            // loop iterations, not just the first iteration
             rvsdg.reconnect_region_result(loop_region, result, ValueOrigin::Argument(argument));
 
             ValueOrigin::Argument(argument)
         }
 
-        let input = argument;
+        fn add_unique_branch(
+            branches: &mut Vec<EmulationTreeNode>,
+            branch: EmulationTreeNode,
+        ) -> u32 {
+            if let Some(index) = branches.iter().position(|b| *b == branch) {
+                index as u32
+            } else {
+                let index = branches.len() as u32;
+
+                branches.push(branch);
+
+                index
+            }
+        }
+
+        fn resolve_branch_index(
+            rvsdg: &mut Rvsdg,
+            loop_region: Region,
+            tree: &EmulationTreeNode,
+            alternatives: &[EmulationTreeNode],
+        ) -> ValueOrigin {
+            if let Some(index) = alternatives
+                .iter()
+                .position(|alternative| alternative == tree)
+            {
+                let node = rvsdg.add_const_u32(loop_region, index as u32);
+
+                return ValueOrigin::Output {
+                    producer: node,
+                    output: 0,
+                };
+            }
+
+            let EmulationTreeNode::Branching(branching) = tree else {
+                panic!("loop-carried pointer result is not one of the routed alternatives")
+            };
+
+            let switch = rvsdg.add_switch(
+                loop_region,
+                vec![ValueInput {
+                    ty: TY_PREDICATE,
+                    origin: branching.branch_selector,
+                }],
+                vec![ValueOutput::new(TY_U32)],
+                None,
+            );
+
+            for branch in &branching.branches {
+                let branch_region = rvsdg.add_switch_branch(switch);
+                let index_origin = resolve_branch_index(rvsdg, branch_region, branch, alternatives);
+
+                rvsdg.reconnect_region_result(branch_region, 0, index_origin);
+            }
+
+            ValueOrigin::Output {
+                producer: switch,
+                output: 0,
+            }
+        }
+
+        let loop_region = rvsdg[loop_node].expect_loop().loop_region();
         let outer_region = rvsdg[loop_node].region();
-        let loop_data = rvsdg[loop_node].expect_loop();
-        let origin = loop_data.value_inputs()[input as usize].origin;
-        let mut info = self
-            .resolve_pointer_emulation_info(rvsdg, outer_region, origin)
+        let arg_origin = ValueOrigin::Argument(loop_value_index);
+        let output_origin = ValueOrigin::Output {
+            producer: loop_node,
+            output: loop_value_index,
+        };
+
+        if self
+            .pointer_emulation_info
+            .contains_key(&(loop_region, arg_origin))
+            && self
+                .pointer_emulation_info
+                .contains_key(&(outer_region, output_origin))
+        {
+            return;
+        }
+
+        // Resolving a loop-carried pointer can recurse back into the same loop argument through the
+        // loop result. The first pass seeds the cache with the input-derived pointer tree so recursive
+        // lookups have a conservative placeholder; once the result-derived tree has been resolved, the
+        // cache entry is replaced with the fully routed tree below.
+        if !self
+            .loop_pointer_routing_in_progress
+            .insert((loop_node, loop_value_index))
+        {
+            return;
+        }
+
+        let input_origin = rvsdg[loop_node].value_inputs()[loop_value_index as usize].origin;
+        let mut input_info = self
+            .resolve_pointer_emulation_info(rvsdg, outer_region, input_origin)
             .clone();
 
-        info.emulation_root
+        input_info
+            .emulation_root
             .visit_value_origins_mut(&mut |outer_origin| {
                 *outer_origin = resolve_inner_origin(rvsdg, loop_node, *outer_origin);
             });
-        info.emulation_root.assign_child_inputs();
+        input_info.emulation_root.assign_child_inputs();
 
-        info
+        self.pointer_emulation_info
+            .insert((loop_region, arg_origin), input_info.clone());
+
+        let result = loop_value_index + 1;
+        let result_origin = rvsdg[loop_region].value_results()[result as usize].origin;
+        let result_info = if result_origin.is_placeholder() {
+            input_info.clone()
+        } else {
+            self.resolve_pointer_emulation_info(rvsdg, loop_region, result_origin)
+                .clone()
+        };
+
+        let mut alternatives = Vec::new();
+
+        let initial_index = add_unique_branch(&mut alternatives, input_info.emulation_root.clone());
+
+        add_unique_branch(&mut alternatives, result_info.emulation_root.clone());
+
+        let routed_info = if alternatives.len() == 1 {
+            input_info.clone()
+        } else {
+            let initial_selector = rvsdg.add_const_u32(outer_region, initial_index);
+            let selector_input =
+                rvsdg.add_loop_input(loop_node, ValueInput::output(TY_U32, initial_selector, 0));
+            let selector_predicate = rvsdg.add_op_case_to_branch_selector(
+                loop_region,
+                ValueInput::argument(TY_U32, selector_input),
+                Int::U32,
+                0..alternatives.len() as u128 - 1,
+            );
+            let next_selector = resolve_branch_index(
+                rvsdg,
+                loop_region,
+                &result_info.emulation_root,
+                &alternatives,
+            );
+
+            rvsdg.reconnect_region_result(loop_region, selector_input + 1, next_selector);
+
+            let mut branching = BranchingNode {
+                branch_selector: ValueOrigin::Output {
+                    producer: selector_predicate,
+                    output: 0,
+                },
+                branches: alternatives,
+                child_inputs: IndexSet::new(),
+            };
+            branching.assign_child_inputs();
+
+            PointerEmulationInfo {
+                pointer_ty: input_info.pointer_ty,
+                emulation_root: branching.into(),
+            }
+        };
+
+        self.pointer_emulation_info
+            .insert((loop_region, arg_origin), routed_info.clone());
+
+        let mut output_info = routed_info;
+
+        output_info
+            .emulation_root
+            .visit_non_ptr_origins_mut(&mut |inner_origin| {
+                for (i, input) in rvsdg[loop_region].value_results()[1..].iter().enumerate() {
+                    if input.origin == *inner_origin {
+                        *inner_origin = ValueOrigin::Output {
+                            producer: loop_node,
+                            output: i as u32,
+                        };
+                        return;
+                    }
+                }
+
+                let outer_region = rvsdg[loop_node].region();
+                let ty = rvsdg.value_origin_ty(loop_region, *inner_origin);
+                let fallback = rvsdg.add_const_fallback(outer_region, ty);
+                let output = rvsdg.add_loop_input(loop_node, ValueInput::output(ty, fallback, 0));
+
+                rvsdg.reconnect_region_result(loop_region, output + 1, *inner_origin);
+
+                *inner_origin = ValueOrigin::Output {
+                    producer: loop_node,
+                    output,
+                };
+            });
+        output_info
+            .emulation_root
+            .visit_ptr_origins_mut(&mut |inner_origin| {
+                let ValueOrigin::Argument(argument) = *inner_origin else {
+                    panic!("originating pointer value must originate outside the loop region")
+                };
+                *inner_origin = rvsdg[loop_node].value_inputs()[argument as usize].origin;
+            });
+        output_info.emulation_root.assign_child_inputs();
+
+        self.pointer_emulation_info
+            .insert((outer_region, output_origin), output_info);
+
+        self.loop_pointer_routing_in_progress
+            .shift_remove(&(loop_node, loop_value_index));
     }
 
     fn create_switch_output_info(
@@ -1242,7 +1458,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::{TY_DUMMY, TypeKind, TY_PTR_U32};
+    use crate::ty::{TY_DUMMY, TY_PTR_U32, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
@@ -3712,5 +3928,113 @@ mod tests {
             panic!("expected Output origin for index")
         };
         assert_eq!(rvsdg[index_producer].expect_const_u32().value(), 0);
+    }
+
+    #[test]
+    fn test_emulate_loop_carried_variable_pointer_load() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ptr_a = rvsdg.add_op_alloca(region, TY_U32);
+        let ptr_b = rvsdg.add_op_alloca(region, TY_U32);
+
+        let initial_val = rvsdg.add_const_u32(region, 0);
+
+        // Loop inputs: [initial_active=ptr_a, b=ptr_b, initial_val=0]
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(TY_PTR_U32, ptr_a, 0),
+                ValueInput::output(TY_PTR_U32, ptr_b, 0),
+                ValueInput::output(TY_U32, initial_val, 0),
+            ],
+            Some(StateOrigin::Argument),
+        );
+
+        // re-entry condition: false
+        let cond = rvsdg.add_const_bool(loop_region, false);
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: cond,
+                output: 0,
+            },
+        );
+
+        // next_active = current_b (Argument 1)
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(1));
+
+        // next_b = current_b (Argument 1) - invariant
+        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(1));
+
+        // Load from active (Argument 0)
+        let load_op = rvsdg.add_op_load(
+            loop_region,
+            ValueInput::argument(TY_PTR_U32, 0),
+            StateOrigin::Argument,
+        );
+
+        // Input 2 is initial_val. Result 3 is next value of this variable.
+        rvsdg.reconnect_region_result(
+            loop_region,
+            3,
+            ValueOrigin::Output {
+                producer: load_op,
+                output: 0,
+            },
+        );
+
+        // Connect loop output to function result
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: loop_node,
+                output: 2,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+
+        // This is expected to fail to correctly identify both ptr_a and ptr_b as origins.
+        // Currently it will probably only identify ptr_a (the initial value), and
+        // since ptr_a is just a pointer, it might think no emulation is needed.
+        emulation_context.emulate_op_load(&mut rvsdg, load_op);
+
+        // Verification:
+        // If it correctly emulates a variable pointer, the load_op should be replaced
+        // by a Switch node that loads from both ptr_a and ptr_b.
+        let load_origin = rvsdg[loop_region].value_results()[3].origin;
+        let ValueOrigin::Output {
+            producer: result_producer,
+            ..
+        } = load_origin
+        else {
+            panic!("expected Output origin for loop result")
+        };
+
+        let node_kind = rvsdg[result_producer].kind();
+        assert!(
+            matches!(node_kind, NodeKind::Switch(_)),
+            "Expected a Switch node for emulated variable pointer load, but got {:?}",
+            node_kind
+        );
     }
 }
