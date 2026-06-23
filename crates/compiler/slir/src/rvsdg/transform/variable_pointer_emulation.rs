@@ -126,6 +126,7 @@
 //! switch-merging, may be able to reduce this cost a little.
 //!
 //! [0]: super::memory_promotion_and_legalization
+use std::cell::OnceCell;
 
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
@@ -149,14 +150,6 @@ struct PointerEmulationInfo {
 enum EmulationTreeNode {
     Branching(BranchingNode),
     Leaf(LeafNode),
-}
-
-impl EmulationTreeNode {
-    fn assign_child_inputs(&mut self) {
-        if let EmulationTreeNode::Branching(node) = self {
-            node.assign_child_inputs();
-        }
-    }
 }
 
 impl From<BranchingNode> for EmulationTreeNode {
@@ -198,7 +191,35 @@ struct BranchingNode {
     /// Child nodes look to map a [ValueOrigin] that is relative to the emulation root region, to
     /// the index of the argument at which their direct parent node makes the value available to
     /// its child nodes.
-    child_inputs: IndexSet<ValueOrigin>,
+    child_inputs: OnceCell<IndexSet<ValueOrigin>>,
+}
+
+impl BranchingNode {
+    fn child_inputs(&self) -> &IndexSet<ValueOrigin> {
+        self.child_inputs.get_or_init(|| {
+            let mut child_inputs = IndexSet::new();
+
+            for branch in &self.branches {
+                match branch {
+                    EmulationTreeNode::Branching(node) => {
+                        child_inputs.insert(node.branch_selector);
+                        child_inputs.extend(node.child_inputs().iter());
+                    }
+                    EmulationTreeNode::Leaf(node) => {
+                        child_inputs.insert(node.root_pointer);
+
+                        for access in &node.access_chain {
+                            if let &Access::DynamicElement(index_origin) = access {
+                                child_inputs.insert(index_origin);
+                            }
+                        }
+                    }
+                }
+            }
+
+            child_inputs
+        })
+    }
 }
 
 impl PartialEq for BranchingNode {
@@ -208,12 +229,6 @@ impl PartialEq for BranchingNode {
 }
 
 impl Eq for BranchingNode {}
-
-impl BranchingNode {
-    fn assign_child_inputs(&mut self) {
-        ChildInputAssigner.visit_branching_node(self)
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Access {
@@ -308,43 +323,6 @@ impl EmulationTreeNode {
 
     fn visit_ptr_origins_mut(&mut self, visitor: &mut impl FnMut(&mut ValueOrigin)) {
         self.visit_value_origins_mut_internal(visitor, false, true)
-    }
-}
-
-/// Propagates input requirements for pointer emulation from the bottom up, and for each branching
-/// node it visits, assigns the combined set of inputs to which its children require access.
-///
-/// These input sets help construct the sets of switch node inputs when constructing a node graph
-/// to emulate a load or store operation on a variable pointer that requires emulation.
-struct ChildInputAssigner;
-
-impl ChildInputAssigner {
-    fn visit_branching_node(&self, node: &mut BranchingNode) {
-        let mut child_inputs = IndexSet::new();
-
-        for branch in &mut node.branches {
-            match branch {
-                EmulationTreeNode::Branching(node) => {
-                    self.visit_branching_node(node);
-
-                    child_inputs.insert(node.branch_selector);
-                    child_inputs.extend(node.child_inputs.iter());
-                }
-                EmulationTreeNode::Leaf(node) => self.visit_leaf_node(node, &mut child_inputs),
-            }
-        }
-
-        node.child_inputs = child_inputs;
-    }
-
-    fn visit_leaf_node(&self, node: &LeafNode, parent_value_inputs: &mut IndexSet<ValueOrigin>) {
-        parent_value_inputs.insert(node.root_pointer);
-
-        for access in &node.access_chain {
-            if let &Access::DynamicElement(index_origin) = access {
-                parent_value_inputs.insert(index_origin);
-            }
-        }
     }
 }
 
@@ -562,7 +540,6 @@ impl EmulationContext {
             .visit_value_origins_mut(&mut |outer_origin| {
                 *outer_origin = resolve_inner_origin(rvsdg, switch_node, *outer_origin);
             });
-        info.emulation_root.assign_child_inputs();
 
         info
     }
@@ -620,7 +597,6 @@ impl EmulationContext {
             .visit_value_origins_mut(&mut |outer_origin| {
                 *outer_origin = resolve_inner_origin(rvsdg, loop_node, *outer_origin);
             });
-        info.emulation_root.assign_child_inputs();
 
         info
     }
@@ -788,8 +764,6 @@ impl EmulationContext {
             child_inputs: Default::default(),
         };
 
-        branching_node.assign_child_inputs();
-
         PointerEmulationInfo {
             pointer_ty,
             emulation_root: branching_node.into(),
@@ -878,7 +852,6 @@ impl EmulationContext {
             .visit_ptr_origins_mut(&mut |inner_origin| {
                 *inner_origin = resolve_ptr_outer_origin(rvsdg, loop_node, *inner_origin);
             });
-        info.emulation_root.assign_child_inputs();
 
         info
     }
@@ -901,7 +874,6 @@ impl EmulationContext {
         info.emulation_root.visit_leaves_mut(&mut |leaf| {
             leaf.access_chain.push(access);
         });
-        info.emulation_root.assign_child_inputs();
         info.pointer_ty = pointer_ty;
 
         info
@@ -926,7 +898,6 @@ impl EmulationContext {
         info.emulation_root.visit_leaves_mut(&mut |leaf| {
             leaf.access_chain.push(access);
         });
-        info.emulation_root.assign_child_inputs();
         info.pointer_ty = pointer_ty;
 
         info
@@ -1056,13 +1027,13 @@ where
             }
         };
 
-        let mut value_inputs = Vec::with_capacity(branching_node.child_inputs.len() + 1);
+        let mut value_inputs = Vec::with_capacity(branching_node.child_inputs().len() + 1);
 
         // Connect the first input to the branch selector predicate.
         value_inputs.push(resolve_input(branching_node.branch_selector, TY_PREDICATE));
 
         // Connect inputs for the emulation values required by the branching node's child nodes.
-        for child_input in branching_node.child_inputs.iter().copied() {
+        for child_input in branching_node.child_inputs().iter().copied() {
             let ty = self.rvsdg.value_origin_ty(self.outer_region, child_input);
 
             value_inputs.push(resolve_input(child_input, ty));
@@ -1114,10 +1085,10 @@ where
 
             let node = match child {
                 EmulationTreeNode::Branching(node) => {
-                    self.visit_branching_node(branch, node, Some(&branching_node.child_inputs))
+                    self.visit_branching_node(branch, node, Some(branching_node.child_inputs()))
                 }
                 EmulationTreeNode::Leaf(node) => {
-                    self.visit_leaf_node(branch, node, Some(&branching_node.child_inputs))
+                    self.visit_leaf_node(branch, node, Some(branching_node.child_inputs()))
                 }
             };
 
@@ -1242,7 +1213,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::{TY_DUMMY, TypeKind, TY_PTR_U32};
+    use crate::ty::{TY_DUMMY, TY_PTR_U32, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
