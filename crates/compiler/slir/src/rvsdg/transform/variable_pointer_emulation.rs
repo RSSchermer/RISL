@@ -126,214 +126,26 @@
 //! switch-merging, may be able to reduce this cost a little.
 //!
 //! [0]: super::memory_promotion_and_legalization
-use std::cell::OnceCell;
 
 use indexmap::IndexSet;
-use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
+use crate::rvsdg::transform::pointer_reconstruction::{
+    Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionNode,
+};
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
-    ValueOutput,
+    Connectivity, Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput,
 };
 use crate::ty::{TY_PREDICATE, TY_U32, Type};
 
-/// A variable pointer emulation program description.
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct PointerEmulationInfo {
-    pointer_ty: Type,
-    emulation_root: EmulationTreeNode,
-}
-
-/// A node in a pointer emulation program description.
-#[derive(Clone, PartialEq, Eq, Debug)]
-enum EmulationTreeNode {
-    Branching(BranchingNode),
-    Leaf(LeafNode),
-}
-
-impl From<BranchingNode> for EmulationTreeNode {
-    fn from(branching: BranchingNode) -> Self {
-        EmulationTreeNode::Branching(branching)
-    }
-}
-
-impl From<LeafNode> for EmulationTreeNode {
-    fn from(leaf: LeafNode) -> Self {
-        EmulationTreeNode::Leaf(leaf)
-    }
-}
-
-/// Represents a branching node in a variable pointer emulation program description.
-///
-/// This will translate to a [Switch] node when constructing the emulation program.
-#[derive(Clone, Debug)]
-struct BranchingNode {
-    /// The [ValueOrigin] for the branch selector predicate, relative to the root emulation node.
-    ///
-    /// For the root emulation switch node, this directly identifies the branch selector input. For
-    /// a switch node nested deeper in the pointer emulation program, this needs to be resolved
-    /// against the parent [BranchingNode]'s [child_inputs].
-    branch_selector: ValueOrigin,
-
-    /// The branches of the node.
-    ///
-    /// Each branch will translate to its own [Region] in the [Switch] node when constructing the
-    /// emulation program.
-    branches: Vec<EmulationTreeNode>,
-
-    /// The complete set of [ValueOrigin]s used by the child nodes (branches) of this branching
-    /// node.
-    ///
-    /// These map to inputs/arguments for the [Switch] node when constructing the emulation program
-    /// in index order.
-    ///
-    /// Child nodes look to map a [ValueOrigin] that is relative to the emulation root region, to
-    /// the index of the argument at which their direct parent node makes the value available to
-    /// its child nodes.
-    child_inputs: OnceCell<IndexSet<ValueOrigin>>,
-}
-
-impl BranchingNode {
-    fn child_inputs(&self) -> &IndexSet<ValueOrigin> {
-        self.child_inputs.get_or_init(|| {
-            let mut child_inputs = IndexSet::new();
-
-            for branch in &self.branches {
-                match branch {
-                    EmulationTreeNode::Branching(node) => {
-                        child_inputs.insert(node.branch_selector);
-                        child_inputs.extend(node.child_inputs().iter());
-                    }
-                    EmulationTreeNode::Leaf(node) => {
-                        child_inputs.insert(node.root_pointer);
-
-                        for access in &node.access_chain {
-                            if let &Access::DynamicElement(index_origin) = access {
-                                child_inputs.insert(index_origin);
-                            }
-                        }
-                    }
-                }
-            }
-
-            child_inputs
-        })
-    }
-}
-
-impl PartialEq for BranchingNode {
-    fn eq(&self, other: &Self) -> bool {
-        self.branch_selector == other.branch_selector && self.branches == other.branches
-    }
-}
-
-impl Eq for BranchingNode {}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Access {
-    Field(u32),
-    StaticElement(u32),
-    DynamicElement(ValueOrigin),
-}
-
-impl Access {
-    pub fn from_element_origin(rvsdg: &Rvsdg, origin: ValueOrigin) -> Self {
-        match origin {
-            ValueOrigin::Argument(_) => Access::DynamicElement(origin),
-            ValueOrigin::Output { producer, .. } => {
-                if let NodeKind::Simple(SimpleNode::ConstU32(n)) = rvsdg[producer].kind() {
-                    Access::StaticElement(n.value())
-                } else {
-                    Access::DynamicElement(origin)
-                }
-            }
-        }
-    }
-}
-
-/// Represents a leaf node in a variable pointer emulation program description.
-///
-/// A leaf node resolves to a pointer without any further branching.
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct LeafNode {
-    /// A pointer to the root identifier of the pointer that this leaf emulates.
-    root_pointer: ValueOrigin,
-
-    /// A complete access chain that will refine the [root_identifier] into the pointer that this
-    /// leave emulates.
-    access_chain: Vec<Access>,
-}
-
-impl EmulationTreeNode {
-    fn visit_leaves_mut(&mut self, visitor: &mut impl FnMut(&mut LeafNode)) {
-        match self {
-            EmulationTreeNode::Branching(node) => {
-                for branch in &mut node.branches {
-                    branch.visit_leaves_mut(visitor);
-                }
-            }
-            EmulationTreeNode::Leaf(node) => visitor(node),
-        }
-    }
-
-    fn visit_value_origins_mut_internal(
-        &mut self,
-        visitor: &mut impl FnMut(&mut ValueOrigin),
-        visit_non_ptr_origins: bool,
-        visit_ptr_origins: bool,
-    ) {
-        match self {
-            EmulationTreeNode::Branching(node) => {
-                if visit_non_ptr_origins {
-                    visitor(&mut node.branch_selector);
-                }
-
-                for branch in &mut node.branches {
-                    branch.visit_value_origins_mut_internal(
-                        visitor,
-                        visit_non_ptr_origins,
-                        visit_ptr_origins,
-                    );
-                }
-            }
-            EmulationTreeNode::Leaf(node) => {
-                if visit_ptr_origins {
-                    visitor(&mut node.root_pointer);
-                }
-
-                if visit_non_ptr_origins {
-                    for access in &mut node.access_chain {
-                        if let Access::DynamicElement(origin) = access {
-                            visitor(origin);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn visit_value_origins_mut(&mut self, visitor: &mut impl FnMut(&mut ValueOrigin)) {
-        self.visit_value_origins_mut_internal(visitor, true, true)
-    }
-
-    fn visit_non_ptr_origins_mut(&mut self, visitor: &mut impl FnMut(&mut ValueOrigin)) {
-        self.visit_value_origins_mut_internal(visitor, true, false)
-    }
-
-    fn visit_ptr_origins_mut(&mut self, visitor: &mut impl FnMut(&mut ValueOrigin)) {
-        self.visit_value_origins_mut_internal(visitor, false, true)
-    }
-}
-
 pub struct EmulationContext {
-    pointer_emulation_info: FxHashMap<(Region, ValueOrigin), PointerEmulationInfo>,
+    reconstruction_context: PointerReconstructionContext,
 }
 
 impl EmulationContext {
     pub fn new() -> Self {
         EmulationContext {
-            pointer_emulation_info: FxHashMap::default(),
+            reconstruction_context: PointerReconstructionContext::new(),
         }
     }
 
@@ -343,7 +155,9 @@ impl EmulationContext {
         let output_ty = data.value_output().ty;
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
-        let info = self.resolve_pointer_emulation_info(rvsdg, region, ptr_origin);
+        let info = self
+            .reconstruction_context
+            .resolve_reconstruction_info(rvsdg, region, ptr_origin);
 
         let gen_op_load = |rvsdg: &mut Rvsdg,
                            region: Region,
@@ -362,7 +176,7 @@ impl EmulationContext {
             additional_values: &[],
         };
 
-        let emulated = emulator.emulate(&info.emulation_root);
+        let emulated = emulator.emulate(info.reconstruction_root.clone());
 
         // Now that we've constructed a node to emulate the original OpLoad, reconnect all users of
         // its value output to the emulated node's output and remove the original OpLoad.
@@ -391,7 +205,11 @@ impl EmulationContext {
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
         let value_input = *data.value_input();
-        let info = self.resolve_pointer_emulation_info(rvsdg, outer_region, ptr_origin);
+        let info = self.reconstruction_context.resolve_reconstruction_info(
+            rvsdg,
+            outer_region,
+            ptr_origin,
+        );
 
         let gen_op_store = |rvsdg: &mut Rvsdg,
                             region: Region,
@@ -410,552 +228,13 @@ impl EmulationContext {
             additional_values: &[value_input],
         };
 
-        emulator.emulate(&info.emulation_root);
+        emulator.emulate(info.reconstruction_root.clone());
 
         rvsdg.remove_node(op_store);
     }
 
     pub fn clear(&mut self) {
-        self.pointer_emulation_info.clear();
-    }
-
-    fn resolve_pointer_emulation_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        region: Region,
-        pointer_origin: ValueOrigin,
-    ) -> &PointerEmulationInfo {
-        if !self
-            .pointer_emulation_info
-            .contains_key(&(region, pointer_origin))
-        {
-            let info = self.create_pointer_emulation_info(rvsdg, region, pointer_origin);
-
-            self.pointer_emulation_info
-                .insert((region, pointer_origin), info);
-        }
-
-        self.pointer_emulation_info
-            .get(&(region, pointer_origin))
-            .unwrap()
-    }
-
-    fn create_pointer_emulation_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        region: Region,
-        pointer_origin: ValueOrigin,
-    ) -> PointerEmulationInfo {
-        use NodeKind::*;
-        use SimpleNode::*;
-
-        match pointer_origin {
-            ValueOrigin::Argument(arg) => self.create_argument_info(rvsdg, region, arg),
-            ValueOrigin::Output { producer, output } => match rvsdg[producer].kind() {
-                Switch(_) => self.create_switch_output_info(rvsdg, producer, output),
-                Loop(_) => self.create_loop_output_info(rvsdg, producer, output),
-                Simple(OpFieldPtr(_)) => self.create_field_ptr_info(rvsdg, producer),
-                Simple(OpElementPtr(_)) => self.create_element_ptr_info(rvsdg, producer),
-                Simple(OpAlloca(_)) => self.create_alloca_info(rvsdg, producer),
-                Simple(ConstFallback(_)) => self.create_fallback_info(rvsdg, producer),
-                Simple(OpOffsetSlice(_)) => self.create_offset_slice_info(rvsdg, producer),
-                Simple(OpLoad(_)) => panic!(
-                    "cannot emulate a pointer for which the access chain information cannot be \
-                    tracked through value-flow"
-                ),
-                _ => unreachable!("node kind cannot output a value of a pointer type"),
-            },
-        }
-    }
-
-    fn create_argument_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        region: Region,
-        argument: u32,
-    ) -> PointerEmulationInfo {
-        let owner = rvsdg[region].owner();
-
-        match rvsdg[owner].kind() {
-            NodeKind::Switch(_) => self.create_switch_argument_info(rvsdg, owner, argument),
-            NodeKind::Loop(_) => self.create_loop_argument_info(rvsdg, owner, argument),
-            NodeKind::Function(_) => {
-                let pointer_ty = rvsdg[region].value_arguments()[argument as usize].ty;
-
-                PointerEmulationInfo {
-                    pointer_ty,
-                    emulation_root: LeafNode {
-                        root_pointer: ValueOrigin::Argument(argument),
-                        access_chain: vec![],
-                    }
-                    .into(),
-                }
-            }
-            _ => unreachable!("node kind cannot own a region"),
-        }
-    }
-
-    fn create_switch_argument_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        switch_node: Node,
-        argument: u32,
-    ) -> PointerEmulationInfo {
-        fn resolve_inner_origin(
-            rvsdg: &mut Rvsdg,
-            switch_node: Node,
-            outer_origin: ValueOrigin,
-        ) -> ValueOrigin {
-            for (i, input) in rvsdg[switch_node].value_inputs()[1..].iter().enumerate() {
-                if input.origin == outer_origin {
-                    return ValueOrigin::Argument(i as u32);
-                }
-            }
-
-            let region = rvsdg[switch_node].region();
-            let input_count = rvsdg[switch_node].value_inputs().len() as u32;
-            let argument_count = input_count - 1;
-            let ty = rvsdg.value_origin_ty(region, outer_origin);
-
-            rvsdg.add_switch_input(
-                switch_node,
-                ValueInput {
-                    ty,
-                    origin: outer_origin,
-                },
-            );
-
-            ValueOrigin::Argument(argument_count)
-        }
-
-        let input = argument + 1;
-        let outer_region = rvsdg[switch_node].region();
-        let switch_data = rvsdg[switch_node].expect_switch();
-        let origin = switch_data.value_inputs()[input as usize].origin;
-        let mut info = self
-            .resolve_pointer_emulation_info(rvsdg, outer_region, origin)
-            .clone();
-
-        info.emulation_root
-            .visit_value_origins_mut(&mut |outer_origin| {
-                *outer_origin = resolve_inner_origin(rvsdg, switch_node, *outer_origin);
-            });
-
-        info
-    }
-
-    fn create_loop_argument_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        loop_node: Node,
-        argument: u32,
-    ) -> PointerEmulationInfo {
-        fn resolve_inner_origin(
-            rvsdg: &mut Rvsdg,
-            loop_node: Node,
-            outer_origin: ValueOrigin,
-        ) -> ValueOrigin {
-            for (i, input) in rvsdg[loop_node].value_inputs().iter().enumerate() {
-                if input.origin == outer_origin {
-                    return ValueOrigin::Argument(i as u32);
-                }
-            }
-
-            let region = rvsdg[loop_node].region();
-            let loop_region = rvsdg[loop_node].expect_loop().loop_region();
-
-            // The index for the new input/argument that we'll add is the count before adding.
-            let argument = rvsdg[loop_node].value_inputs().len() as u32;
-            // The corresponding result index is 1 greater than the argument index.
-            let result = argument + 1;
-            let ty = rvsdg.value_origin_ty(region, outer_origin);
-
-            rvsdg.add_loop_input(
-                loop_node,
-                ValueInput {
-                    ty,
-                    origin: outer_origin,
-                },
-            );
-
-            // Connect the new result to the new argument to ensure the value is available on all
-            // loop iterations, not just the first iteration
-            rvsdg.reconnect_region_result(loop_region, result, ValueOrigin::Argument(argument));
-
-            ValueOrigin::Argument(argument)
-        }
-
-        let input = argument;
-        let outer_region = rvsdg[loop_node].region();
-        let loop_data = rvsdg[loop_node].expect_loop();
-        let origin = loop_data.value_inputs()[input as usize].origin;
-        let mut info = self
-            .resolve_pointer_emulation_info(rvsdg, outer_region, origin)
-            .clone();
-
-        info.emulation_root
-            .visit_value_origins_mut(&mut |outer_origin| {
-                *outer_origin = resolve_inner_origin(rvsdg, loop_node, *outer_origin);
-            });
-
-        info
-    }
-
-    fn create_switch_output_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        switch_node: Node,
-        output: u32,
-    ) -> PointerEmulationInfo {
-        // Helper function to find or create a non-pointer value origin outside the switch node that
-        // represents the same value as the given `inner_origin` inside the switch node
-        fn resolve_non_ptr_outer_origin(
-            rvsdg: &mut Rvsdg,
-            switch_node: Node,
-            branch: Region,
-            inner_origin: ValueOrigin,
-        ) -> ValueOrigin {
-            // First, check if the inner value origin connects directly to a branch argument and, if
-            // so, use the origin of the corresponding input as the outer origin.
-            if let ValueOrigin::Argument(argument) = inner_origin {
-                // The argument's corresponding input is at an index 1 greater than the argument's
-                // index, as the first input to a switch node is the branch selector predicate.
-                let input = argument + 1;
-
-                return rvsdg[switch_node].value_inputs()[input as usize].origin;
-            }
-
-            // Next, check if the inner value origin is already connected to a region result and, if
-            // so, use the corresponding output as the outer origin
-            for (i, input) in rvsdg[branch].value_results().iter().enumerate() {
-                if input.origin == inner_origin {
-                    return ValueOrigin::Output {
-                        producer: switch_node,
-                        output: i as u32,
-                    };
-                }
-            }
-
-            let inner_origin_ty = rvsdg.value_origin_ty(branch, inner_origin);
-
-            // Next, try to find a result of the correct type that is currently connected to a
-            // ConstFallback node. A fallback node indicates that any value of the correct type is
-            // valid, we'll claim it and replace it with our value. We don't do this for "predicate"
-            // type values; since we intend to normalize these later, they need more than just type
-            // compatibility, and we conservatively assume such outputs can never be reused.
-            if inner_origin_ty != TY_PREDICATE {
-                let result_count = rvsdg[branch].value_results().len();
-
-                for result in 0..result_count {
-                    let result_input = rvsdg[branch].value_results()[result];
-
-                    if result_input.ty == rvsdg.value_origin_ty(branch, inner_origin)
-                        && let ValueOrigin::Output {
-                            producer,
-                            output: 0,
-                        } = result_input.origin
-                        && rvsdg[producer].is_const_fallback()
-                    {
-                        rvsdg.reconnect_region_result(branch, result as u32, inner_origin);
-
-                        return ValueOrigin::Output {
-                            producer: switch_node,
-                            output: result as u32,
-                        };
-                    }
-                }
-            }
-
-            // If we reach this point, then apparently we don't already have an appropriate output
-            // available, so we'll create a new one. We'll connect the corresponding result for our
-            // current branch to our inner_origin. For all other branches we'll connect a fallback
-            // node to the result; if we later need emulation values in those branches, we might be
-            // able to reuse such a result.
-            let output = rvsdg.add_switch_output(switch_node, inner_origin_ty);
-            let branch_count = rvsdg[switch_node].expect_switch().branches().len();
-            for i in 0..branch_count {
-                let b = rvsdg[switch_node].expect_switch().branches()[i];
-
-                let origin = if b == branch {
-                    inner_origin
-                } else {
-                    let fallback_node = rvsdg.add_const_fallback(b, inner_origin_ty);
-
-                    ValueOrigin::Output {
-                        producer: fallback_node,
-                        output: 0,
-                    }
-                };
-
-                rvsdg.reconnect_region_result(b, output, origin);
-            }
-
-            ValueOrigin::Output {
-                producer: switch_node,
-                output,
-            }
-        }
-
-        // Helper function to find or create a pointer value origin outside the switch node that
-        // represents the same value as the given `inner_origin` inside the switch node
-        fn resolve_ptr_outer_origin(
-            rvsdg: &mut Rvsdg,
-            switch_node: Node,
-            inner_origin: ValueOrigin,
-        ) -> ValueOrigin {
-            // Originating pointer values must already be available outside the switch node, as
-            // an originating pointer value may not outlive its region. (We don't currently enforce
-            // this in SLIR, but all pointer values derive from Rust references, and the Rust
-            // borrow checker will enforce this for us.) Therefore, the `inner_origin` must be an
-            // argument origin, and we'll resolve the outer origin as the origin of the argument's
-            // corresponding input.
-
-            let ValueOrigin::Argument(argument) = inner_origin else {
-                panic!("originating pointer value must originate outside the switch region")
-            };
-
-            // The argument's corresponding input is at an index 1 greater than the argument's
-            // index, as the first input to a switch node is the branch selector predicate.
-            let input = argument + 1;
-
-            rvsdg[switch_node].value_inputs()[input as usize].origin
-        }
-
-        let switch_data = rvsdg[switch_node].expect_switch();
-        let pointer_ty = switch_data.value_outputs()[output as usize].ty;
-        let branch_count = switch_data.branches().len();
-        let branch_selector = switch_data.branch_selector().origin;
-        let mut branches = Vec::with_capacity(branch_count);
-
-        for i in 0..branch_count {
-            let branch = rvsdg[switch_node].expect_switch().branches()[i];
-            let origin = rvsdg[branch].value_results()[output as usize].origin;
-            let mut info = self
-                .resolve_pointer_emulation_info(rvsdg, branch, origin)
-                .clone();
-
-            info.emulation_root
-                .visit_non_ptr_origins_mut(&mut |inner_origin| {
-                    *inner_origin =
-                        resolve_non_ptr_outer_origin(rvsdg, switch_node, branch, *inner_origin);
-                });
-
-            info.emulation_root
-                .visit_ptr_origins_mut(&mut |inner_origin| {
-                    *inner_origin = resolve_ptr_outer_origin(rvsdg, switch_node, *inner_origin);
-                });
-
-            branches.push(info.emulation_root)
-        }
-
-        // Check if all branches produce identical pointer emulations. If all branches do produce
-        // identical pointer emulations, we don't need to create a new branching node to emulate
-        // the switch node's output.
-        if branches.iter().all(|b| b == &branches[0]) {
-            return PointerEmulationInfo {
-                pointer_ty,
-                emulation_root: branches.pop().unwrap(),
-            };
-        }
-
-        let mut branching_node = BranchingNode {
-            branch_selector,
-            branches,
-            child_inputs: Default::default(),
-        };
-
-        PointerEmulationInfo {
-            pointer_ty,
-            emulation_root: branching_node.into(),
-        }
-    }
-
-    fn create_loop_output_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        loop_node: Node,
-        output: u32,
-    ) -> PointerEmulationInfo {
-        // Helper function to find or create a non-pointer value origin outside the loop node that
-        // represents the same value as the given `inner_origin` inside the loop node
-        fn resolve_non_ptr_outer_origin(
-            rvsdg: &mut Rvsdg,
-            loop_node: Node,
-            loop_region: Region,
-            inner_origin: ValueOrigin,
-        ) -> ValueOrigin {
-            // First check if the inner value origin is already connected to a region result and, if
-            // available, use the corresponding output as the outer origin
-            for (i, input) in rvsdg[loop_region].value_results()[1..].iter().enumerate() {
-                if input.origin == inner_origin {
-                    return ValueOrigin::Output {
-                        producer: loop_node,
-                        output: i as u32,
-                    };
-                }
-            }
-
-            // The value origin is not available outside the loop, add a new loop value to make it
-            // available. We'll have to provide an input value (that will be unused), so we'll
-            // create a new "fallback" value.
-
-            let outer_region = rvsdg[loop_node].region();
-            let ty = rvsdg.value_origin_ty(outer_region, inner_origin);
-            let input_value = rvsdg.add_const_fallback(outer_region, ty);
-            let output = rvsdg[loop_node].value_inputs().len() as u32;
-            let result = output + 1;
-
-            rvsdg.add_loop_input(loop_node, ValueInput::output(ty, input_value, 0));
-            rvsdg.reconnect_region_result(loop_region, result, inner_origin);
-
-            ValueOrigin::Output {
-                producer: loop_node,
-                output,
-            }
-        }
-
-        // Helper function to find or create a pointer value origin outside the loop node that
-        // represents the same value as the given `inner_origin` inside the loop node
-        fn resolve_ptr_outer_origin(
-            rvsdg: &mut Rvsdg,
-            loop_node: Node,
-            inner_origin: ValueOrigin,
-        ) -> ValueOrigin {
-            // Originating pointer values must already be available outside the loop region, as
-            // an originating pointer value may not outlive its region. (We don't currently enforce
-            // this in SLIR, but all pointer values derive from Rust references, and the Rust
-            // borrow checker will enforce this for us.) Therefore, the `inner_origin` must be an
-            // argument origin, and we'll resolve the outer origin as the origin of the argument's
-            // corresponding input.
-
-            let ValueOrigin::Argument(argument) = inner_origin else {
-                panic!("originating pointer value must originate outside the loop region")
-            };
-
-            rvsdg[loop_node].value_inputs()[argument as usize].origin
-        }
-
-        let loop_region = rvsdg[loop_node].expect_loop().loop_region();
-        let result = output + 1;
-        let origin = rvsdg[loop_region].value_results()[result as usize].origin;
-        let mut info = self
-            .resolve_pointer_emulation_info(rvsdg, loop_region, origin)
-            .clone();
-
-        info.emulation_root
-            .visit_non_ptr_origins_mut(&mut |inner_origin| {
-                *inner_origin =
-                    resolve_non_ptr_outer_origin(rvsdg, loop_node, loop_region, *inner_origin);
-            });
-
-        info.emulation_root
-            .visit_ptr_origins_mut(&mut |inner_origin| {
-                *inner_origin = resolve_ptr_outer_origin(rvsdg, loop_node, *inner_origin);
-            });
-
-        info
-    }
-
-    fn create_field_ptr_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        op_field_ptr: Node,
-    ) -> PointerEmulationInfo {
-        let region = rvsdg[op_field_ptr].region();
-        let field_ptr = rvsdg[op_field_ptr].expect_op_field_ptr();
-        let pointer_ty = field_ptr.value_output().ty;
-        let ptr_origin = field_ptr.ptr_input().origin;
-        let access = Access::Field(field_ptr.field_index());
-
-        let mut info = self
-            .resolve_pointer_emulation_info(rvsdg, region, ptr_origin)
-            .clone();
-
-        info.emulation_root.visit_leaves_mut(&mut |leaf| {
-            leaf.access_chain.push(access);
-        });
-        info.pointer_ty = pointer_ty;
-
-        info
-    }
-
-    fn create_element_ptr_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        op_element_ptr: Node,
-    ) -> PointerEmulationInfo {
-        let region = rvsdg[op_element_ptr].region();
-        let element_ptr = rvsdg[op_element_ptr].expect_op_element_ptr();
-        let pointer_ty = element_ptr.value_output().ty;
-        let ptr_origin = element_ptr.ptr_input().origin;
-        let index_origin = element_ptr.index_input().origin;
-        let access = Access::from_element_origin(rvsdg, index_origin);
-
-        let mut info = self
-            .resolve_pointer_emulation_info(rvsdg, region, ptr_origin)
-            .clone();
-
-        info.emulation_root.visit_leaves_mut(&mut |leaf| {
-            leaf.access_chain.push(access);
-        });
-        info.pointer_ty = pointer_ty;
-
-        info
-    }
-
-    fn create_alloca_info(&mut self, rvsdg: &Rvsdg, op_alloca: Node) -> PointerEmulationInfo {
-        let emulation_root = LeafNode {
-            root_pointer: ValueOrigin::Output {
-                producer: op_alloca,
-                output: 0,
-            },
-            access_chain: vec![],
-        };
-
-        PointerEmulationInfo {
-            pointer_ty: rvsdg[op_alloca].expect_op_alloca().value_output().ty,
-            emulation_root: emulation_root.into(),
-        }
-    }
-
-    fn create_fallback_info(
-        &mut self,
-        rvsdg: &Rvsdg,
-        const_fallback: Node,
-    ) -> PointerEmulationInfo {
-        let emulation_root = LeafNode {
-            root_pointer: ValueOrigin::Output {
-                producer: const_fallback,
-                output: 0,
-            },
-            access_chain: vec![],
-        };
-
-        PointerEmulationInfo {
-            pointer_ty: rvsdg[const_fallback].expect_const_fallback().ty(),
-            emulation_root: emulation_root.into(),
-        }
-    }
-
-    fn create_offset_slice_info(
-        &mut self,
-        rvsdg: &mut Rvsdg,
-        op_offset_slice: Node,
-    ) -> PointerEmulationInfo {
-        // We run the offset-slice-elaboration pass before we run any variable pointer emulation
-        // transforms. After offset-slice-elaboration, the refinement of the pointer itself is no
-        // longer done by the OpOffsetSlice node anymore; instead, it happens at the next
-        // OpElementPtr node, which now already incorporates the additional offset in its
-        // `index_input`. We therefore don't need to record the OpOffsetSlice into the
-        // PointerEmulationInfo here, we simply pass forward the PointerEmulationInfo for the
-        // OpOffsetSlice's `ptr_input`.
-
-        let region = rvsdg[op_offset_slice].region();
-        let offset_slice = rvsdg[op_offset_slice].expect_op_offset_slice();
-        let ptr_origin = offset_slice.ptr_input().origin;
-
-        self.resolve_pointer_emulation_info(rvsdg, region, ptr_origin)
-            .clone()
+        self.reconstruction_context.clear();
     }
 }
 
@@ -1000,12 +279,24 @@ impl<'a, F> Emulator<'a, F>
 where
     F: Fn(&mut Rvsdg, Region, ValueInput, &[ValueInput], StateOrigin) -> Node,
 {
-    fn emulate(&mut self, root_node: &EmulationTreeNode) -> Node {
+    fn emulate(&mut self, root_node: PointerReconstructionNode) -> Node {
         match root_node {
-            EmulationTreeNode::Branching(node) => {
-                self.visit_branching_node(self.outer_region, node, None)
+            PointerReconstructionNode::Branching(mut node) => {
+                node.propagate_sub_tree_inputs(|leaf_node, input_set| {
+                    input_set.insert(leaf_node.root_pointer.origin);
+
+                    for access in &leaf_node.access_chain {
+                        if let &Access::DynamicElement(index_origin) = access {
+                            input_set.insert(index_origin);
+                        }
+                    }
+                });
+
+                self.visit_branching_node(self.outer_region, &node, None)
             }
-            EmulationTreeNode::Leaf(node) => self.visit_leaf_node(self.outer_region, node, None),
+            PointerReconstructionNode::Leaf(node) => {
+                self.visit_leaf_node(self.outer_region, &node, None)
+            }
         }
     }
 
@@ -1027,13 +318,13 @@ where
             }
         };
 
-        let mut value_inputs = Vec::with_capacity(branching_node.child_inputs().len() + 1);
+        let mut value_inputs = Vec::with_capacity(branching_node.sub_tree_inputs.len() + 1);
 
         // Connect the first input to the branch selector predicate.
         value_inputs.push(resolve_input(branching_node.branch_selector, TY_PREDICATE));
 
         // Connect inputs for the emulation values required by the branching node's child nodes.
-        for child_input in branching_node.child_inputs().iter().copied() {
+        for child_input in branching_node.sub_tree_inputs.iter().copied() {
             let ty = self.rvsdg.value_origin_ty(self.outer_region, child_input);
 
             value_inputs.push(resolve_input(child_input, ty));
@@ -1084,11 +375,11 @@ where
             let branch = self.rvsdg.add_switch_branch(switch_node);
 
             let node = match child {
-                EmulationTreeNode::Branching(node) => {
-                    self.visit_branching_node(branch, node, Some(branching_node.child_inputs()))
+                PointerReconstructionNode::Branching(node) => {
+                    self.visit_branching_node(branch, node, Some(&branching_node.sub_tree_inputs))
                 }
-                EmulationTreeNode::Leaf(node) => {
-                    self.visit_leaf_node(branch, node, Some(branching_node.child_inputs()))
+                PointerReconstructionNode::Leaf(node) => {
+                    self.visit_leaf_node(branch, node, Some(&branching_node.sub_tree_inputs))
                 }
             };
 
@@ -1125,10 +416,8 @@ where
             }
         };
 
-        let ptr_ty = self
-            .rvsdg
-            .value_origin_ty(self.outer_region, leaf_node.root_pointer);
-        let ptr_input = resolve_input(leaf_node.root_pointer, ptr_ty);
+        let ptr_ty = leaf_node.root_pointer.ty;
+        let ptr_input = resolve_input(leaf_node.root_pointer.origin, ptr_ty);
 
         let ptr_input = if leaf_node.access_chain.is_empty() {
             ptr_input

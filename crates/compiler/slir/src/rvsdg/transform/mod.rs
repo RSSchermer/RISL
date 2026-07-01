@@ -20,6 +20,7 @@ pub mod memory_transform;
 pub mod node_reduction;
 pub mod offset_slice_elaboration;
 pub mod offset_slice_replacement;
+pub mod pointer_reconstruction;
 pub mod pred_to_case_extraction;
 pub mod pred_to_case_to_pred_merging;
 pub mod proxy_node_elimination;
@@ -31,6 +32,7 @@ pub mod switch_arg_reduction;
 pub mod switch_merging;
 pub mod switch_passthrough_elimination;
 pub mod switchify_pred_to_case;
+pub mod variable_loop_pointer_normalization;
 pub mod variable_pointer_emulation;
 
 use crate::Module;

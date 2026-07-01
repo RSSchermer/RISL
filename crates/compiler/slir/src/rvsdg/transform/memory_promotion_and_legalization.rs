@@ -199,6 +199,28 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
         self.visited.insert((region, origin))
     }
 
+    // fn visit_region_argument(&mut self, rvsdg: &Rvsdg, region: Region, argument: u32) {
+    //     use NodeKind::*;
+    //
+    //     let owner = rvsdg[region].owner();
+    //
+    //     if matches!(rvsdg[owner].kind(), Loop(_)) {
+    //         let result = argument + 1;
+    //         let result_origin = rvsdg[region].value_results()[result as usize].origin;
+    //
+    //         if result_origin.is_placeholder() {
+    //             todo!()
+    //         } else if result_origin != ValueOrigin::Argument(argument) {
+    //             // If a pointer-type loop-value is not loop-invariant (the result does not originate
+    //             // directly from the corresponding argument), then it's a variable pointer, and we
+    //             // must emulate it.
+    //             self.needs_emulation = true;
+    //         }
+    //     }
+    //
+    //     visit::reverse_value_flow::visit_region_argument(self, rvsdg, region, argument);
+    // }
+
     fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, output: u32) {
         use NodeKind::*;
         use SimpleNode::*;
