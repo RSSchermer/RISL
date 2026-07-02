@@ -15,6 +15,7 @@ pub mod function_inlining;
 pub mod identical_branch_elimination;
 pub mod invalid_ptr_replacement;
 pub mod loop_passthrough_elimination;
+pub mod loop_pointer_normalization;
 pub mod memory_promotion_and_legalization;
 pub mod memory_transform;
 pub mod node_reduction;
@@ -32,7 +33,6 @@ pub mod switch_arg_reduction;
 pub mod switch_merging;
 pub mod switch_passthrough_elimination;
 pub mod switchify_pred_to_case;
-pub mod loop_pointer_normalization;
 pub mod variable_pointer_emulation;
 
 use crate::Module;
