@@ -32,7 +32,7 @@ pub mod switch_arg_reduction;
 pub mod switch_merging;
 pub mod switch_passthrough_elimination;
 pub mod switchify_pred_to_case;
-pub mod variable_loop_pointer_normalization;
+pub mod loop_pointer_normalization;
 pub mod variable_pointer_emulation;
 
 use crate::Module;

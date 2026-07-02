@@ -1,27 +1,27 @@
-//! Rewrites pointer-type loop-values that are not loop-invariant into loop-invariant loop-values
-//! and adapter sub-graphs.
+//! Rewrites pointer-type loop-values that are not loop-invariant into loop-invariant loop-values.
 //!
 //! This is a preparatory transformation for [variable_pointer_emulation]. Emulating operations
 //! on variable pointers that originate from loop-values comes with additional complexities. The
 //! core problem is that the current pointer-value can depend on the previous iteration's value,
-//! creating a recursive dependency which the simple [PointerEmulationInfo] descriptions produced
-//! by [variable_pointer_emulation] cannot directly represent. Rather than increasing the complexity
-//! of the pointer-emulation algorithm, we instead opt to first rewrite variable pointer-type
-//! loop-values into loop-invariant loop-values and adapter sub-graphs.
+//! creating a recursive dependency which the simple [PointerReconstructionInfo] descriptions
+//! cannot directly represent. Rather than increasing the complexity of the pointer-emulation
+//! algorithm, we instead opt to first rewrite variable pointer-type loop-values into loop-invariant
+//! loop-values first.
 //!
 //! There are two key observations/constraints that make this transform possible:
 //!
 //! 1. A variable pointer-type loop-value cannot be iteratively "self-refining". "Refining" here
-//!    refers to the [OpElementPtr] and [OpFieldPtr] operations, which we collectively refer to as
-//!    "pointer-refining" operations ([OpVariantPtr] is also a pointer-refining operation, but all
-//!    [OpVariantPtr] nodes will have been eliminated by an earlier transform and are therefore not
-//!    relevant here). Note that this is not a limitation imposed by this transform; it naturally
-//!    follows from the type constraints of the SLIR IR. A loop-value's argument and result both
-//!    represent the same value and thus must have the same type. A pointer-refining operation could
-//!    only produce a value of the same type if the base type is self-recursive: a struct `A`
-//!    contains a field of type `A`, or an array type where the element type is the array type
-//!    itself (recursively). Such self-recursive types are already not allowed in SLIR (they cannot
-//!    be represented in memory unless they are zero-sized, and we don't allow zero-sized types).
+//!    refers to the [OpElementPtr] and [OpFieldPtr] operations, which we'll collectively refer to
+//!    as "pointer-refining" operations ([OpVariantPtr] is also a pointer-refining operation, but
+//!    all [OpVariantPtr] nodes will have been eliminated by an earlier transform and are therefore
+//!    not relevant here). Note that this is not a limitation imposed by this transform; it
+//!    naturally follows from the type constraints of the SLIR IR. A loop-value's argument and
+//!    result both represent the same value and thus must have the same type. A pointer-refining
+//!    operation could only produce a value of the same type if the base type is self-recursive: a
+//!    struct `A` contains a field of type `A`, or an array type where the element type is the array
+//!    type itself (recursively). Such self-recursive types are already disallowed in SLIR (they
+//!    cannot be represented in memory unless they are zero-sized, and we don't allow zero-sized
+//!    types).
 //! 2. A pointer may not outlive the scope of the value it points to. This means that all
 //!    pointer-type values that flow to loop-region results must have originated from loop-region
 //!    arguments. Note that such pointer values may be refined inside the loop-region if this does
@@ -34,23 +34,25 @@
 //! a shape may be parameterized by dynamic element index values. Since there is a fixed number of
 //! shapes, we can enumerate them all and assign each shape a unique index. We can turn this index
 //! into a loop-value and use it to select the right shape for the current iteration using a switch
-//! node with a single output the type of which matches the loop-value's type. We insert a copy of
-//! switch node in 2 places:
+//! node with a single output the type of which matches the loop-value's type; we'll refer to such
+//! switch nodes as "shape selectors". To normalize a variable pointer-type loop-value we'll insert
+//! such a shape selector in two places:
 //!
-//! - Inside the loop-region, to represent the pointe value for the current iteration. All users of
-//!   the original variable pointer-type loop-region argument can be reconnected to this switch
-//!   node's output value.
+//! - Inside the loop-region, to represent the pointer value for the current iteration. All users of
+//!   the original variable pointer-type loop-region argument can be reconnected to this shape
+//!   selector's output value.
 //! - In the loop node's outer region ("after" the loop node), to represent the loop-value's output
 //!   for the final iteration. All users of the original variable pointer-type loop-output can be
-//!   reconnected to this switch node's output value.
+//!   reconnected to this shape selector's output value.
 //!
-//! The first shape is always the variable pointer-type loop-value's input value. To collect the
+//! One of the shapes is always the variable pointer-type loop-value's input value. To collect the
 //! other possible shapes, we do a reverse-value-flow analysis starting from the variable
 //! pointer-type loop-value's result. Reverse-value-flow always starts as a single path, but switch
 //! nodes can cause the path to split into many paths (I'm ignoring loop nodes for now, I'll
 //! explain why that's justified later). We only trace the pointer value; we don't trace the
 //! reverse-value-flow of index values used for refining the pointer value. We stop tracing the
-//! pointer value when we reach a loop argument.
+//! pointer value when we reach a loop argument (and per obserservation 2 above, all paths must
+//! reach a loop-region argument).
 //!
 //! If the argument represents a loop-invariant pointer value, then we add a new shape to a set of
 //! possible shapes. If the argument represents a dependency on another variable pointer-type
@@ -58,33 +60,66 @@
 //! loop-value's result. How we treat the variable pointer dependency depends on whether we find a
 //! dependency cycle:
 //!
-//! - If there is no dependency cycle, we first generate the switch nodes for the dependency. We
+//! - If there is no dependency cycle, we first generate the shape selectors for the dependency. We
 //!   then treat the dependency similarly to how we treat a loop-invariant dependency, except in
-//!   that we use the output of the switch nodes as the base pointer for the shape, rather than the
-//!   original pointer-type loop-value.
+//!   that we use the output of the shape selectors as the base pointer for the shape, rather than
+//!   the original pointer-type loop-value.
 //! - If there is a dependency cycle, then we combine all shapes for all loop-values that are part
 //!   of the cycle into a single set, such that we assign each shape a consistent index across all
-//!   loop-values that are part of the cycle. Note we still create separate switch nodes and
-//!   separate shape index loop-values for each loop-value in the cycle.
+//!   loop-values that are part of the cycle. Note we still create separate shape selectors and
+//!   separate shape index loop-values (and access paramater loop-values) for each loop-value in the
+//!   cycle. We'll refer to all loop-values that are part of the same dependency cycle as a
+//!   "dependency group".
 //!
-//! The "adapter" switch nodes we generate are not parameterized only by the shape index; if a shape
-//! is refined with dynamic index values, then these index values also need to be passed into the
-//! switch node so that we can instantiate such shapes. Therefore, if during reverser value-flow
+//! The shape selectors we generate are not parameterized only by the shape index; if a shape is
+//! refined with dynamic index values, then these index values also need to be passed into the
+//! switch node so that we can instantiate such shapes. Therefore, if during reverse value-flow
 //! tracing we encounter a refining operation that uses a dynamic index, we first make sure the
 //! value is available in the loop-region. If the access happens inside a switch node, we make sure
 //! the index value is passed out as a switch output value, recursivily for nested switch nodes,
 //! until we reach the loop-region. When the value is available in the loop-region, we need to
 //! ensure that the value will be available in the next iteration. Therefore, if the value is not
 //! already used by a loop-region result, we add a new loop-value and connect its result to the
-//! index value. The adapter switch node then uses the corresponding loop-region arguments as
+//! index value. The shape selectors then use the corresponding loop-region arguments/outputs as
 //! input values.
 //!
-//! Now that we have created a new set of switch nodes to represent the variable pointer-type
-//! loop-value(s), we have to ensure that at the end of each iteration, each shape index value is
-//! assigned the appropriate index.
+//! Now that we have created the shape selectors to represent the variable pointer-type
+//! loop-value(s), we have to ensure that at the end of each iteration, each shape index result and
+//! its associated access parameter results are assigned the appropriate values. For this we'll
+//! add another structure to the loop-region that we'll refer to as the "shape encoder". We use
+//! [PointerReconstructionInfo] to guide the construction of the shape encoder. This behaves
+//! similarly to the way [variable_pointer_emulation] uses the [PointerReconstructionInfo] to create
+//! emulation programs for load and store operations. However, instead of the leaves emulating a
+//! load of store operation, we'll instead output the appropriate shape index and any dynamic access
+//! parameters used by the shape. How we decide the shape index depends on whether the shape's
+//! originating loop-argument is part of the same dependency group as the current loop-value:
+//!
+//! - If the originating loop-argument is not part of the same dependency group, then we set a
+//!   constant shape index that depends on the position of the shape in the current dependency
+//!   group's shape set. If the shape uses any dynamic index values, then we pass these out as the
+//!   access parameters, in the order they are used to refine the shape. Note that multiple leaves
+//!   may to the same shape.
+//! - If the originating loop-argument is part of the same dependency group, then we set the shape
+//!   index to the shape index loop-value that we've created earlier for the depended-upon
+//!   pointer-type loop-value. We likewise set all access parameter loop-values to the corresponding
+//!   access parameter loop-values for the depended-upon pointer-type loop-value. This works because
+//!   of obeservation 1 (above): if a pointer-type loop-result originates from a circular
+//!   dependency, then there cannot be any pointer refinements along the control-flow path to the
+//!   originating loop-argument, as the circular dependency means that the value would eventually
+//!   flow back onto itself, and any pointer refinements would result in a type violation; the next
+//!   iteration's value for the current loop-value will necessarily be equal to the depended-upon
+//!   loop-value's value in the current iteration. Since we make sure that all loop-values in the
+//!   same dependency group share the exact same shape set with the exact same shape indices, we can
+//!   simply pass the shape index value and the access parameter values forward.
+//!
+//! So far we've only addressed the case of control-flow flowing through switch nodes and have
+//! ignored control-flow through loop nodes. We can handle control-flow through loop nodes simply
+//! by first applying this transform to the relevant loop-values of the inner loop node first.
+//! After applying the transform, the relevant loop-values will be loop-invariant, meaning we do
+//! not need to analyze the control-flow inside the loop node; the value output by the loop node
+//! will be identical to the value input into the loop node.
 //!
 //! [variable_pointer_emulation]: crate::rvsdg::transform::variable_pointer_emulation
-//!
 
 use std::ops::Range;
 
@@ -201,7 +236,7 @@ impl VariableLoopPointerNormalizer {
             }
         }
 
-        // Create the new loop-values we use for cross-iteration pointer serialization. For each
+        // Create the new loop-values we use for cross-iteration pointer encoding. For each
         // variable pointer-type loop-value we'll create one new loop-value to store the shape
         // index. Additionally, if the shape-set for the loop-value contains shapes that use
         // runtime-dynamic index values for pointer refinement, then we'll add one additional
