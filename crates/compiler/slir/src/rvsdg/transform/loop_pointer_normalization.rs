@@ -170,6 +170,7 @@ struct LoopValueInfo {
     shapes: IndexSet<PointerShape>,
     dependencies: FxHashSet<u32>,
     dep_group: Option<usize>,
+    initial_loop_value: u32,
     shape_index_loop_value: u32,
     access_param_loop_values: Range<u32>,
 
@@ -390,6 +391,15 @@ impl VariableLoopPointerNormalizer {
             access_chain: vec![],
         });
 
+        // Add a new loop-value to represent the initial value.
+        let initial_input = rvsdg[self.loop_node].value_inputs()[loop_value as usize];
+        let initial_value = rvsdg.add_loop_input(self.loop_node, initial_input);
+        rvsdg.reconnect_region_result(
+            loop_region,
+            initial_value + 1,
+            ValueOrigin::Argument(initial_value),
+        );
+
         // Before we initialize the loop-value info for our dependencies, add an entry for the
         // current loop-value in the loop-value info map, so that if we encounter a dependency
         // cycle, we will not recurse infinitely.
@@ -401,6 +411,7 @@ impl VariableLoopPointerNormalizer {
                 shapes,
                 dependencies: FxHashSet::default(),
                 dep_group: None,
+                initial_loop_value: initial_value,
                 shape_index_loop_value: 0,
                 access_param_loop_values: Default::default(),
                 shape_selectors: None,
@@ -499,16 +510,18 @@ impl VariableLoopPointerNormalizer {
         let loop_region = rvsdg[self.loop_node].expect_loop().loop_region();
         let inner_selector =
             self.construct_shape_selector(rvsdg, loop_value, loop_region, |loop_value| {
-                if !dep_group.loop_values.contains(&loop_value)
-                    && let Some(info) = self.loop_value_info.get(&loop_value)
-                {
-                    let (inner_selector, _) = info.shape_selectors.expect(
-                        "construction sequencing should ensure this was initialized this earlier",
-                    );
+                if let Some(info) = self.loop_value_info.get(&loop_value) {
+                    if !dep_group.loop_values.contains(&loop_value) {
+                        let (inner_selector, _) = info.shape_selectors.expect(
+                            "construction sequencing should ensure this was initialized this earlier",
+                        );
 
-                    ValueOrigin::Output {
-                        producer: inner_selector,
-                        output: 0,
+                        ValueOrigin::Output {
+                            producer: inner_selector,
+                            output: 0,
+                        }
+                    } else {
+                        ValueOrigin::Argument(info.initial_loop_value)
                     }
                 } else {
                     ValueOrigin::Argument(loop_value)
@@ -520,16 +533,21 @@ impl VariableLoopPointerNormalizer {
         let outer_region = rvsdg[self.loop_node].region();
         let outer_selector =
             self.construct_shape_selector(rvsdg, loop_value, outer_region, |loop_value| {
-                if !dep_group.loop_values.contains(&loop_value)
-                    && let Some(info) = self.loop_value_info.get(&loop_value)
-                {
-                    let (_, outer_selector) = info.shape_selectors.expect(
-                        "construction sequencing should ensure this initialized this earlier",
-                    );
+                if let Some(info) = self.loop_value_info.get(&loop_value) {
+                    if !dep_group.loop_values.contains(&loop_value) {
+                        let (_, outer_selector) = info.shape_selectors.expect(
+                            "construction sequencing should ensure this initialized this earlier",
+                        );
 
-                    ValueOrigin::Output {
-                        producer: outer_selector,
-                        output: 0,
+                        ValueOrigin::Output {
+                            producer: outer_selector,
+                            output: 0,
+                        }
+                    } else {
+                        ValueOrigin::Output {
+                            producer: self.loop_node,
+                            output: info.initial_loop_value,
+                        }
                     }
                 } else {
                     ValueOrigin::Output {
@@ -1102,13 +1120,12 @@ mod tests {
 
         let loop_data = rvsdg[loop_node].expect_loop();
 
-        assert_eq!(loop_data.value_inputs().len(), 4);
-        assert_eq!(loop_data.value_inputs()[3].ty, TY_U32);
+        assert_eq!(loop_data.value_inputs().len(), 5);
 
         let ValueOrigin::Output {
             producer: initial_shape_index,
             output: 0,
-        } = loop_data.value_inputs()[3].origin
+        } = loop_data.value_inputs()[4].origin
         else {
             panic!("the added shape-index loop input should be initialized by a constant")
         };
@@ -1134,6 +1151,9 @@ mod tests {
         };
 
         let inner_selector_data = rvsdg[inner_shape_selector].expect_switch();
+
+        assert_eq!(inner_selector_data.value_inputs().len(), 4);
+
         let ValueOrigin::Output {
             producer: inner_shape_branch_selector,
             output: 0,
@@ -1142,8 +1162,11 @@ mod tests {
             panic!("the inner shape-selector should be driven by a branch selector")
         };
 
-        assert!(rvsdg[inner_shape_branch_selector].is_op_case_to_branch_selector());
-        assert_eq!(inner_selector_data.value_inputs().len(), 4);
+        let inner_shape_branch_selector_data =
+            rvsdg[inner_shape_branch_selector].expect_op_case_to_branch_selector();
+
+        assert_eq!(inner_shape_branch_selector_data.cases(), [0, 1]);
+
         assert_eq!(
             inner_selector_data.value_inputs()[1],
             ValueInput::argument(TY_PTR_U32, 0)
@@ -1154,17 +1177,9 @@ mod tests {
         );
         assert_eq!(
             inner_selector_data.value_inputs()[3],
-            ValueInput::output(TY_PTR_U32, inner_shape_selector, 0)
+            ValueInput::argument(TY_PTR_U32, 3)
         );
-        assert_eq!(inner_selector_data.value_outputs()[0].ty, TY_PTR_U32);
-        assert!(
-            inner_selector_data.value_outputs()[0]
-                .users
-                .contains(&ValueUser::Input {
-                    consumer: inner_store_node,
-                    input: 0,
-                })
-        );
+
         assert_eq!(inner_selector_data.branches().len(), 3);
         assert_eq!(
             rvsdg[inner_selector_data.branches()[0]].value_results()[0].origin,
@@ -1179,9 +1194,20 @@ mod tests {
             ValueOrigin::Argument(2)
         );
 
+        assert_eq!(inner_selector_data.value_outputs()[0].ty, TY_PTR_U32);
+        assert!(
+            inner_selector_data.value_outputs()[0]
+                .users
+                .contains(&ValueUser::Input {
+                    consumer: inner_store_node,
+                    input: 0,
+                })
+        );
+
         // Verify the outer shape selector
 
         let outer_store_data = rvsdg[outer_store_node].expect_op_store();
+
         let ValueOrigin::Output {
             producer: outer_shape_selector,
             output: 0,
@@ -1191,7 +1217,22 @@ mod tests {
         };
 
         let outer_selector_data = rvsdg[outer_shape_selector].expect_switch();
+
         assert_eq!(outer_selector_data.value_inputs().len(), 4);
+
+        let ValueOrigin::Output {
+            producer: outer_shape_branch_selector,
+            output: 0,
+        } = outer_selector_data.value_inputs()[0].origin
+        else {
+            panic!("the outer shape-selector should be driven by a branch selector")
+        };
+
+        let outer_shape_branch_selector_data =
+            rvsdg[outer_shape_branch_selector].expect_op_case_to_branch_selector();
+
+        assert_eq!(outer_shape_branch_selector_data.cases(), [0, 1]);
+
         assert_eq!(
             outer_selector_data.value_inputs()[1],
             ValueInput::output(TY_PTR_U32, loop_node, 0)
@@ -1202,17 +1243,9 @@ mod tests {
         );
         assert_eq!(
             outer_selector_data.value_inputs()[3],
-            ValueInput::output(TY_PTR_U32, outer_shape_selector, 0)
+            ValueInput::output(TY_PTR_U32, loop_node, 3)
         );
-        assert_eq!(outer_selector_data.value_outputs()[0].ty, TY_PTR_U32);
-        assert!(
-            outer_selector_data.value_outputs()[0]
-                .users
-                .contains(&ValueUser::Input {
-                    consumer: outer_store_node,
-                    input: 0,
-                })
-        );
+
         assert_eq!(outer_selector_data.branches().len(), 3);
         assert_eq!(
             rvsdg[outer_selector_data.branches()[0]].value_results()[0].origin,
@@ -1227,12 +1260,22 @@ mod tests {
             ValueOrigin::Argument(2)
         );
 
+        assert_eq!(outer_selector_data.value_outputs()[0].ty, TY_PTR_U32);
+        assert!(
+            outer_selector_data.value_outputs()[0]
+                .users
+                .contains(&ValueUser::Input {
+                    consumer: outer_store_node,
+                    input: 0,
+                })
+        );
+
         // Verify the shape encoder
 
         let ValueOrigin::Output {
             producer: shape_encoder,
             output: 0,
-        } = rvsdg[loop_region].value_results()[4].origin
+        } = rvsdg[loop_region].value_results()[5].origin
         else {
             panic!("the shape-index result should be produced by the shape encoder")
         };
@@ -1247,7 +1290,7 @@ mod tests {
         assert!(
             shape_encoder_data.value_outputs()[0]
                 .users
-                .contains(&ValueUser::Result(4))
+                .contains(&ValueUser::Result(5))
         );
         assert_eq!(shape_encoder_data.branches().len(), 2);
 
