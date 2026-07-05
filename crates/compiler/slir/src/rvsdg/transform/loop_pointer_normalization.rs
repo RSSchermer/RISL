@@ -754,7 +754,7 @@ impl VariableLoopPointerNormalizer {
             .clone()
             .zip(outputs[1..].iter())
         {
-            rvsdg.reconnect_region_result(loop_region, i, *output);
+            rvsdg.reconnect_region_result(loop_region, i + 1, *output);
         }
     }
 }
@@ -1013,8 +1013,8 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueUser};
-    use crate::ty::{TY_DUMMY, TY_PTR_U32, TY_U32};
-    use crate::{FnArg, FnSig, Function, Module, Symbol};
+    use crate::ty::{Int, TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TY_U32, TypeKind};
+    use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     // Note: the order of shapes is not meant to be explicitly defined, as long as the shape
     // selectors and shape encoders are internally consistent. However, writing tests that are
@@ -1322,6 +1322,241 @@ mod tests {
         };
 
         assert_eq!(rvsdg[shape_index_1].expect_const_u32().value(), 1);
+    }
+
+    #[test]
+    fn test_normalize_with_dynamically_refined_variable_pointer() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ty_array_u32 = rvsdg.ty().register(TypeKind::Array {
+            element_ty: TY_U32,
+            count: 10,
+            stride: 4,
+        });
+        let ty_ptr_array_u32 = rvsdg.ty().register(TypeKind::Ptr(ty_array_u32));
+
+        let array_ptr = rvsdg.add_op_alloca(region, ty_array_u32);
+        let initial_index = rvsdg.add_const_u32(region, 0);
+
+        let initial_ptr = rvsdg.add_op_element_ptr(
+            region,
+            ValueInput::output(ty_ptr_array_u32, array_ptr, 0),
+            ValueInput::output(TY_U32, initial_index, 0),
+        );
+
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(ty_ptr_array_u32, array_ptr, 0),
+                ValueInput::output(TY_U32, initial_index, 0),
+                ValueInput::output(TY_PTR_U32, initial_ptr, 0),
+            ],
+            Some(StateOrigin::Argument),
+        );
+
+        let store_val = rvsdg.add_const_u32(loop_region, 42);
+        let inner_store_node = rvsdg.add_op_store(
+            loop_region,
+            ValueInput::argument(TY_PTR_U32, 2),
+            ValueInput::output(TY_U32, store_val, 0),
+            StateOrigin::Argument,
+        );
+
+        let next_ptr = rvsdg.add_op_element_ptr(
+            loop_region,
+            ValueInput::argument(ty_ptr_array_u32, 0),
+            ValueInput::argument(TY_U32, 1),
+        );
+
+        let index_increment = rvsdg.add_const_u32(loop_region, 1);
+        let next_index = rvsdg.add_op_binary(
+            loop_region,
+            BinaryOperator::Add,
+            ValueInput::argument(TY_U32, 1),
+            ValueInput::output(TY_U32, index_increment, 0),
+        );
+
+        let reentry_predicate = rvsdg.add_const_bool(loop_region, false);
+
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: reentry_predicate,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(
+            loop_region,
+            2,
+            ValueOrigin::Output {
+                producer: next_index,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(
+            loop_region,
+            3,
+            ValueOrigin::Output {
+                producer: next_ptr,
+                output: 0,
+            },
+        );
+
+        let mut normalizer = VariableLoopPointerNormalizer::new(&rvsdg, loop_node);
+
+        normalizer.normalize_loop_value(&mut rvsdg, 2);
+
+        let loop_data = rvsdg[loop_node].expect_loop();
+
+        // 3 original, 3 new (initial pointer value, shape index, access param)
+        assert_eq!(loop_data.value_inputs().len(), 6);
+
+        // Verify that the original variable pointer-type loop-value is now invariant
+        assert_eq!(
+            rvsdg[loop_region].value_results()[3].origin,
+            ValueOrigin::Argument(2),
+        );
+
+        // Verify the shape selector
+
+        let store_ptr = rvsdg[inner_store_node].expect_op_store().value_inputs()[0].origin;
+        let ValueOrigin::Output {
+            producer: shape_selector,
+            ..
+        } = store_ptr
+        else {
+            panic!("store_ptr should be an output from the shape selector")
+        };
+
+        let selector_data = rvsdg[shape_selector].expect_switch();
+
+        assert_eq!(
+            selector_data.value_inputs().len(),
+            4,
+            "shape selector should have 4 inputs (selector, array_ptr, initial_ptr, access_param)"
+        );
+
+        let ValueOrigin::Output {
+            producer: branch_selector,
+            ..
+        } = selector_data.value_inputs()[0].origin
+        else {
+            panic!("selector should be driven by a branch selector")
+        };
+
+        assert_eq!(
+            rvsdg[branch_selector]
+                .expect_op_case_to_branch_selector()
+                .value_input()
+                .origin,
+            ValueOrigin::Argument(4),
+        );
+
+        assert_eq!(
+            selector_data.value_inputs()[1],
+            ValueInput::argument(ty_ptr_array_u32, 0)
+        );
+        assert_eq!(
+            selector_data.value_inputs()[2],
+            ValueInput::argument(TY_PTR_U32, 3)
+        );
+        assert_eq!(
+            selector_data.value_inputs()[3],
+            ValueInput::argument(TY_U32, 5)
+        );
+
+        assert_eq!(selector_data.branches().len(), 2,);
+
+        let branch_0 = selector_data.branches()[0];
+        let branch_0_output = rvsdg[branch_0].value_results()[0].origin;
+
+        let ValueOrigin::Output {
+            producer: branch_0_node,
+            ..
+        } = branch_0_output
+        else {
+            panic!("branch 0 should return an output from an OpElementPtr")
+        };
+
+        let element_ptr_0 = rvsdg[branch_0_node].expect_op_element_ptr();
+
+        assert_eq!(
+            element_ptr_0.value_inputs()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            element_ptr_0.value_inputs()[1].origin,
+            ValueOrigin::Argument(2)
+        );
+
+        let branch_1 = selector_data.branches()[1];
+
+        assert_eq!(
+            rvsdg[branch_1].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+
+        // Verify initial pointer value initialization
+        assert_eq!(
+            loop_data.value_inputs()[3].origin,
+            ValueOrigin::Output {
+                producer: initial_ptr,
+                output: 0
+            },
+        );
+
+        // Verify shape index initialization
+        let ValueOrigin::Output {
+            producer: initial_shape_index_node,
+            ..
+        } = loop_data.value_inputs()[4].origin
+        else {
+            panic!("initial shape index should be a constant")
+        };
+        assert_eq!(
+            rvsdg[initial_shape_index_node].expect_const_u32().value(),
+            1,
+        );
+
+        // Verify shape encoding
+
+        let ValueOrigin::Output {
+            producer: encoder_node,
+            ..
+        } = rvsdg[loop_region].value_results()[5].origin
+        else {
+            panic!("shape encoder for v2 should be a node")
+        };
+        assert_eq!(rvsdg[encoder_node].expect_const_u32().value(), 0,);
+
+        assert_eq!(
+            rvsdg[loop_region].value_results()[6].origin,
+            ValueOrigin::Argument(1),
+        );
     }
 
     #[test]
