@@ -131,11 +131,14 @@ impl LoopValueUseAnalyzer {
 
         match owner_data.kind() {
             NodeKind::Switch(_) => self.visit_node_output(rvsdg, owner, result),
-            NodeKind::Loop(_) => {
+            NodeKind::Loop(loop_data) => {
                 if result == 0 {
                     self.used = true;
                 } else {
-                    self.visit_node_output(rvsdg, owner, result - 1)
+                    let output_index = result - 1;
+
+                    self.visit_node_output(rvsdg, owner, output_index);
+                    self.visit_region_argument(rvsdg, loop_data.loop_region(), output_index);
                 }
             }
             NodeKind::Simple(_)
@@ -714,6 +717,62 @@ mod tests {
     }
 
     #[test]
+    fn test_loop_value_use_analyzer_chained_loop_values() {
+        let mut module = Module::new(Symbol::from_ref("m"));
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("m"),
+        };
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let const_val = rvsdg.add_const_u32(region, 0);
+        let val_input0 = ValueInput::output(TY_U32, const_val, 0);
+        let val_input1 = ValueInput::output(TY_U32, const_val, 0);
+        let val_input2 = ValueInput::output(TY_U32, const_val, 0);
+
+        // Create a loop with 3 loop-values.
+        let (loop_node, loop_region) =
+            rvsdg.add_loop(region, vec![val_input0, val_input1, val_input2], None);
+
+        // Inside the loop:
+        // Arg(0) -> Result(2)  (Loop-value 0 flows to Loop-value 1)
+        // Arg(1) -> Result(3)  (Loop-value 1 flows to Loop-value 2)
+        // Arg(2) -> Result(1)  (Loop-value 2 flows to Loop-value 0)
+
+        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(loop_region, 3, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(2));
+
+        // Use the loop's 3rd value-output (Loop-value 2).
+        let _user_node = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, loop_node, 2));
+
+        // Note: NO user for Loop-value 0 and Loop-value 1 outputs.
+
+        let mut analyzer = LoopValueUseAnalyzer::new();
+
+        // Loop-value 2 is obviously used.
+        assert!(analyzer.loop_value_is_used(&rvsdg, loop_node, 2));
+
+        // Loop-value 1 should be used because Arg(1) -> Result(3) -> Output(2)
+        assert!(analyzer.loop_value_is_used(&rvsdg, loop_node, 1));
+
+        // Loop-value 0 should be used because Arg(0) -> Result(2) -> Arg(1) -> Result(3)
+        // -> Output(2)
+        assert!(analyzer.loop_value_is_used(&rvsdg, loop_node, 0));
+    }
+
+    #[test]
     fn test_dead_loop_value_normalizer() {
         let mut module = Module::new(Symbol::from_ref("m"));
         let function = Function {
@@ -820,5 +879,65 @@ mod tests {
         // Verify that proxy nodes for loop-values 1 and 3 no longer have any users.
         assert!(rvsdg[proxy_1].value_outputs()[0].users.is_empty());
         assert!(rvsdg[proxy_3].value_outputs()[0].users.is_empty());
+    }
+
+    #[test]
+    fn test_dead_loop_value_normalizer_chained() {
+        let mut module = Module::new(Symbol::from_ref("m"));
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("m"),
+        };
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let const_val = rvsdg.add_const_u32(region, 0);
+        let val_inputs = vec![ValueInput::output(TY_U32, const_val, 0); 3];
+
+        // Create a loop with 3 loop-values.
+        let (loop_node, loop_region) = rvsdg.add_loop(region, val_inputs, None);
+
+        // Inside the loop:
+        // Arg(0) -> Result(2)  (Loop-value 0 flows to Loop-value 1)
+        // Arg(1) -> Result(3)  (Loop-value 1 flows to Loop-value 2)
+        // Arg(2) -> Result(1)  (Loop-value 2 flows to Loop-value 0)
+
+        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(loop_region, 3, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(2));
+
+        // Use the loop's 3rd value-output (Loop-value 2).
+        let _user_node = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, loop_node, 2));
+
+        // Transform.
+        let mut normalizer = DeadLoopValueNormalizer::new();
+        normalizer.transform_region(&mut rvsdg, region);
+
+        // All loop-values should still be connected as they were, because they are all used.
+        let loop_data = rvsdg[loop_node].expect_loop();
+        let loop_region_after = loop_data.loop_region();
+
+        assert_eq!(
+            rvsdg[loop_region_after].value_results()[1].origin,
+            ValueOrigin::Argument(2)
+        );
+        assert_eq!(
+            rvsdg[loop_region_after].value_results()[2].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[loop_region_after].value_results()[3].origin,
+            ValueOrigin::Argument(1)
+        );
     }
 }
