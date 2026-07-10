@@ -1,4 +1,5 @@
 use crate::rvsdg::Rvsdg;
+use crate::rvsdg::transform::loop_pointer_normalization::LoopPointersNormalizer;
 use crate::rvsdg::transform::memory_promotion_and_legalization::MemoryPromoterLegalizer;
 use crate::rvsdg::transform::proxy_node_elimination::region_eliminate_proxy_nodes;
 use crate::rvsdg::transform::scalar_replacement::AggregateReplacementContext;
@@ -7,6 +8,7 @@ use crate::{Function, Module};
 
 pub struct MemoryTransformer {
     aggregate_replacement_cx: AggregateReplacementContext,
+    loop_pointers_normalizer: LoopPointersNormalizer,
     promoter_legalizer: MemoryPromoterLegalizer,
 }
 
@@ -14,6 +16,7 @@ impl MemoryTransformer {
     pub fn new() -> Self {
         MemoryTransformer {
             aggregate_replacement_cx: AggregateReplacementContext::new(),
+            loop_pointers_normalizer: LoopPointersNormalizer::new(),
             promoter_legalizer: MemoryPromoterLegalizer::new(),
         }
     }
@@ -26,6 +29,9 @@ impl MemoryTransformer {
 
         let mut region_replacement_cx =
             self.aggregate_replacement_cx.for_region(rvsdg, body_region);
+
+        self.loop_pointers_normalizer
+            .collect_jobs(rvsdg, body_region);
 
         let mut iterations = 0;
         const MAX_ITERATIONS: usize = 32;
@@ -46,6 +52,7 @@ impl MemoryTransformer {
                 region_eliminate_proxy_nodes(rvsdg, body_region);
 
                 did_transform |= region_coalesce_store_ops(rvsdg, body_region);
+                did_transform |= self.loop_pointers_normalizer.process_jobs(rvsdg);
 
                 self.promoter_legalizer
                     .promote_and_legalize(rvsdg, body_region);

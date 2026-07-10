@@ -120,17 +120,94 @@
 //! will be identical to the value input into the loop node.
 //!
 //! [variable_pointer_emulation]: crate::rvsdg::transform::variable_pointer_emulation
-
+use std::collections::VecDeque;
+use std::mem;
 use std::ops::Range;
 
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::rvsdg::transform::pointer_reconstruction::{
-    Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionNode,
+    Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionError,
+    PointerReconstructionNode,
 };
-use crate::rvsdg::{Connectivity, Node, Region, Rvsdg, ValueInput, ValueOrigin, ValueOutput};
+use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
+use crate::rvsdg::{
+    Connectivity, Node, NodeKind, Region, Rvsdg, ValueInput, ValueOrigin, ValueOutput, visit,
+};
 use crate::ty::{Int, TY_PREDICATE, TY_U32, Type};
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Job {
+    loop_node: Node,
+    loop_value: u32,
+}
+
+struct JobCollector<'a> {
+    jobs: &'a mut VecDeque<Job>,
+}
+
+impl RegionNodesVisitor for JobCollector<'_> {
+    fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
+        if let NodeKind::Loop(data) = rvsdg[node].kind() {
+            for (i, input) in data.value_inputs().iter().enumerate() {
+                if rvsdg.ty().kind(input.ty).is_ptr() {
+                    self.jobs.push_back(Job {
+                        loop_node: node,
+                        loop_value: i as u32,
+                    });
+                }
+            }
+        }
+
+        visit::region_nodes::visit_node(self, rvsdg, node);
+    }
+}
+
+pub struct LoopPointersNormalizer {
+    queue_current: VecDeque<Job>,
+    queue_next: VecDeque<Job>,
+}
+
+impl LoopPointersNormalizer {
+    pub fn new() -> Self {
+        Self {
+            queue_current: VecDeque::new(),
+            queue_next: VecDeque::new(),
+        }
+    }
+
+    pub fn collect_jobs(&mut self, rvsdg: &Rvsdg, region: Region) {
+        self.queue_current.clear();
+        self.queue_next.clear();
+
+        let mut collector = JobCollector {
+            jobs: &mut self.queue_current,
+        };
+
+        collector.visit_region(rvsdg, region);
+    }
+
+    pub fn process_jobs(&mut self, rvsdg: &mut Rvsdg) -> bool {
+        let mut made_change = false;
+
+        // Queues are ordered from the "outside-in". We want to process loop nodes from the
+        // "inside-out", so pwe process jobs in reverse order.
+        while let Some(job) = self.queue_current.pop_back() {
+            let mut normalizer = VariableLoopPointerNormalizer::new(rvsdg, job.loop_node);
+
+            if let Ok(did_normalize) = normalizer.normalize_loop_value(rvsdg, job.loop_value) {
+                made_change |= did_normalize;
+            } else {
+                self.queue_next.push_front(job);
+            }
+        }
+
+        mem::swap(&mut self.queue_current, &mut self.queue_next);
+
+        made_change
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct PointerShape {
@@ -223,11 +300,30 @@ impl VariableLoopPointerNormalizer {
         }
     }
 
-    pub fn normalize_loop_value(&mut self, rvsdg: &mut Rvsdg, loop_value: u32) {
+    /// Normalizes a pointer-type loop-value and all of its dependencies if applicable.
+    ///
+    /// Does nothing if the loop-value was already loop-invariant.
+    ///
+    /// Return `true` if the pointer-type loop-value was normalized, or `false` if it was already
+    /// loop-invariant.
+    pub fn normalize_loop_value(
+        &mut self,
+        rvsdg: &mut Rvsdg,
+        loop_value: u32,
+    ) -> Result<bool, PointerReconstructionError> {
+        self.reconstruction_context.clear();
+        self.loop_value_info.clear();
+        self.dep_groups.clear();
+
         let outer_region = rvsdg[self.loop_node].region();
         let loop_region = rvsdg[self.loop_node].expect_loop().loop_region();
 
-        self.init_loop_value_info(rvsdg, loop_value);
+        self.init_loop_value_info(rvsdg, loop_value)?;
+
+        if self.loop_value_info.is_empty() {
+            return Ok(false);
+        }
+
         self.init_dep_groups();
 
         // Each loop-value in the analysis set should now be assigned to exactly one dependency
@@ -342,12 +438,18 @@ impl VariableLoopPointerNormalizer {
                 ValueOrigin::Argument(*loop_value),
             );
         }
+
+        Ok(true)
     }
 
-    fn init_loop_value_info(&mut self, rvsdg: &mut Rvsdg, loop_value: u32) {
+    fn init_loop_value_info(
+        &mut self,
+        rvsdg: &mut Rvsdg,
+        loop_value: u32,
+    ) -> Result<(), PointerReconstructionError> {
         if self.loop_value_info.contains_key(&loop_value) {
             // We've already initialized the loop-value info for this loop-value.
-            return;
+            return Ok(());
         }
 
         let result_index = loop_value + 1;
@@ -362,14 +464,14 @@ impl VariableLoopPointerNormalizer {
 
         if is_invariant {
             // If the loop-value is already loop-invariant, we don't need to do anything.
-            return;
+            return Ok(());
         }
 
         let reconstruction_info = self.reconstruction_context.resolve_reconstruction_info(
             rvsdg,
             loop_region,
             result.origin,
-        );
+        )?;
 
         let mut shapes = IndexSet::new();
 
@@ -419,7 +521,7 @@ impl VariableLoopPointerNormalizer {
         );
 
         for dependency in &dependencies {
-            self.init_loop_value_info(rvsdg, *dependency);
+            self.init_loop_value_info(rvsdg, *dependency)?;
         }
 
         // Invariant loop-values do not need shape-selectors, and should therefore not be part of
@@ -433,6 +535,8 @@ impl VariableLoopPointerNormalizer {
             .get_mut(&loop_value)
             .expect("should have been inserted above")
             .dependencies = dependencies;
+
+        Ok(())
     }
 
     /// Performs a strongly-connected-components analysis on the loop-value dependency graph to

@@ -157,7 +157,8 @@ impl EmulationContext {
         let ptr_origin = data.ptr_input().origin;
         let info = self
             .reconstruction_context
-            .resolve_reconstruction_info(rvsdg, region, ptr_origin);
+            .resolve_reconstruction_info(rvsdg, region, ptr_origin)
+            .unwrap();
 
         let gen_op_load = |rvsdg: &mut Rvsdg,
                            region: Region,
@@ -205,11 +206,10 @@ impl EmulationContext {
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
         let value_input = *data.value_input();
-        let info = self.reconstruction_context.resolve_reconstruction_info(
-            rvsdg,
-            outer_region,
-            ptr_origin,
-        );
+        let info = self
+            .reconstruction_context
+            .resolve_reconstruction_info(rvsdg, outer_region, ptr_origin)
+            .unwrap();
 
         let gen_op_store = |rvsdg: &mut Rvsdg,
                             region: Region,

@@ -1,5 +1,3 @@
-use std::cell::OnceCell;
-
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
 
@@ -231,8 +229,19 @@ impl PointerReconstructionNode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, thiserror::Error, Debug)]
+pub enum PointerReconstructionError {
+    #[error("the `{0:?}` load operation needs to be promoted to value-flow")]
+    NeedsPromotion(Node),
+    #[error("loop-value `{loop_value}` for loop node `{loop_node:?}` needs to be normalized")]
+    NeedsLoopPointerNormalization { loop_node: Node, loop_value: u32 },
+}
+
+pub type PointerReconstructionResult =
+    Result<PointerReconstructionInfo, PointerReconstructionError>;
+
 pub struct PointerReconstructionContext {
-    pointer_reconstruction_info: FxHashMap<(Region, ValueOrigin), PointerReconstructionInfo>,
+    pointer_reconstruction_info: FxHashMap<(Region, ValueOrigin), PointerReconstructionResult>,
     bounding_region: Option<Region>,
 }
 
@@ -267,7 +276,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         region: Region,
         pointer_origin: ValueOrigin,
-    ) -> &PointerReconstructionInfo {
+    ) -> Result<&PointerReconstructionInfo, PointerReconstructionError> {
         if !self
             .pointer_reconstruction_info
             .contains_key(&(region, pointer_origin))
@@ -281,6 +290,8 @@ impl PointerReconstructionContext {
         self.pointer_reconstruction_info
             .get(&(region, pointer_origin))
             .unwrap()
+            .as_ref()
+            .map_err(|err| *err)
     }
 
     fn create_reconstruction_info(
@@ -288,7 +299,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         region: Region,
         pointer_origin: ValueOrigin,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         use NodeKind::*;
         use SimpleNode::*;
 
@@ -302,10 +313,7 @@ impl PointerReconstructionContext {
                 Simple(OpAlloca(_)) => self.create_alloca_info(rvsdg, producer),
                 Simple(ConstFallback(_)) => self.create_fallback_info(rvsdg, producer),
                 Simple(OpOffsetSlice(_)) => self.create_offset_slice_info(rvsdg, producer),
-                Simple(OpLoad(_)) => panic!(
-                    "cannot reconstruct a pointer for which the access chain information cannot be \
-                    tracked through value-flow"
-                ),
+                Simple(OpLoad(_)) => Err(PointerReconstructionError::NeedsPromotion(producer)),
                 _ => unreachable!("node kind cannot output a value of a pointer type"),
             },
         }
@@ -316,7 +324,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         region: Region,
         argument: u32,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         let owner = rvsdg[region].owner();
         let kind = rvsdg[owner].kind();
 
@@ -327,14 +335,14 @@ impl PointerReconstructionContext {
 
             let pointer_ty = rvsdg[region].value_arguments()[argument as usize].ty;
 
-            return PointerReconstructionInfo {
+            return Ok(PointerReconstructionInfo {
                 pointer_ty,
                 reconstruction_root: LeafNode {
                     root_pointer: ValueInput::argument(pointer_ty, argument),
                     access_chain: vec![],
                 }
                 .into(),
-            };
+            });
         }
 
         match kind {
@@ -349,7 +357,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         switch_node: Node,
         argument: u32,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         fn resolve_inner_origin(
             rvsdg: &mut Rvsdg,
             switch_node: Node,
@@ -382,7 +390,7 @@ impl PointerReconstructionContext {
         let switch_data = rvsdg[switch_node].expect_switch();
         let origin = switch_data.value_inputs()[input as usize].origin;
         let mut info = self
-            .resolve_reconstruction_info(rvsdg, outer_region, origin)
+            .resolve_reconstruction_info(rvsdg, outer_region, origin)?
             .clone();
 
         info.reconstruction_root
@@ -390,7 +398,7 @@ impl PointerReconstructionContext {
                 *outer_origin = resolve_inner_origin(rvsdg, switch_node, *outer_origin);
             });
 
-        info
+        Ok(info)
     }
 
     fn create_loop_argument_info(
@@ -398,7 +406,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         loop_node: Node,
         argument: u32,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         fn resolve_inner_origin(
             rvsdg: &mut Rvsdg,
             loop_node: Node,
@@ -443,15 +451,15 @@ impl PointerReconstructionContext {
         let result_origin = rvsdg[loop_region].value_results()[result as usize].origin;
 
         if result_origin != ValueOrigin::Argument(argument) {
-            panic!(
-                "cannot reconstruct a pointer through a variable loop-value; pointer-type \
-                loop-values must be loop-invariant"
-            );
+            return Err(PointerReconstructionError::NeedsLoopPointerNormalization {
+                loop_node,
+                loop_value: argument,
+            });
         }
 
         let input_origin = loop_data.value_inputs()[input as usize].origin;
         let mut info = self
-            .resolve_reconstruction_info(rvsdg, outer_region, input_origin)
+            .resolve_reconstruction_info(rvsdg, outer_region, input_origin)?
             .clone();
 
         info.reconstruction_root
@@ -459,7 +467,7 @@ impl PointerReconstructionContext {
                 *outer_origin = resolve_inner_origin(rvsdg, loop_node, *outer_origin);
             });
 
-        info
+        Ok(info)
     }
 
     fn create_switch_output_info(
@@ -467,7 +475,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         switch_node: Node,
         output: u32,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         // Helper function to find or create a non-pointer value origin outside the switch node that
         // represents the same value as the given `inner_origin` inside the switch node
         fn resolve_non_ptr_outer_origin(
@@ -592,7 +600,7 @@ impl PointerReconstructionContext {
             let branch = rvsdg[switch_node].expect_switch().branches()[i];
             let origin = rvsdg[branch].value_results()[output as usize].origin;
             let mut info = self
-                .resolve_reconstruction_info(rvsdg, branch, origin)
+                .resolve_reconstruction_info(rvsdg, branch, origin)?
                 .clone();
 
             info.reconstruction_root
@@ -613,10 +621,10 @@ impl PointerReconstructionContext {
         // produce identical pointer reconstructions, we don't need to create a new branching node
         // to reconstruct the switch node's output.
         if branches.iter().all(|b| b == &branches[0]) {
-            return PointerReconstructionInfo {
+            return Ok(PointerReconstructionInfo {
                 pointer_ty,
                 reconstruction_root: branches.pop().unwrap(),
-            };
+            });
         }
 
         let branching_node = BranchingNode {
@@ -625,10 +633,10 @@ impl PointerReconstructionContext {
             sub_tree_inputs: Default::default(),
         };
 
-        PointerReconstructionInfo {
+        Ok(PointerReconstructionInfo {
             pointer_ty,
             reconstruction_root: branching_node.into(),
-        }
+        })
     }
 
     fn create_loop_output_info(
@@ -636,7 +644,7 @@ impl PointerReconstructionContext {
         rvsdg: &mut Rvsdg,
         loop_node: Node,
         output: u32,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         // Helper function to find or create a non-pointer value origin outside the loop node that
         // represents the same value as the given `inner_origin` inside the loop node
         fn resolve_non_ptr_outer_origin(
@@ -709,7 +717,7 @@ impl PointerReconstructionContext {
         }
 
         let mut info = self
-            .resolve_reconstruction_info(rvsdg, loop_region, result_origin)
+            .resolve_reconstruction_info(rvsdg, loop_region, result_origin)?
             .clone();
 
         info.reconstruction_root
@@ -723,14 +731,14 @@ impl PointerReconstructionContext {
                 *inner_origin = resolve_ptr_outer_origin(rvsdg, loop_node, *inner_origin);
             });
 
-        info
+        Ok(info)
     }
 
     fn create_field_ptr_info(
         &mut self,
         rvsdg: &mut Rvsdg,
         op_field_ptr: Node,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         let region = rvsdg[op_field_ptr].region();
         let field_ptr = rvsdg[op_field_ptr].expect_op_field_ptr();
         let pointer_ty = field_ptr.value_output().ty;
@@ -738,7 +746,7 @@ impl PointerReconstructionContext {
         let access = Access::Field(field_ptr.field_index());
 
         let mut info = self
-            .resolve_reconstruction_info(rvsdg, region, ptr_origin)
+            .resolve_reconstruction_info(rvsdg, region, ptr_origin)?
             .clone();
 
         info.reconstruction_root.visit_leaves_mut(&mut |leaf| {
@@ -746,14 +754,14 @@ impl PointerReconstructionContext {
         });
         info.pointer_ty = pointer_ty;
 
-        info
+        Ok(info)
     }
 
     fn create_element_ptr_info(
         &mut self,
         rvsdg: &mut Rvsdg,
         op_element_ptr: Node,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         let region = rvsdg[op_element_ptr].region();
         let element_ptr = rvsdg[op_element_ptr].expect_op_element_ptr();
         let pointer_ty = element_ptr.value_output().ty;
@@ -762,7 +770,7 @@ impl PointerReconstructionContext {
         let access = Access::from_element_origin(rvsdg, index_origin);
 
         let mut info = self
-            .resolve_reconstruction_info(rvsdg, region, ptr_origin)
+            .resolve_reconstruction_info(rvsdg, region, ptr_origin)?
             .clone();
 
         info.reconstruction_root.visit_leaves_mut(&mut |leaf| {
@@ -770,10 +778,14 @@ impl PointerReconstructionContext {
         });
         info.pointer_ty = pointer_ty;
 
-        info
+        Ok(info)
     }
 
-    fn create_alloca_info(&mut self, rvsdg: &Rvsdg, op_alloca: Node) -> PointerReconstructionInfo {
+    fn create_alloca_info(
+        &mut self,
+        rvsdg: &Rvsdg,
+        op_alloca: Node,
+    ) -> PointerReconstructionResult {
         let pointer_ty = rvsdg[op_alloca].expect_op_alloca().value_output().ty;
 
         let reconstruction_root = LeafNode {
@@ -781,17 +793,17 @@ impl PointerReconstructionContext {
             access_chain: vec![],
         };
 
-        PointerReconstructionInfo {
+        Ok(PointerReconstructionInfo {
             pointer_ty,
             reconstruction_root: reconstruction_root.into(),
-        }
+        })
     }
 
     fn create_fallback_info(
         &mut self,
         rvsdg: &Rvsdg,
         const_fallback: Node,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         let pointer_ty = rvsdg[const_fallback].expect_const_fallback().ty();
 
         let reconstruction_root = LeafNode {
@@ -799,17 +811,17 @@ impl PointerReconstructionContext {
             access_chain: vec![],
         };
 
-        PointerReconstructionInfo {
+        Ok(PointerReconstructionInfo {
             pointer_ty,
             reconstruction_root: reconstruction_root.into(),
-        }
+        })
     }
 
     fn create_offset_slice_info(
         &mut self,
         rvsdg: &mut Rvsdg,
         op_offset_slice: Node,
-    ) -> PointerReconstructionInfo {
+    ) -> PointerReconstructionResult {
         // We run the offset-slice-elaboration pass before we run any transforms that involve
         // pointer reconstruction. After offset-slice-elaboration, the refinement of the pointer
         // itself is no longer done by the OpOffsetSlice node anymore; instead, it happens at the
@@ -823,6 +835,6 @@ impl PointerReconstructionContext {
         let ptr_origin = offset_slice.ptr_input().origin;
 
         self.resolve_reconstruction_info(rvsdg, region, ptr_origin)
-            .clone()
+            .cloned()
     }
 }
