@@ -120,8 +120,7 @@
 //! will be identical to the value input into the loop node.
 //!
 //! [variable_pointer_emulation]: crate::rvsdg::transform::variable_pointer_emulation
-use std::collections::VecDeque;
-use std::mem;
+
 use std::ops::Range;
 
 use indexmap::{IndexMap, IndexSet};
@@ -131,81 +130,67 @@ use crate::rvsdg::transform::pointer_reconstruction::{
     Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionError,
     PointerReconstructionNode,
 };
-use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
-use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, ValueInput, ValueOrigin, ValueOutput, visit,
-};
+use crate::rvsdg::{Connectivity, Node, Region, Rvsdg, ValueInput, ValueOrigin, ValueOutput};
 use crate::ty::{Int, TY_PREDICATE, TY_U32, Type};
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct Job {
     loop_node: Node,
     loop_value: u32,
 }
 
-struct JobCollector<'a> {
-    jobs: &'a mut VecDeque<Job>,
+pub struct VariableLoopPointerNormalizer {
+    queue: Vec<Job>,
 }
 
-impl RegionNodesVisitor for JobCollector<'_> {
-    fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
-        if let NodeKind::Loop(data) = rvsdg[node].kind() {
-            for (i, input) in data.value_inputs().iter().enumerate() {
-                if rvsdg.ty().kind(input.ty).is_ptr() {
-                    self.jobs.push_back(Job {
-                        loop_node: node,
-                        loop_value: i as u32,
+impl VariableLoopPointerNormalizer {
+    pub fn new() -> Self {
+        Self { queue: Vec::new() }
+    }
+
+    pub fn normalize_loop_value(&mut self, rvsdg: &mut Rvsdg, loop_node: Node, loop_value: u32) {
+        use PointerReconstructionError::*;
+
+        // Make sure there's nothing in the queue from a previous (failed) run
+        self.queue.clear();
+
+        self.queue.push(Job {
+            loop_node,
+            loop_value,
+        });
+
+        // If the loop-value's value-flow involves a pointer-type variable loop-value in a nested
+        // loop node, then we'll need to ensure we normalize this inner loop node's loop-value
+        // first. We'll use trial-and-error and a job queue to achieve the right order of
+        // operations. This is perhaps slightly wastefull in the sense that we'll have to redo the
+        // pointer reconstruction analysis for the outer loop loop-value(s) every time we fail, but
+        // nested loops should not be a common occurrence (especially in GPU code).
+
+        while let Some(job) = self.queue.pop() {
+            let mut normalizer = NormalizerInternal::new(rvsdg, job.loop_node);
+
+            match normalizer.normalize_loop_value(rvsdg, job.loop_value) {
+                Ok(_) => {
+                    // The loop-value was normalized successfully
+                }
+                Err(NeedsLoopPointerNormalization {
+                    loop_node,
+                    loop_value,
+                }) => {
+                    // First push the current job back onto the stack since we didn't finish it
+                    self.queue.push(job);
+
+                    // Then push the new job onto the stack so that it will be processed first on
+                    // the next iteration
+                    self.queue.push(Job {
+                        loop_node,
+                        loop_value,
                     });
+                }
+                Err(err) => {
+                    panic!("unexpected error: {:?}", err);
                 }
             }
         }
-
-        visit::region_nodes::visit_node(self, rvsdg, node);
-    }
-}
-
-pub struct LoopPointersNormalizer {
-    queue_current: VecDeque<Job>,
-    queue_next: VecDeque<Job>,
-}
-
-impl LoopPointersNormalizer {
-    pub fn new() -> Self {
-        Self {
-            queue_current: VecDeque::new(),
-            queue_next: VecDeque::new(),
-        }
-    }
-
-    pub fn collect_jobs(&mut self, rvsdg: &Rvsdg, region: Region) {
-        self.queue_current.clear();
-        self.queue_next.clear();
-
-        let mut collector = JobCollector {
-            jobs: &mut self.queue_current,
-        };
-
-        collector.visit_region(rvsdg, region);
-    }
-
-    pub fn process_jobs(&mut self, rvsdg: &mut Rvsdg) -> bool {
-        let mut made_change = false;
-
-        // Queues are ordered from the "outside-in". We want to process loop nodes from the
-        // "inside-out", so pwe process jobs in reverse order.
-        while let Some(job) = self.queue_current.pop_back() {
-            let mut normalizer = VariableLoopPointerNormalizer::new(rvsdg, job.loop_node);
-
-            if let Ok(did_normalize) = normalizer.normalize_loop_value(rvsdg, job.loop_value) {
-                made_change |= did_normalize;
-            } else {
-                self.queue_next.push_front(job);
-            }
-        }
-
-        mem::swap(&mut self.queue_current, &mut self.queue_next);
-
-        made_change
     }
 }
 
@@ -281,14 +266,14 @@ fn is_loop_value_invariant(rvsdg: &Rvsdg, loop_region: Region, loop_value: u32) 
     result.origin == ValueOrigin::Argument(loop_value)
 }
 
-pub struct VariableLoopPointerNormalizer {
+pub struct NormalizerInternal {
     loop_node: Node,
     reconstruction_context: PointerReconstructionContext,
     loop_value_info: FxHashMap<u32, LoopValueInfo>,
     dep_groups: Vec<DepGroup>,
 }
 
-impl VariableLoopPointerNormalizer {
+impl NormalizerInternal {
     pub fn new(rvsdg: &Rvsdg, loop_node: Node) -> Self {
         let loop_region = rvsdg[loop_node].expect_loop().loop_region();
 
@@ -1227,9 +1212,9 @@ mod tests {
             StateOrigin::Node(loop_node),
         );
 
-        let mut normalizer = VariableLoopPointerNormalizer::new(&rvsdg, loop_node);
+        let mut normalizer = VariableLoopPointerNormalizer::new();
 
-        normalizer.normalize_loop_value(&mut rvsdg, 2);
+        normalizer.normalize_loop_value(&mut rvsdg, loop_node, 2);
 
         let loop_data = rvsdg[loop_node].expect_loop();
 
@@ -1530,9 +1515,9 @@ mod tests {
             },
         );
 
-        let mut normalizer = VariableLoopPointerNormalizer::new(&rvsdg, loop_node);
+        let mut normalizer = VariableLoopPointerNormalizer::new();
 
-        normalizer.normalize_loop_value(&mut rvsdg, 2);
+        normalizer.normalize_loop_value(&mut rvsdg, loop_node, 2);
 
         let loop_data = rvsdg[loop_node].expect_loop();
 
@@ -1728,10 +1713,10 @@ mod tests {
         rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(1));
         rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(0));
 
-        let mut normalizer = VariableLoopPointerNormalizer::new(&rvsdg, loop_node);
+        let mut normalizer = VariableLoopPointerNormalizer::new();
 
         // Normalizing 0 should also normalize 1 due to a (circular) dependency
-        normalizer.normalize_loop_value(&mut rvsdg, 0);
+        normalizer.normalize_loop_value(&mut rvsdg, loop_node, 0);
 
         let loop_data = rvsdg[loop_node].expect_loop();
 
@@ -1872,5 +1857,288 @@ mod tests {
             rvsdg[loop_region].value_results()[6].origin,
             ValueOrigin::Argument(4)
         );
+    }
+
+    #[test]
+    fn test_normalize_nested_loops() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ptr_0 = rvsdg.add_op_alloca(region, TY_U32);
+        let ptr_1 = rvsdg.add_op_alloca(region, TY_U32);
+
+        // Outer loop
+        let (loop_outer_node, loop_outer_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(TY_PTR_U32, ptr_0, 0),
+                ValueInput::output(TY_PTR_U32, ptr_1, 0),
+            ],
+            Some(StateOrigin::Argument),
+        );
+
+        // Inner loop inside outer loop
+        let (loop_inner_node, loop_inner_region) = rvsdg.add_loop(
+            loop_outer_region,
+            vec![
+                ValueInput::argument(TY_PTR_U32, 0),
+                ValueInput::argument(TY_PTR_U32, 1),
+            ],
+            Some(StateOrigin::Argument),
+        );
+
+        // Inner loop loop values
+        let loop_inner_case = rvsdg.add_const_u32(loop_inner_region, 0);
+        let loop_inner_selector = rvsdg.add_op_case_to_branch_selector(
+            loop_inner_region,
+            ValueInput::output(TY_U32, loop_inner_case, 0),
+            Int::U32,
+            [0],
+        );
+        let loop_inner_switch = rvsdg.add_switch(
+            loop_inner_region,
+            vec![
+                ValueInput::output(TY_PREDICATE, loop_inner_selector, 0),
+                ValueInput::argument(TY_PTR_U32, 0),
+                ValueInput::argument(TY_PTR_U32, 1),
+            ],
+            vec![ValueOutput::new(TY_PTR_U32)],
+            None,
+        );
+        let b0 = rvsdg.add_switch_branch(loop_inner_switch);
+        rvsdg.reconnect_region_result(b0, 0, ValueOrigin::Argument(0));
+        let b1 = rvsdg.add_switch_branch(loop_inner_switch);
+        rvsdg.reconnect_region_result(b1, 0, ValueOrigin::Argument(1));
+
+        let loop_inner_reentry = rvsdg.add_const_bool(loop_inner_region, false);
+        rvsdg.reconnect_region_result(
+            loop_inner_region,
+            0,
+            ValueOrigin::Output {
+                producer: loop_inner_reentry,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(loop_inner_region, 1, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(
+            loop_inner_region,
+            2,
+            ValueOrigin::Output {
+                producer: loop_inner_switch,
+                output: 0,
+            },
+        );
+
+        // Outer loop loop values
+        let loop_outer_reentry = rvsdg.add_const_bool(loop_outer_region, false);
+        rvsdg.reconnect_region_result(
+            loop_outer_region,
+            0,
+            ValueOrigin::Output {
+                producer: loop_outer_reentry,
+                output: 0,
+            },
+        );
+        // Outer loop result for loop value 0 depends on inner loop output 1
+        rvsdg.reconnect_region_result(
+            loop_outer_region,
+            1,
+            ValueOrigin::Output {
+                producer: loop_inner_node,
+                output: 1,
+            },
+        );
+        // Outer loop result for loop value 1 is invariant
+        rvsdg.reconnect_region_result(loop_outer_region, 2, ValueOrigin::Argument(1));
+
+        // Outer use of outer loop output
+        let value_42 = rvsdg.add_const_u32(region, 42);
+        let outer_store_node = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, loop_outer_node, 0),
+            ValueInput::output(TY_U32, value_42, 0),
+            StateOrigin::Node(loop_outer_node),
+        );
+
+        let mut normalizer = VariableLoopPointerNormalizer::new();
+
+        normalizer.normalize_loop_value(&mut rvsdg, loop_outer_node, 0);
+
+        let loop_inner_data = rvsdg[loop_inner_node].expect_loop();
+
+        assert_eq!(loop_inner_data.value_inputs().len(), 4);
+
+        let loop_outer_data = rvsdg[loop_outer_node].expect_loop();
+
+        assert_eq!(loop_outer_data.value_inputs().len(), 4);
+
+        // Verify shape index initialization for inner loop
+        let ValueOrigin::Output {
+            producer: inner_init_shape_index_node,
+            ..
+        } = loop_inner_data.value_inputs()[3].origin
+        else {
+            panic!("inner shape index init should be a constant")
+        };
+        assert_eq!(
+            rvsdg[inner_init_shape_index_node]
+                .expect_const_u32()
+                .value(),
+            1
+        );
+
+        // Verify shape index initialization for outer loop
+        let ValueOrigin::Output {
+            producer: outer_init_shape_index_node,
+            ..
+        } = loop_outer_data.value_inputs()[3].origin
+        else {
+            panic!("outer shape index init should be a constant")
+        };
+        assert_eq!(
+            rvsdg[outer_init_shape_index_node]
+                .expect_const_u32()
+                .value(),
+            0
+        );
+
+        // Verify shape selector inside outer loop
+        let loop_inner_inputs = rvsdg[loop_inner_node].value_inputs();
+        let ValueOrigin::Output {
+            producer: outer_shape_selector,
+            ..
+        } = loop_inner_inputs[0].origin
+        else {
+            panic!("inner loop input 0 should now use the outer shape selector")
+        };
+
+        let outer_selector_data = rvsdg[outer_shape_selector].expect_switch();
+        assert_eq!(outer_selector_data.value_inputs().len(), 3);
+
+        let ValueOrigin::Output {
+            producer: outer_shape_branch_selector,
+            ..
+        } = outer_selector_data.value_inputs()[0].origin
+        else {
+            panic!("outer shape selector should be driven by a branch selector")
+        };
+        assert_eq!(
+            rvsdg[outer_shape_branch_selector]
+                .expect_op_case_to_branch_selector()
+                .value_input()
+                .origin,
+            ValueOrigin::Argument(3)
+        );
+
+        assert_eq!(
+            outer_selector_data.value_inputs()[1],
+            ValueInput::argument(TY_PTR_U32, 2)
+        );
+        assert_eq!(
+            outer_selector_data.value_inputs()[2],
+            ValueInput::argument(TY_PTR_U32, 1)
+        );
+
+        let outer_selector_branches = outer_selector_data.branches();
+
+        assert_eq!(outer_selector_branches.len(), 2);
+
+        let outer_selector_branch_0 = outer_selector_branches[0];
+
+        assert_eq!(
+            rvsdg[outer_selector_branch_0].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+
+        let outer_selector_branch_1 = outer_selector_branches[1];
+
+        assert_eq!(
+            rvsdg[outer_selector_branch_1].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+
+        // Verify shape encoder inside outer loop
+
+        let ValueOrigin::Output {
+            producer: outer_shape_encoder,
+            ..
+        } = rvsdg[loop_outer_region].value_results()[4].origin
+        else {
+            panic!("outer shape index result should be driven by the shape encoder")
+        };
+
+        let outer_encoder_data = rvsdg[outer_shape_encoder].expect_switch();
+
+        // Verify the other inputs to the outer shape encoder
+        assert_eq!(outer_encoder_data.value_inputs().len(), 2);
+
+        // The branch selector for the outer shape encoder is the shape index for the inner loop
+        // value.
+        let ValueOrigin::Output {
+            producer: outer_encoder_branch_selector,
+            ..
+        } = outer_encoder_data.value_inputs()[0].origin
+        else {
+            panic!("outer shape encoder should be driven by a branch selector")
+        };
+        assert_eq!(
+            rvsdg[outer_encoder_branch_selector]
+                .expect_op_case_to_branch_selector()
+                .value_input()
+                .origin,
+            ValueOrigin::Output {
+                producer: loop_inner_node,
+                output: 3
+            }
+        );
+
+        assert_eq!(
+            outer_encoder_data.value_inputs()[1],
+            ValueInput::argument(TY_U32, 3)
+        );
+
+        let outer_encoder_branches = outer_encoder_data.branches();
+
+        assert_eq!(outer_encoder_branches.len(), 2);
+
+        // Encoder branch 0 (for inner shape 0) should output the current outer shape index
+        let outer_encoder_branch_0 = outer_encoder_branches[0];
+
+        assert_eq!(
+            rvsdg[outer_encoder_branch_0].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+
+        // Encoder branch 1 (for inner shape 1) should output outer shape 1
+        let outer_encoder_branch_1 = outer_encoder_branches[1];
+
+        let ValueOrigin::Output {
+            producer: eb1_const,
+            ..
+        } = rvsdg[outer_encoder_branch_1].value_results()[0].origin
+        else {
+            panic!("encoder branch 1 should output a constant")
+        };
+
+        assert_eq!(rvsdg[eb1_const].expect_const_u32().value(), 1);
+
+        // We trust the shape selector after the outer loop is correct if the shape selector inside
+        // the outer loop is correct, as other tests already verify this.
     }
 }

@@ -710,10 +710,10 @@ impl PointerReconstructionContext {
         let result_origin = rvsdg[loop_region].value_results()[result as usize].origin;
 
         if result_origin != ValueOrigin::Argument(argument) {
-            panic!(
-                "cannot reconstruct a pointer through a variable loop-value; pointer-type \
-                loop-values must be loop-invariant"
-            );
+            return Err(PointerReconstructionError::NeedsLoopPointerNormalization {
+                loop_node,
+                loop_value: argument,
+            });
         }
 
         let mut info = self
