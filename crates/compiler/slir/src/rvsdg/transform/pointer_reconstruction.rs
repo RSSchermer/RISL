@@ -241,7 +241,7 @@ pub type PointerReconstructionResult =
     Result<PointerReconstructionInfo, PointerReconstructionError>;
 
 pub struct PointerReconstructionContext {
-    pointer_reconstruction_info: FxHashMap<(Region, ValueOrigin), PointerReconstructionResult>,
+    pointer_reconstruction_info: FxHashMap<(Region, ValueOrigin), PointerReconstructionInfo>,
     bounding_region: Option<Region>,
 }
 
@@ -281,17 +281,16 @@ impl PointerReconstructionContext {
             .pointer_reconstruction_info
             .contains_key(&(region, pointer_origin))
         {
-            let info = self.create_reconstruction_info(rvsdg, region, pointer_origin);
+            let info = self.create_reconstruction_info(rvsdg, region, pointer_origin)?;
 
             self.pointer_reconstruction_info
                 .insert((region, pointer_origin), info);
         }
 
-        self.pointer_reconstruction_info
+        Ok(self
+            .pointer_reconstruction_info
             .get(&(region, pointer_origin))
-            .unwrap()
-            .as_ref()
-            .map_err(|err| *err)
+            .unwrap())
     }
 
     fn create_reconstruction_info(

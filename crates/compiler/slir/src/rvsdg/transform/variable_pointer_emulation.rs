@@ -130,8 +130,10 @@
 use indexmap::IndexSet;
 use smallvec::SmallVec;
 
+use crate::rvsdg::transform::loop_pointer_normalization::VariableLoopPointerNormalizer;
 use crate::rvsdg::transform::pointer_reconstruction::{
-    Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionNode,
+    Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionError,
+    PointerReconstructionInfo, PointerReconstructionNode,
 };
 use crate::rvsdg::{
     Connectivity, Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput,
@@ -140,12 +142,14 @@ use crate::ty::{TY_PREDICATE, TY_U32, Type};
 
 pub struct EmulationContext {
     reconstruction_context: PointerReconstructionContext,
+    loop_pointer_normalizer: VariableLoopPointerNormalizer,
 }
 
 impl EmulationContext {
     pub fn new() -> Self {
         EmulationContext {
             reconstruction_context: PointerReconstructionContext::new(),
+            loop_pointer_normalizer: VariableLoopPointerNormalizer::new(),
         }
     }
 
@@ -155,10 +159,7 @@ impl EmulationContext {
         let output_ty = data.value_output().ty;
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
-        let info = self
-            .reconstruction_context
-            .resolve_reconstruction_info(rvsdg, region, ptr_origin)
-            .unwrap();
+        let info = self.resolve_reconstruction_info(rvsdg, region, ptr_origin);
 
         let gen_op_load = |rvsdg: &mut Rvsdg,
                            region: Region,
@@ -177,7 +178,7 @@ impl EmulationContext {
             additional_values: &[],
         };
 
-        let emulated = emulator.emulate(info.reconstruction_root.clone());
+        let emulated = emulator.emulate(info.reconstruction_root);
 
         // Now that we've constructed a node to emulate the original OpLoad, reconnect all users of
         // its value output to the emulated node's output and remove the original OpLoad.
@@ -206,10 +207,7 @@ impl EmulationContext {
         let state_origin = data.state().unwrap().origin;
         let ptr_origin = data.ptr_input().origin;
         let value_input = *data.value_input();
-        let info = self
-            .reconstruction_context
-            .resolve_reconstruction_info(rvsdg, outer_region, ptr_origin)
-            .unwrap();
+        let info = self.resolve_reconstruction_info(rvsdg, outer_region, ptr_origin);
 
         let gen_op_store = |rvsdg: &mut Rvsdg,
                             region: Region,
@@ -228,13 +226,39 @@ impl EmulationContext {
             additional_values: &[value_input],
         };
 
-        emulator.emulate(info.reconstruction_root.clone());
+        emulator.emulate(info.reconstruction_root);
 
         rvsdg.remove_node(op_store);
     }
 
     pub fn clear(&mut self) {
         self.reconstruction_context.clear();
+    }
+
+    fn resolve_reconstruction_info(
+        &mut self,
+        rvsdg: &mut Rvsdg,
+        region: Region,
+        origin: ValueOrigin,
+    ) -> PointerReconstructionInfo {
+        use PointerReconstructionError::*;
+
+        loop {
+            match self
+                .reconstruction_context
+                .resolve_reconstruction_info(rvsdg, region, origin)
+            {
+                Err(NeedsLoopPointerNormalization {
+                    loop_node,
+                    loop_value,
+                }) => {
+                    self.loop_pointer_normalizer
+                        .normalize_loop_value(rvsdg, loop_node, loop_value);
+                }
+                Err(err) => panic!("unexpected error: {:?}", err),
+                Ok(info) => return info.clone(),
+            }
+        }
     }
 }
 

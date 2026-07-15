@@ -1969,7 +1969,7 @@ mod tests {
 
         // Outer use of outer loop output
         let value_42 = rvsdg.add_const_u32(region, 42);
-        let outer_store_node = rvsdg.add_op_store(
+        rvsdg.add_op_store(
             region,
             ValueInput::output(TY_PTR_U32, loop_outer_node, 0),
             ValueInput::output(TY_U32, value_42, 0),
