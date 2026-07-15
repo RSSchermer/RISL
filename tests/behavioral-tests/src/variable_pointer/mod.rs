@@ -1,2 +1,4 @@
 mod if_else_different_address_spaces;
 mod if_else_same_address_space;
+mod loop_alternating_cycle;
+mod loop_alternating_no_cycle;
