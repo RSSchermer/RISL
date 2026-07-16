@@ -131,13 +131,19 @@ impl PointerAnalyzer {
         region: Region,
         pointer_origin: ValueOrigin,
     ) -> PointerAction {
-        *self
-            .cache
-            .entry((region, pointer_origin))
-            .or_insert_with(|| {
+        if let Some(action) = self.cache.get(&(region, pointer_origin)) {
+            *action
+        } else {
+            let (action, cacheable) =
                 self.visitor
-                    .analyze_pointer_origin(rvsdg, region, pointer_origin)
-            })
+                    .analyze_pointer_origin(rvsdg, region, pointer_origin);
+
+            if cacheable {
+                self.cache.insert((region, pointer_origin), action);
+            }
+
+            action
+        }
     }
 
     fn clear_cache(&mut self) {
@@ -154,6 +160,7 @@ pub struct PointerOriginVisitor {
     can_promote: bool,
     needs_emulation: bool,
     can_emulate: bool,
+    cacheable: bool,
 }
 
 impl PointerOriginVisitor {
@@ -165,6 +172,7 @@ impl PointerOriginVisitor {
             can_promote: true,
             needs_emulation: false,
             can_emulate: true,
+            cacheable: true,
         }
     }
 
@@ -173,16 +181,17 @@ impl PointerOriginVisitor {
         rvsdg: &Rvsdg,
         region: Region,
         pointer_origin: ValueOrigin,
-    ) -> PointerAction {
+    ) -> (PointerAction, bool) {
         self.visited.clear();
         self.promotion_candidate = None;
         self.can_promote = true;
         self.needs_emulation = false;
         self.can_emulate = true;
+        self.cacheable = true;
 
         self.visit_value_origin(rvsdg, region, pointer_origin);
 
-        if self.needs_emulation && self.can_emulate {
+        let action = if self.needs_emulation && self.can_emulate {
             PointerAction::VariablePointerEmulation
         } else if let Some(candidate) = self.promotion_candidate
             && self.can_promote
@@ -190,7 +199,9 @@ impl PointerOriginVisitor {
             PointerAction::Promotion(candidate)
         } else {
             PointerAction::Nothing
-        }
+        };
+
+        (action, self.cacheable)
     }
 }
 
@@ -215,6 +226,13 @@ impl ReverseValueFlowVisitor for PointerOriginVisitor {
                 // directly from the corresponding argument), then it's a variable pointer, and we
                 // must emulate it.
                 self.needs_emulation = true;
+
+                // The emulation of a pointer-type loop-value that is not loop-invariant will
+                // involve a loop_pointer_normalization transform. This will adjust the value-flow
+                // for the loop-argument and the loop-arguments of any other loop-values reachable
+                // from the loop-argument. This means that reanalysis of the loop-argument or any
+                // downstream value-flow should not use a cached value.
+                self.cacheable = false;
             }
         }
 
