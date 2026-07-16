@@ -153,6 +153,8 @@ impl EmulationContext {
         }
     }
 
+    /// Replaces an [OpLoad] node where the input pointer is a variable pointer, with an emulation
+    /// sub-graph that does not use variable pointers.
     pub fn emulate_op_load(&mut self, rvsdg: &mut Rvsdg, op_load: Node) {
         let region = rvsdg[op_load].region();
         let data = rvsdg[op_load].expect_op_load();
@@ -201,6 +203,8 @@ impl EmulationContext {
         rvsdg.remove_node(op_load);
     }
 
+    /// Replaces an [OpStore] node where the input pointer is a variable pointer, with an emulation
+    /// sub-graph that does not use variable pointers.
     pub fn emulate_op_store(&mut self, rvsdg: &mut Rvsdg, op_store: Node) {
         let outer_region = rvsdg[op_store].region();
         let data = rvsdg[op_store].expect_op_store();
