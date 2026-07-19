@@ -202,10 +202,12 @@ impl<'a, V: CodegenObject> OperandRef<V> {
                     };
                 }
                 ValueAbi::ScalarPair(a, b) => {
+                    let (a_layout, b_layout) = layout.for_pair_parts();
+                    
                     let b_offset = a.size(&machine_info).bytes();
 
-                    let a_val = Scalar::read_from_alloc(alloc, 0, a, &layout.field(0));
-                    let b_val = Scalar::read_from_alloc(alloc, b_offset, b, &layout.field(1));
+                    let a_val = Scalar::read_from_alloc(alloc, 0, a, &a_layout);
+                    let b_val = Scalar::read_from_alloc(alloc, b_offset, b, &b_layout);
 
                     let a_val = bx.scalar_to_backend(a_val);
                     let b_val = bx.scalar_to_backend(b_val);
@@ -276,8 +278,7 @@ impl<'a, V: CodegenObject> OperandRef<V> {
     /// For other cases, see `immediate`.
     pub fn immediate_or_packed_pair<Bx: BuilderMethods<'a, Value = V>>(self, bx: &mut Bx) -> V {
         if let OperandValue::Pair(a, b) = self.val {
-            let a_layout = self.layout.field(0);
-            let b_layout = self.layout.field(1);
+            let (a_layout, b_layout) = self.layout.for_pair_parts();
 
             let a_llty = bx.immediate_backend_type(&a_layout);
             let b_llty = bx.immediate_backend_type(&b_layout);

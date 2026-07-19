@@ -238,10 +238,7 @@ fn unpack_scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAnd
         }
     }
 
-    let field_0 = layout.field(0);
-    let field_1 = layout.field(1);
-
-    (field_0, field_1)
+    layout.for_pair_parts()
 }
 
 #[derive(Clone, Copy)]

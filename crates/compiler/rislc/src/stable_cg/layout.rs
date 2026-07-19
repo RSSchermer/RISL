@@ -1,5 +1,7 @@
+use std::assert_matches::assert_matches;
+use std::mem;
 use rustc_middle::bug;
-use rustc_public::abi::{IntegerLength, LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape};
+use rustc_public::abi::{IntegerLength, LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape, FieldsShape};
 use rustc_public::target::{MachineInfo, MachineSize};
 use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
@@ -172,6 +174,26 @@ impl TyAndLayout {
             }
             _ => bug!("invalid variant"),
         }
+    }
+
+    pub fn for_pair_parts(&self) -> (Self, Self) {
+        assert_matches!(self.layout.abi, ValueAbi::ScalarPair(..));
+
+        let mut field_0 = 0;
+        let mut field_1 = 1;
+
+        if let FieldsShape::Arbitrary { offsets } = &self.layout.fields {
+            assert_eq!(offsets.len(), 2);
+
+            if offsets[1] < offsets[0] {
+                mem::swap(&mut field_0, &mut field_1);
+            }
+        }
+
+        let part_0 = self.field(field_0);
+        let part_1 = self.field(field_1);
+
+        (part_0, part_1)
     }
 
     /// If the type is a new-type struct that wraps a scalar or scalar-pair value, unpacks the
