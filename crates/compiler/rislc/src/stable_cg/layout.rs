@@ -1,10 +1,14 @@
 use std::assert_matches::assert_matches;
 use std::mem;
+
 use rustc_middle::bug;
-use rustc_public::abi::{IntegerLength, LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape, FieldsShape};
+use rustc_public::abi::{
+    FieldsShape, IntegerLength, LayoutShape, Primitive, Scalar, ValueAbi, VariantsShape,
+};
 use rustc_public::target::{MachineInfo, MachineSize};
 use rustc_public::ty::{Region, RegionKind, RigidTy, Ty, TyKind, UintTy, VariantIdx};
 use rustc_public_bridge::IndexedVal;
+use smallvec::SmallVec;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TyAndLayout {
@@ -179,19 +183,21 @@ impl TyAndLayout {
     pub fn for_pair_parts(&self) -> (Self, Self) {
         assert_matches!(self.layout.abi, ValueAbi::ScalarPair(..));
 
-        let mut field_0 = 0;
-        let mut field_1 = 1;
+        let memory_indices = self.layout.fields.fields_by_offset_order();
+        let non_zst_indices: SmallVec<[usize; 2]> = memory_indices
+            .iter()
+            .copied()
+            .filter(|&i| self.field(i).layout.size.bytes() != 0)
+            .collect();
 
-        if let FieldsShape::Arbitrary { offsets } = &self.layout.fields {
-            assert_eq!(offsets.len(), 2);
+        assert_eq!(
+            non_zst_indices.len(),
+            2,
+            "scalar-pair must have exactly 2 non-ZST fields"
+        );
 
-            if offsets[1] < offsets[0] {
-                mem::swap(&mut field_0, &mut field_1);
-            }
-        }
-
-        let part_0 = self.field(field_0);
-        let part_1 = self.field(field_1);
+        let part_0 = self.field(non_zst_indices[0]);
+        let part_1 = self.field(non_zst_indices[1]);
 
         (part_0, part_1)
     }

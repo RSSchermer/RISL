@@ -3,6 +3,7 @@ use rustc_public::abi::{FieldsShape, ValueAbi, VariantsShape};
 use rustc_public::mir;
 use rustc_public::mir::Mutability;
 use rustc_public::ty::{Align, RigidTy, Ty, TyKind, VariantIdx};
+use smallvec::SmallVec;
 use tracing::instrument;
 
 use super::operand::OperandValue;
@@ -168,10 +169,36 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
             return self.val.with_type(field);
         }
 
+        let slir_index = if let ValueAbi::ScalarPair(..) = &self.layout.layout.abi {
+            let memory_indices = self.layout.layout.fields.fields_by_offset_order();
+            let non_zst_indices: SmallVec<[usize; 2]> = memory_indices
+                .iter()
+                .copied()
+                .filter(|&i| self.layout.field(i).layout.size.bytes() != 0)
+                .collect();
+
+            if field.layout.size.bytes() == 0 {
+                return self.val.with_type(field);
+            }
+
+            non_zst_indices
+                .iter()
+                .position(|&i| i == ix)
+                .unwrap_or_else(|| {
+                    bug!(
+                        "failed to find non-ZST MIR field {} in ScalarPair layout {:#?}",
+                        ix,
+                        self.layout
+                    )
+                })
+        } else {
+            ix
+        };
+
         let ptr = bx.element_ptr(
             bx.backend_type(&field),
             self.val.llval,
-            &[bx.const_u32(ix as u32)],
+            &[bx.const_u32(slir_index as u32)],
         );
         let val = PlaceValue {
             llval: ptr,

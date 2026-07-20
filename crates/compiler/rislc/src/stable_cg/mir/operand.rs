@@ -8,6 +8,7 @@ use rustc_public::abi::{ValueAbi, VariantsShape};
 use rustc_public::mir;
 use rustc_public::target::MachineInfo;
 use rustc_public::ty::{Align, ConstantKind, MirConst, RigidTy, TyKind};
+use smallvec::SmallVec;
 use tracing::debug;
 
 use super::place::{PlaceRef, PlaceValue};
@@ -203,7 +204,7 @@ impl<'a, V: CodegenObject> OperandRef<V> {
                 }
                 ValueAbi::ScalarPair(a, b) => {
                     let (a_layout, b_layout) = layout.for_pair_parts();
-                    
+
                     let b_offset = a.size(&machine_info).bytes();
 
                     let a_val = Scalar::read_from_alloc(alloc, 0, a, &a_layout);
@@ -346,12 +347,19 @@ impl<'a, V: CodegenObject> OperandRef<V> {
 
             // Extract a scalar component from a pair.
             (OperandValue::Pair(a_llval, b_llval), ValueAbi::ScalarPair(..)) => {
-                let is_first_field = self.layout.layout.fields.fields_by_offset_order()[0] == i;
+                let memory_indices = self.layout.layout.fields.fields_by_offset_order();
+                let non_zst_indices: SmallVec<[usize; 2]> = memory_indices
+                    .iter()
+                    .copied()
+                    .filter(|&i| self.layout.field(i).layout.size.bytes() != 0)
+                    .collect();
 
-                if is_first_field {
+                if non_zst_indices[0] == i {
                     OperandValue::Immediate(a_llval)
-                } else {
+                } else if non_zst_indices[1] == i {
                     OperandValue::Immediate(b_llval)
+                } else {
+                    bug!("a scalar-pair should only have two fields");
                 }
             }
 
@@ -482,13 +490,20 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                     dest = dest.project_field(bx, 0);
                 }
 
+                let memory_indices = dest.layout.layout.fields.fields_by_offset_order();
+                let non_zst_indices: SmallVec<[usize; 2]> = memory_indices
+                    .iter()
+                    .copied()
+                    .filter(|&i| dest.layout.field(i).layout.size.bytes() != 0)
+                    .collect();
+
                 let a_val = bx.from_immediate(a);
-                let a_ptr = dest.project_field(bx, 0);
+                let a_ptr = dest.project_field(bx, non_zst_indices[0]);
 
                 bx.store(a_val, a_ptr.val.llval);
 
                 let b_val = bx.from_immediate(b);
-                let b_ptr = dest.project_field(bx, 1);
+                let b_ptr = dest.project_field(bx, non_zst_indices[1]);
 
                 bx.store(b_val, b_ptr.val.llval);
             }
