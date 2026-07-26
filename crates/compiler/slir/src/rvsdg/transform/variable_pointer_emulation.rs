@@ -334,28 +334,29 @@ where
         branching_node: &BranchingNode,
         input_mapping: Option<&IndexSet<ValueOrigin>>,
     ) -> Node {
-        let resolve_input = |origin, ty| {
-            if let Some(input_mapping) = input_mapping {
+        let resolve_input = |rvsdg: &Rvsdg, origin| {
+            let origin = if let Some(input_mapping) = input_mapping {
                 let argument = input_mapping
                     .get_index_of(&origin)
                     .expect("input mapping was not correctly constructed");
-
-                ValueInput::argument(ty, argument as u32)
+                ValueOrigin::Argument(argument as u32)
             } else {
-                ValueInput { ty, origin }
-            }
+                origin
+            };
+
+            let ty = rvsdg.value_origin_ty(region, origin);
+
+            ValueInput { ty, origin }
         };
 
         let mut value_inputs = Vec::with_capacity(branching_node.sub_tree_inputs.len() + 1);
 
         // Connect the first input to the branch selector predicate.
-        value_inputs.push(resolve_input(branching_node.branch_selector, TY_PREDICATE));
+        value_inputs.push(resolve_input(self.rvsdg, branching_node.branch_selector));
 
         // Connect inputs for the emulation values required by the branching node's child nodes.
         for child_input in branching_node.sub_tree_inputs.iter().copied() {
-            let ty = self.rvsdg.value_origin_ty(self.outer_region, child_input);
-
-            value_inputs.push(resolve_input(child_input, ty));
+            value_inputs.push(resolve_input(self.rvsdg, child_input));
         }
 
         // Connect inputs for any non-pointer additional values passed in for the operation (e.g.
@@ -432,20 +433,22 @@ where
         leaf_node: &LeafNode,
         input_mapping: Option<&IndexSet<ValueOrigin>>,
     ) -> Node {
-        let resolve_input = |origin, ty| {
-            if let Some(input_mapping) = input_mapping {
+        let resolve_input = |rvsdg: &Rvsdg, origin| {
+            let origin = if let Some(input_mapping) = input_mapping {
                 let argument = input_mapping
                     .get_index_of(&origin)
                     .expect("input mapping was not correctly constructed");
-
-                ValueInput::argument(ty, argument as u32)
+                ValueOrigin::Argument(argument as u32)
             } else {
-                ValueInput { ty, origin }
-            }
+                origin
+            };
+
+            let ty = rvsdg.value_origin_ty(region, origin);
+
+            ValueInput { ty, origin }
         };
 
-        let ptr_ty = leaf_node.root_pointer.ty;
-        let ptr_input = resolve_input(leaf_node.root_pointer.origin, ptr_ty);
+        let ptr_input = resolve_input(self.rvsdg, leaf_node.root_pointer.origin);
 
         let ptr_input = if leaf_node.access_chain.is_empty() {
             ptr_input
@@ -472,7 +475,7 @@ where
                         (node, ty)
                     }
                     Access::DynamicElement(origin) => {
-                        let input = resolve_input(*origin, TY_U32);
+                        let input = resolve_input(self.rvsdg, *origin);
                         let node = self.rvsdg.add_op_element_ptr(region, ptr_input, input);
                         let ty = self.rvsdg[node].expect_op_element_ptr().value_output().ty;
 
