@@ -1,274 +1,426 @@
+use std::collections::VecDeque;
+
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::KeyData;
 
 use crate::Module;
 use crate::rvsdg::transform::variable_pointer_emulation::EmulationContext;
-use crate::rvsdg::visit::reverse_value_flow::ReverseValueFlowVisitor;
-use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
+use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, StateUser, ValueInput,
     ValueOrigin, ValueUser, visit,
 };
-use crate::ty::TypeKind;
-
-#[derive(Debug)]
-struct AggregateAnalyzer {
-    cache: FxHashMap<Node, bool>,
-    visited: FxHashSet<(Region, ValueUser)>,
-    is_aggregate: bool,
-}
-
-impl AggregateAnalyzer {
-    fn new() -> Self {
-        AggregateAnalyzer {
-            cache: Default::default(),
-            visited: Default::default(),
-            is_aggregate: false,
-        }
-    }
-
-    fn is_aggregate(&mut self, rvsdg: &Rvsdg, alloca_node: Node) -> bool {
-        let alloca_ty = rvsdg[alloca_node].expect_op_alloca().ty();
-
-        match &*rvsdg.ty().kind(alloca_ty) {
-            TypeKind::Struct(_) | TypeKind::Array { .. } | TypeKind::Enum(_) => true,
-            TypeKind::Scalar(_) | TypeKind::Ptr(_) | TypeKind::Predicate => false,
-            TypeKind::Vector(_) | TypeKind::Matrix(_) => {
-                // We treat vectors and matrices as promotable scalars if they are only stored to or
-                // loaded from "in whole", that is, not via element pointers to individual elements.
-                // Otherwise, we treat them as aggregates. We'll run a value-flow analysis to check
-                // if the alloca pointer is only every used as the pointer input to a load or store,
-                // or passed through switch or loop nodes. Since we may end up analyzing the same
-                // alloca node multiple times, and this is a relatively expensive operation, we
-                // cache the result. Note that the memory-promotion pass is iterative and each
-                // subsequent iteration will invalidate the cache, so the cache must be cleared at
-                // the start of each iteration.
-
-                if let Some(cached) = self.cache.get(&alloca_node).copied() {
-                    return cached;
-                }
-
-                self.visited.clear();
-                self.is_aggregate = false;
-
-                self.visit_value_output(rvsdg, alloca_node, 0);
-                self.cache.insert(alloca_node, self.is_aggregate);
-
-                self.is_aggregate
-            }
-            TypeKind::Atomic(_)
-            | TypeKind::Slice { .. }
-            | TypeKind::Function(_)
-            | TypeKind::Dummy => unreachable!("type cannot be stored in an alloca"),
-        }
-    }
-
-    fn clear_cache(&mut self) {
-        self.cache.clear();
-    }
-}
-
-impl ValueFlowVisitor for AggregateAnalyzer {
-    fn should_visit(&mut self, region: Region, user: ValueUser) -> bool {
-        self.visited.insert((region, user))
-    }
-
-    fn visit_value_input(&mut self, rvsdg: &Rvsdg, node: Node, input: u32) {
-        use NodeKind::*;
-        use SimpleNode::*;
-
-        match rvsdg[node].kind() {
-            Simple(OpLoad(_)) => {
-                // Don't continue visiting the load node's output: we're only interested in the uses
-                // of the alloca pointer, not in how its value is used.
-            }
-            Simple(OpStore(_)) if input == 0 => {
-                // Store nodes don't output values.
-            }
-            Switch(_) | Loop(_) => {
-                visit::value_flow::visit_value_input(self, rvsdg, node, input);
-            }
-            _ => {
-                self.is_aggregate = true;
-            }
-        }
-    }
-}
+use crate::ty::{Type, TypeKind};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum PointerAction {
-    /// A memory operation that uses the pointer can be promoted to value-flow.
+enum PointerTrace {
+    /// The trace has a single root and that root is an [OpAlloca] node.
+    Alloca(Node),
+
+    /// The trace is split by control-flow.
     ///
-    /// The pointer has a determinate access chain that resolves back to an originating [OpAlloca].
-    /// Contains the [Node] that represents the originating [OpAlloca].
-    Promotion(Node),
+    /// We conservatively assume there are multiple roots in this case, even if e.g., the trace
+    /// is split across multiple switch branches that do eventually all reconverge onto the same
+    /// [OpAlloca] node.
+    ///
+    /// Mem-ops that use a pointer classified as "variable" will need to be legalized by
+    /// variable-pointer-emulation. The new mem-ops produced by emulation may be promotable in a
+    /// later round of memory-promotion-and-legalization.
+    Variable,
 
-    /// Memory operations that use this pointer need variable-pointer-emulation to be legal on a
-    /// target that does not support variable pointers.
-    VariablePointerEmulation,
+    /// The trace has a single root that is a global binding.
+    Binding,
 
-    /// Memory operations that use the pointer should be left as they are.
-    Nothing,
+    /// The trace has a single root that is a constant.
+    Constant,
+
+    /// The trace has a single root that is a [ConstFallback] node.
+    ConstFallback,
+
+    /// Trace's root is an aggregate value.
+    ///
+    /// We always consider struct and array types aggregate. However, vector and matrix may be
+    /// treated as if they are "scalar" values. This depends on whether the pointer is ever stored
+    /// to/loaded from via an element-projected pointer; if it is only ever stored to/loaded from
+    /// whole, then it is treated as a scalar. A particular trace will be classified as aggregate if
+    /// it reaches an [OpElementPtr] or an [OpFieldPtr] node.
+    Aggregate,
+
+    /// The trace reaches the output of an [OpLoad] node.
+    ///
+    /// We make no attempt to trace pointer values to memory stores and loads; we instead assume
+    /// that the pointer could have originated from any alloca, binding, or constant with a
+    /// compatible type.
+    Blocked,
 }
 
 struct PointerAnalyzer {
-    cache: FxHashMap<(Region, ValueOrigin), PointerAction>,
-    visitor: PointerOriginVisitor,
+    /// The set of [OpAlloca] nodes that were reached by a trace that cannot be promoted this round.
+    ///
+    /// This means that either at least one trace that reached alloca was classified as "variable",
+    /// or at least one trace was classified as "aggregate". In the first case, at least one round
+    /// of variable-pointer-emulation will be required to turn the mem-ops that caused the
+    /// "variable" trace into mem-ops that trace to a single root. In the latter case, a round of
+    /// scalar-replacement may be required (unless the alloca contains a type we do not wish to
+    /// split; in that case we simply leave the alloca unpromoted).
+    alloca_blacklist: FxHashSet<Node>,
+
+    /// The set of pointee-types for all pointer traces that resulted in [PointerTrace::Blocked].
+    ///
+    /// We use this set of types to exclude [OpAlloca] nodes from promotion: any [OpAlloca] node
+    /// that contains a type that is compatible with any type in this set (as per
+    /// [TypeRegistry::can_coerce]) will not be promoted this round.
+    ///
+    /// This is because we make no attempt to trace pointer values to memory stores and loads; we
+    /// instead assume that the pointer could have originated from any alloca with a compatible
+    /// type.
+    ///
+    /// Note that we are guaranteed to be able to promote such allocas during some later round, due
+    /// to two top-level constraints on RISL:
+    ///
+    /// 1. Global bindings cannot hold pointer values, neither as their top-level type nor inside
+    ///    an aggregate type (recursively).
+    /// 2. RISL does not allow self-referential types.
+    ///
+    /// The first constraint implies that the blocking [OpLoad] must load from an [OpAlloca] node.
+    /// Because of the second constraint, that [OpAlloca] node must store a different type than
+    /// the blocked pointee-type: if the blocked pointee-type is `T`, then the [OpAlloca] node the
+    /// blocking [OpLoad] loads from must store a value of type `ptr<T>`. This pattern may repeat:
+    /// the pointer input for the blocking [OpLoad] may itself be blocked by another [OpLoad] that
+    /// loads from an [OpAlloca] that stores a value of type `ptr<ptr<T>>`, and so on. However, as
+    /// types cannot be self-referential, this pattern must terminate. There must then be at least
+    /// one "top-level" [OpAlloca] node that is not blocked and can be promoted (potentially after
+    /// a round of variable-pointer-emulation). Promoting the set of top-level [OpAlloca] nodes will
+    /// uncover a new set of top-level [OpAlloca] nodes. We can thus uncover all [OpAlloca] nodes
+    /// after a finite number of iterations.
+    blocked_types: FxHashSet<Type>,
+
+    /// During the job-collection for a single round, pointer-analysis for a particular pointer
+    /// origin is idempotent.
+    cache: FxHashMap<(Region, ValueOrigin), PointerTrace>,
 }
 
 impl PointerAnalyzer {
     fn new() -> Self {
-        PointerAnalyzer {
-            cache: Default::default(),
-            visitor: PointerOriginVisitor::new(),
+        Self {
+            alloca_blacklist: Default::default(),
+            blocked_types: FxHashSet::default(),
+            cache: FxHashMap::default(),
         }
     }
 
-    fn resolve_action(
-        &mut self,
-        rvsdg: &Rvsdg,
-        region: Region,
-        pointer_origin: ValueOrigin,
-    ) -> PointerAction {
-        if let Some(action) = self.cache.get(&(region, pointer_origin)) {
-            *action
-        } else {
-            let (action, cacheable) =
-                self.visitor
-                    .analyze_pointer_origin(rvsdg, region, pointer_origin);
-
-            if cacheable {
-                self.cache.insert((region, pointer_origin), action);
-            }
-
-            action
-        }
-    }
-
-    fn clear_cache(&mut self) {
+    fn clear(&mut self) {
+        self.alloca_blacklist.clear();
+        self.blocked_types.clear();
         self.cache.clear();
-        self.visitor.aggregate_analyzer.clear_cache();
-    }
-}
-
-#[derive(Debug)]
-pub struct PointerOriginVisitor {
-    visited: FxHashSet<(Region, ValueOrigin)>,
-    aggregate_analyzer: AggregateAnalyzer,
-    promotion_candidate: Option<Node>,
-    can_promote: bool,
-    needs_emulation: bool,
-    can_emulate: bool,
-    cacheable: bool,
-}
-
-impl PointerOriginVisitor {
-    fn new() -> Self {
-        PointerOriginVisitor {
-            visited: Default::default(),
-            aggregate_analyzer: AggregateAnalyzer::new(),
-            promotion_candidate: None,
-            can_promote: true,
-            needs_emulation: false,
-            can_emulate: true,
-            cacheable: true,
-        }
     }
 
-    fn analyze_pointer_origin(
+    fn visit_value_origin(
         &mut self,
         rvsdg: &Rvsdg,
         region: Region,
-        pointer_origin: ValueOrigin,
-    ) -> (PointerAction, bool) {
-        self.visited.clear();
-        self.promotion_candidate = None;
-        self.can_promote = true;
-        self.needs_emulation = false;
-        self.can_emulate = true;
-        self.cacheable = true;
+        origin: ValueOrigin,
+    ) -> PointerTrace {
+        if let Some(cached) = self.cache.get(&(region, origin)) {
+            return *cached;
+        }
 
-        self.visit_value_origin(rvsdg, region, pointer_origin);
-
-        let action = if self.needs_emulation && self.can_emulate {
-            PointerAction::VariablePointerEmulation
-        } else if let Some(candidate) = self.promotion_candidate
-            && self.can_promote
-        {
-            PointerAction::Promotion(candidate)
-        } else {
-            PointerAction::Nothing
+        let trace = match origin {
+            ValueOrigin::Argument(arg) => self.visit_region_argument(rvsdg, region, arg),
+            ValueOrigin::Output { producer, output } => {
+                self.visit_value_output(rvsdg, producer, output)
+            }
         };
 
-        (action, self.cacheable)
-    }
-}
+        self.cache.insert((region, origin), trace);
 
-impl ReverseValueFlowVisitor for PointerOriginVisitor {
-    fn should_visit(&mut self, region: Region, origin: ValueOrigin) -> bool {
-        self.visited.insert((region, origin))
+        trace
     }
 
-    fn visit_region_argument(&mut self, rvsdg: &Rvsdg, region: Region, argument: u32) {
+    fn visit_region_argument(&mut self, rvsdg: &Rvsdg, region: Region, arg: u32) -> PointerTrace {
         use NodeKind::*;
 
         let owner = rvsdg[region].owner();
 
-        if matches!(rvsdg[owner].kind(), Loop(_)) {
-            let result = argument + 1;
-            let result_origin = rvsdg[region].value_results()[result as usize].origin;
+        match rvsdg[owner].kind() {
+            Switch(_) => self.visit_value_input(rvsdg, owner, arg + 1),
+            Loop(_) => {
+                let result_origin = rvsdg[region].value_results()[(arg + 1) as usize].origin;
 
-            if result_origin.is_placeholder() {
-                todo!()
-            } else if result_origin != ValueOrigin::Argument(argument) {
-                // If a pointer-type loop-value is not loop-invariant (the result does not originate
-                // directly from the corresponding argument), then it's a variable pointer, and we
-                // must emulate it.
-                self.needs_emulation = true;
+                assert!(
+                    !result_origin.is_placeholder(),
+                    "loop-region results should never connect to placeholder origins during job \
+                    collection"
+                );
 
-                // The emulation of a pointer-type loop-value that is not loop-invariant will
-                // involve a loop_pointer_normalization transform. This will adjust the value-flow
-                // for the loop-argument and the loop-arguments of any other loop-values reachable
-                // from the loop-argument. This means that reanalysis of the loop-argument or any
-                // downstream value-flow should not use a cached value.
-                self.cacheable = false;
+                let trace = self.visit_value_input(rvsdg, owner, arg);
+
+                if result_origin == ValueOrigin::Argument(arg) {
+                    trace
+                } else {
+                    // If the loop-value is not loop-invariant, we always consider the pointer
+                    // "variable", unless it was "blocked" (which supersedes all other
+                    // classifications).
+
+                    if let PointerTrace::Blocked = trace {
+                        PointerTrace::Blocked
+                    } else {
+                        if let PointerTrace::Alloca(node) = trace {
+                            // If the trace resolved to a single OpAlloca node, then the OpAlloca
+                            // node may not yet have been blacklisted for this round, so we do so
+                            // now.
+                            self.alloca_blacklist.insert(node);
+                        }
+
+                        PointerTrace::Variable
+                    }
+                }
             }
-        }
+            Function(function) => {
+                let Some(dependency) = function.dependencies().get(arg as usize) else {
+                    panic!("pointer analysis reached non-dependency function argument (`{arg}`)");
+                };
 
-        visit::reverse_value_flow::visit_region_argument(self, rvsdg, region, argument);
+                let ValueOrigin::Output { producer, .. } = dependency.origin else {
+                    panic!("the global region should not have arguments");
+                };
+
+                match rvsdg[producer].kind() {
+                    UniformBinding(_) | StorageBinding(_) | WorkgroupBinding(_) => {
+                        PointerTrace::Binding
+                    }
+                    Constant(_) => PointerTrace::Constant,
+                    _ => panic!("unexpected dependency kind"),
+                }
+            }
+            _ => unreachable!("node kind cannot own a region"),
+        }
     }
 
-    fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, output: u32) {
+    fn visit_value_output(&mut self, rvsdg: &Rvsdg, node: Node, output: u32) -> PointerTrace {
         use NodeKind::*;
         use SimpleNode::*;
 
         match rvsdg[node].kind() {
-            Switch(_) | Loop(_) => {
-                self.needs_emulation = true;
-                self.can_promote = false;
+            Switch(data) => {
+                // A switch output is always "variable", unless the trace is "blocked" on one or
+                // more branches. In the first case, mem-ops using the pointer will be candidates
+                // for variable-pointer-emulation this round; in the later case, the emulation of
+                // mem-ops that use the pointer will have to be deferred to a later round, after the
+                // blocking load has itself been promoted.
 
-                visit::reverse_value_flow::visit_value_output(self, rvsdg, node, output);
+                let mut any_blocked = false;
+
+                for branch in data.branches() {
+                    let origin = rvsdg[*branch].value_results()[output as usize].origin;
+                    let trace = self.visit_value_origin(rvsdg, *branch, origin);
+
+                    match trace {
+                        PointerTrace::Alloca(node) => {
+                            // Since all downstream mem-ops using the pointer will need variable-
+                            // pointer-emulation first, promotion of the alloca will have to be
+                            // deferred to a later round.
+                            self.alloca_blacklist.insert(node);
+                        }
+                        PointerTrace::Blocked => any_blocked = true,
+                        _ => {}
+                    }
+                }
+
+                if any_blocked {
+                    PointerTrace::Blocked
+                } else {
+                    PointerTrace::Variable
+                }
             }
-            Simple(OpAlloca(_)) => {
-                self.promotion_candidate = Some(node);
-                self.can_promote &= !self.aggregate_analyzer.is_aggregate(rvsdg, node);
+            Loop(data) => {
+                let loop_region = data.loop_region();
+                let result = output + 1;
+                let origin = rvsdg[loop_region].value_results()[result as usize].origin;
+
+                let trace = self.visit_value_origin(rvsdg, loop_region, origin);
+
+                // If the loop-value is loop-invariant, return the trace; otherwise the output
+                // pointer is always variable.
+                if origin == ValueOrigin::Argument(output) {
+                    trace
+                } else {
+                    // If the loop-value is not loop-invariant, we always consider the pointer
+                    // "variable", unless it was "blocked" (which supersedes all other
+                    // classifications).
+
+                    if let PointerTrace::Blocked = trace {
+                        PointerTrace::Blocked
+                    } else {
+                        if let PointerTrace::Alloca(node) = trace {
+                            // If the trace resolved to a single OpAlloca node, then the OpAlloca
+                            // node may not yet have been blacklisted for this round, so we do so
+                            // now.
+                            self.alloca_blacklist.insert(node);
+                        }
+
+                        PointerTrace::Variable
+                    }
+                }
             }
             Simple(OpFieldPtr(_)) | Simple(OpElementPtr(_)) => {
-                self.can_promote = false;
+                let trace = self.visit_value_input(rvsdg, node, 0);
 
-                visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
+                if let PointerTrace::Alloca(node) = trace {
+                    self.alloca_blacklist.insert(node);
+                }
+
+                PointerTrace::Aggregate
             }
-            Simple(OpLoad(_) | OpVariantPtr(_) | OpDiscriminantPtr(_)) => {
-                self.can_promote = false;
-                self.can_emulate = false;
+            Simple(OpOffsetSlice(_) | ValueProxy(_)) => self.visit_value_input(rvsdg, node, 0),
+            Simple(OpAlloca(data)) => {
+                let ty = data.ty();
+
+                if matches!(
+                    &*rvsdg.ty().kind(ty),
+                    TypeKind::Struct(_) | TypeKind::Array { .. }
+                ) {
+                    // We never promote mem-ops on alloca that hold struct or array values; these
+                    // need to be split into scalar-like values by a scalar-replacement pass first.
+                    // Note that we do allow vector and matrix types to behave as "scalar-like" and
+                    // thus as promotable. This requires that they are only ever loaded from or
+                    // stored to "whole", never via an element-projected pointer. The tracing logic
+                    // for OpElementPtr takes care of alloca blacklisting in this case.
+
+                    self.alloca_blacklist.insert(node);
+
+                    // Note that returning PointerTrace::Aggregate here is essentially just an
+                    // optimization over returning PointerTrace::Alloca. The WorkCollector would
+                    // filter out mem-ops on this pointer anyway using the alloca_blacklist, but
+                    // returning PointerTrace::Aggregate prevents the WorkCollector from even
+                    // recording the mem-op as a candidate; this skips the alloca_blacklist lookup
+                    // later.
+
+                    PointerTrace::Aggregate
+                } else {
+                    PointerTrace::Alloca(node)
+                }
             }
-            Simple(OpOffsetSlice(_) | ValueProxy(_)) => {
-                visit::reverse_value_flow::visit_value_input(self, rvsdg, node, 0);
+            Simple(OpLoad(data)) => {
+                // We won't try to trace a pointer value through mem-ops, we'll simply never
+                // promote a dependent mem-op if its input pointer trace reaches the output of an
+                // OpLoad node. That means that if the loaded pointer were to originate from an
+                // OpAlloca node, then that OpAlloca node would need to be blacklisted from
+                // promotion this round (we can only promote an OpAlloca if we can promote *all*
+                // mem-ops to/from that alloca in the same round). However, since we don't trace
+                // a pointer value through mem-ops, we don't know which OpAlloca (if any) to
+                // blacklist. What we do instead is add the OpLoad's output type to the
+                // `blocked_types` set. All entries in the `blocked_types` set will later serve
+                // as blanket blacklists for all OpAlloca nodes with matching value types.
+                //
+                // See also comment on the `blocked_types` field.
+
+                let output_ty = data.value_output().ty;
+
+                let TypeKind::Ptr(pointee_ty) = *rvsdg.ty().kind(output_ty) else {
+                    panic!("expected to be tracing a pointer value");
+                };
+
+                self.blocked_types.insert(pointee_ty);
+
+                PointerTrace::Blocked
             }
-            Simple(ConstFallback(_)) => (),
+            Simple(ConstFallback(_)) => PointerTrace::ConstFallback,
+            Simple(OpVariantPtr(_) | OpDiscriminantPtr(_)) => {
+                panic!("enum pointer ops should have been eliminated by enum-replacement");
+            }
             _ => unreachable!("node kind cannot output a pointer"),
         }
+    }
+
+    fn visit_value_input(&mut self, rvsdg: &Rvsdg, node: Node, input: u32) -> PointerTrace {
+        let region = rvsdg[node].region();
+        let origin = rvsdg[node].value_inputs()[input as usize].origin;
+
+        self.visit_value_origin(rvsdg, region, origin)
+    }
+}
+
+struct WorkCollector<'a> {
+    analyzer: &'a mut PointerAnalyzer,
+    promotion_candidates: &'a mut FxHashMap<Node, Node>,
+    promotable_ops: &'a mut FxHashMap<Node, Node>,
+    emulation_queue: &'a mut VecDeque<Node>,
+}
+
+impl WorkCollector<'_> {
+    fn collect(&mut self, rvsdg: &Rvsdg, region: Region) {
+        // Analyze all mem-ops (loads/stores) in the region graph.
+        self.visit_region(rvsdg, region);
+
+        // After visiting all mem-ops in the graph, the promotion_candidates map now contains a
+        // reduced collection of mem-ops based on whether their pointer input traces to single
+        // OpAlloca root. However, a mem-op on an alloca is only promotable this round if *all*
+        // mem-ops on that alloca are promotable this round. During analysis, we blacklist allocas
+        // that we know to be a root for mem-ops that cannot be promoted yet for other reasons (the
+        // trace was classified as "variable" or "aggregate"). We've also tracked a list of
+        // "blocked types" for traces that were blocked by an OpLoad, so that no root could be
+        // determined. We therefore conservatively also exclude all allocas that store a type that
+        // matches a type in the blocked_types list. This is still not quite enough to guarantee we
+        // exclude all allocas that cannot yet be completely promoted: since we don't trace beyond
+        // the OpLoad we cannot know if the pointer-value we loaded from it was refined from a
+        // pointer to an aggregate type before it was stored (e.g., by an OpElementPtr node). We
+        // therefore also conservatively exclude all allocas that store an aggregate type if there
+        // is even a single type in the blocked_types set.
+        //
+        // Note that all blocking OpLoad will eventually be promoted away, thus unlocking such
+        // excluded allocas in a later round of memory-promotion-and-legalization. Since the
+        // blocked_list being non-empty always implies that at least one more round is required
+        // anyway, this conservative exclusion mechanism does not actually increase the total number
+        // of rounds and should not have a major performance impact.
+        for (candidate, alloca) in self.promotion_candidates.iter() {
+            if !self.analyzer.alloca_blacklist.contains(alloca) {
+                let ty = rvsdg[*alloca].expect_op_alloca().ty();
+
+                let is_aggregate_ty = matches!(
+                    &*rvsdg.ty().kind(ty),
+                    TypeKind::Struct(_)
+                        | TypeKind::Array { .. }
+                        | TypeKind::Slice { .. }
+                        | TypeKind::Vector(_)
+                        | TypeKind::Matrix(_)
+                );
+
+                if !self.analyzer.blocked_types.is_empty() && is_aggregate_ty {
+                    continue;
+                }
+
+                if !self.analyzer.blocked_types.contains(&ty) {
+                    self.promotable_ops.insert(*candidate, *alloca);
+                }
+            }
+        }
+    }
+}
+
+impl RegionNodesVisitor for WorkCollector<'_> {
+    fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
+        use NodeKind::*;
+        use SimpleNode::*;
+
+        let trace = match rvsdg[node].kind() {
+            Simple(OpLoad(_)) => Some(self.analyzer.visit_value_input(rvsdg, node, 0)),
+            Simple(OpStore(_)) => Some(self.analyzer.visit_value_input(rvsdg, node, 0)),
+            _ => None,
+        };
+
+        if let Some(trace) = trace {
+            match trace {
+                PointerTrace::Alloca(alloca) => {
+                    self.promotion_candidates.insert(node, alloca);
+                }
+                PointerTrace::Variable => self.emulation_queue.push_back(node),
+                _ => {}
+            }
+        }
+
+        visit::region_nodes::visit_node(self, rvsdg, node);
     }
 }
 
@@ -389,8 +541,11 @@ struct LoopResultInitJob {
 /// Because of this inter-dependence between memory to value-flow promotion and variable pointer
 /// emulation, these transforms are combined into a single pass.
 pub struct MemoryPromoterLegalizer {
+    analyzer: PointerAnalyzer,
+    promotion_candidates: FxHashMap<Node, Node>,
+    promotable_ops: FxHashMap<Node, Node>,
+    emulation_queue: VecDeque<Node>,
     emulation_context: EmulationContext,
-    pointer_analyzer: PointerAnalyzer,
     state_origin: (Region, StateOrigin),
     value_availability: FxHashMap<(Node, Region), ValueOrigin>,
     owner_stack: Vec<Node>,
@@ -401,8 +556,11 @@ pub struct MemoryPromoterLegalizer {
 impl MemoryPromoterLegalizer {
     pub fn new() -> Self {
         MemoryPromoterLegalizer {
+            analyzer: PointerAnalyzer::new(),
+            promotion_candidates: Default::default(),
+            promotable_ops: Default::default(),
+            emulation_queue: Default::default(),
             emulation_context: EmulationContext::new(),
-            pointer_analyzer: PointerAnalyzer::new(),
             state_origin: (Region::from(KeyData::from_ffi(0)), StateOrigin::Argument),
             value_availability: Default::default(),
             owner_stack: vec![],
@@ -412,17 +570,51 @@ impl MemoryPromoterLegalizer {
     }
 
     pub fn promote_and_legalize(&mut self, rvsdg: &mut Rvsdg, region: Region) {
-        // Set the initial state origin to the region's state argument
-        self.state_origin = (region, StateOrigin::Argument);
+        loop {
+            // We currently don't maintain any state between rounds, as the RVSDG may change quite
+            // a bit, which would invalidate any cached information.
+            self.reset(region);
 
-        // Clear any state set by a previous promote-and-legalize run
+            WorkCollector {
+                analyzer: &mut self.analyzer,
+                promotion_candidates: &mut self.promotion_candidates,
+                promotable_ops: &mut self.promotable_ops,
+                emulation_queue: &mut self.emulation_queue,
+            }
+            .collect(rvsdg, region);
+
+            if self.promotable_ops.is_empty() && self.emulation_queue.is_empty() {
+                // We won't be making progress this round. This implies that the RVSDG will remain
+                // unchanged, so we also cannot make any progress in the next round. Therefore, we
+                // can end here.
+                break;
+            }
+
+            // If we have any promotable mem-ops, we first walk the state-chain and promote them all
+            // in state-chain order.
+            if !self.promotable_ops.is_empty() {
+                while self.visit_state_user(rvsdg) {}
+            }
+
+            // Now emulate all mem-ops that the analyzer found to operate on variable pointers. This
+            // may uncover more promotion candidates for the next round.
+            while let Some(op) = self.emulation_queue.pop_front() {
+                self.emulation_context.emulate_mem_op(rvsdg, op);
+            }
+        }
+    }
+
+    fn reset(&mut self, region: Region) {
+        self.analyzer.clear();
+        self.promotion_candidates.clear();
+        self.promotable_ops.clear();
+        self.emulation_queue.clear();
         self.emulation_context.clear();
-        self.pointer_analyzer.clear_cache();
+        self.state_origin = (region, StateOrigin::Argument);
         self.value_availability.clear();
         self.owner_stack.clear();
         self.touched_outer_alloca_stack.clear();
-
-        while self.visit_state_user(rvsdg) {}
+        self.loop_result_init_jobs.clear();
     }
 
     fn visit_state_user(&mut self, rvsdg: &mut Rvsdg) -> bool {
@@ -606,82 +798,60 @@ impl MemoryPromoterLegalizer {
     fn visit_op_store(&mut self, rvsdg: &mut Rvsdg, op_store: Node) {
         let region = rvsdg[op_store].region();
         let store_data = rvsdg[op_store].expect_op_store();
-        let pointer_origin = store_data.ptr_input().origin;
         let value_origin = store_data.value_input().origin;
-        let action = self
-            .pointer_analyzer
-            .resolve_action(rvsdg, region, pointer_origin);
 
-        match action {
-            PointerAction::Promotion(op_alloca) => {
-                self.value_availability
-                    .insert((op_alloca, region), value_origin);
+        let Some(&alloca) = self.promotable_ops.get(&op_store) else {
+            // This op is not in the promotable-ops set, so we skip over it this round.
 
-                // If the alloca originated from an outer region, then "touch" the alloca so that
-                // we can make the value available to the outer region later (see `visit_switch` and
-                // `visit_loop`). Note that to test if the alloca originated from an outer region,
-                // we only have to compare its region with the store node's region, since an alloca
-                // could never come from a sub-region of the store node's region (an alloca cannot
-                // outlive its region, so that would be UB); if the alloca's region is not equal to
-                // the store node's region, then it must have originated from an outer region.
-                if rvsdg[op_alloca].region() != region {
-                    self.touched_outer_alloca_stack.touch(op_alloca);
-                }
+            self.state_origin = (region, StateOrigin::Node(op_store));
 
-                rvsdg.remove_node(op_store);
+            return;
+        };
 
-                // Note that removing the node will adjust the state chain by connecting the
-                // OpStore's state origin to the OpStore's state user, so we don't need to update
-                // `self.state_origin`.
-            }
-            PointerAction::VariablePointerEmulation => {
-                self.emulation_context.emulate_op_store(rvsdg, op_store);
+        self.value_availability
+            .insert((alloca, region), value_origin);
 
-                // Note that emulation will replace the OpStore in the state chain with the
-                // emulation node, so the "visit loop" will automatically visit the emulation node
-                // on the next iteration.
-            }
-            PointerAction::Nothing => {
-                // Do nothing, except move the current state origin beyond the load
-                self.state_origin = (region, StateOrigin::Node(op_store));
-            }
+        // If the alloca originated from an outer region, then "touch" the alloca so that we can
+        // make the value available to the outer region later (see `visit_switch` and `visit_loop`).
+        // Note that to test if the alloca originated from an outer region, we only have to compare
+        // its region with the store node's region, since an alloca could never come from a
+        // sub-region of the store node's region (an alloca cannot outlive its region, so that would
+        // be UB); if the alloca's region is not equal to the store node's region, then it must have
+        // originated from an outer region.
+        if rvsdg[alloca].region() != region {
+            self.touched_outer_alloca_stack.touch(alloca);
         }
+
+        rvsdg.remove_node(op_store);
+
+        // Note that removing the node will adjust the state chain by connecting the OpStore's state
+        // origin to the OpStore's state user, so we don't need to update `self.state_origin`.
     }
 
     fn visit_op_load(&mut self, rvsdg: &mut Rvsdg, op_load: Node) {
         let region = rvsdg[op_load].region();
-        let origin = rvsdg[op_load].expect_op_load().ptr_input().origin;
-        let action = self.pointer_analyzer.resolve_action(rvsdg, region, origin);
 
-        match action {
-            PointerAction::Promotion(op_alloca) => {
-                let origin = self.resolve_alloca_value(rvsdg, op_alloca, region);
-                let user_count = rvsdg[op_load].expect_op_load().value_output().users.len();
+        let Some(&alloca) = self.promotable_ops.get(&op_load) else {
+            // This op is not in the promotable-ops set, so we skip over it this round.
 
-                for i in (0..user_count).rev() {
-                    let user = rvsdg[op_load].expect_op_load().value_output().users[i];
+            self.state_origin = (region, StateOrigin::Node(op_load));
 
-                    rvsdg.reconnect_value_user(region, user, origin);
-                }
+            return;
+        };
 
-                rvsdg.remove_node(op_load);
+        let origin = self.resolve_alloca_value(rvsdg, alloca, region);
+        let user_count = rvsdg[op_load].expect_op_load().value_output().users.len();
 
-                // Note that removing the node will adjust the state chain by connecting the
-                // OpLoad's state origin to the OpLoad's state user, so we don't need to
-                // update `self.state_origin`.
-            }
-            PointerAction::VariablePointerEmulation => {
-                self.emulation_context.emulate_op_load(rvsdg, op_load);
+        for i in (0..user_count).rev() {
+            let user = rvsdg[op_load].expect_op_load().value_output().users[i];
 
-                // Note that emulation will replace the OpLoad in the state chain with the emulation
-                // node, so the "visit loop" will automatically visit the emulation node on the
-                // next iteration.
-            }
-            PointerAction::Nothing => {
-                // Do nothing, except move the current state origin beyond the load
-                self.state_origin = (region, StateOrigin::Node(op_load));
-            }
+            rvsdg.reconnect_value_user(region, user, origin);
         }
+
+        rvsdg.remove_node(op_load);
+
+        // Note that removing the node will adjust the state chain by connecting the OpLoad's state
+        // origin to the OpLoad's state user, so we don't need to update `self.state_origin`.
     }
 
     fn resolve_alloca_value(
@@ -765,24 +935,16 @@ impl MemoryPromoterLegalizer {
                 }
                 NodeKind::Loop(loop_data) => {
                     let loop_region = loop_data.loop_region();
+                    let argument = rvsdg.add_loop_input(owner, ValueInput { ty, origin });
+                    let result = argument + 1;
 
-                    let argument =
-                        rvsdg[owner]
-                            .value_input_for_origin(origin)
-                            .unwrap_or_else(|| {
-                                let input = rvsdg.add_loop_input(owner, ValueInput { ty, origin });
-                                let result = input + 1;
-
-                                // Leave the result with a placeholder origin for now, but schedule
-                                // a job to connect properly once the loop-region is processed;
-                                // see the documentation for `LoopResultInitJob` for more details.
-                                self.loop_result_init_jobs
-                                    .entry(owner)
-                                    .or_default()
-                                    .push(LoopResultInitJob { op_alloca, result });
-
-                                input
-                            });
+                    // Leave the result with a placeholder origin for now, but schedule a job to
+                    // connect properly once the loop-region is processed; see the documentation
+                    // for `LoopResultInitJob` for more details.
+                    self.loop_result_init_jobs
+                        .entry(owner)
+                        .or_default()
+                        .push(LoopResultInitJob { op_alloca, result });
 
                     let inner_origin = ValueOrigin::Argument(argument);
 

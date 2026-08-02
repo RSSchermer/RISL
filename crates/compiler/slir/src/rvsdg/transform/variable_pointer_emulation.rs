@@ -136,9 +136,10 @@ use crate::rvsdg::transform::pointer_reconstruction::{
     PointerReconstructionInfo, PointerReconstructionNode,
 };
 use crate::rvsdg::{
-    Connectivity, Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueInput, ValueOrigin,
+    ValueOutput,
 };
-use crate::ty::{TY_PREDICATE, TY_U32, Type};
+use crate::ty::{TY_U32, Type};
 
 pub struct EmulationContext {
     reconstruction_context: PointerReconstructionContext,
@@ -150,6 +151,17 @@ impl EmulationContext {
         EmulationContext {
             reconstruction_context: PointerReconstructionContext::new(),
             loop_pointer_normalizer: VariableLoopPointerNormalizer::new(),
+        }
+    }
+
+    pub fn emulate_mem_op(&mut self, rvsdg: &mut Rvsdg, op: Node) {
+        use NodeKind::*;
+        use SimpleNode::*;
+
+        match rvsdg[op].kind() {
+            Simple(OpLoad(_)) => self.emulate_op_load(rvsdg, op),
+            Simple(OpStore(_)) => self.emulate_op_store(rvsdg, op),
+            _ => panic!("expected node to be a mem-op"),
         }
     }
 
@@ -533,7 +545,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::{TY_DUMMY, TY_PTR_U32, TypeKind};
+    use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
