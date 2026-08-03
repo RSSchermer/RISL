@@ -267,11 +267,15 @@ impl PointerAnalyzer {
             Simple(OpFieldPtr(_)) | Simple(OpElementPtr(_)) => {
                 let trace = self.visit_value_input(rvsdg, node, 0);
 
-                if let PointerTrace::Alloca(node) = trace {
-                    self.alloca_blacklist.insert(node);
-                }
+                if let PointerTrace::Blocked = trace {
+                    PointerTrace::Blocked
+                } else {
+                    if let PointerTrace::Alloca(node) = trace {
+                        self.alloca_blacklist.insert(node);
+                    }
 
-                PointerTrace::Aggregate
+                    PointerTrace::Aggregate
+                }
             }
             Simple(OpOffsetSlice(_) | ValueProxy(_)) => self.visit_value_input(rvsdg, node, 0),
             Simple(OpAlloca(data)) => {
