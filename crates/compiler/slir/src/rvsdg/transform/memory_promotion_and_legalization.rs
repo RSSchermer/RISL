@@ -267,8 +267,8 @@ impl PointerAnalyzer {
             Simple(OpFieldPtr(_)) | Simple(OpElementPtr(_)) => {
                 let trace = self.visit_value_input(rvsdg, node, 0);
 
-                if let PointerTrace::Blocked = trace {
-                    PointerTrace::Blocked
+                if matches!(trace, PointerTrace::Blocked | PointerTrace::Variable) {
+                    trace
                 } else {
                     if let PointerTrace::Alloca(node) = trace {
                         self.alloca_blacklist.insert(node);
@@ -2451,6 +2451,132 @@ mod tests {
         assert!(
             !rvsdg.is_live_node(inner_load_node),
             "the inner load node should be removed after promotion"
+        );
+    }
+
+    #[test]
+    fn test_emulate_variable_pointer_element_projection_then_load() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_PREDICATE,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_F32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ptr_ty = module.ty.register(TypeKind::Ptr(TY_VEC2_F32));
+        let element_ptr_ty = module.ty.register(TypeKind::Ptr(TY_F32));
+
+        let alloca_0_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
+        let value_0_node = rvsdg.add_const_f32(region, 0.0);
+        let vector_0_node = rvsdg.add_op_vector(
+            region,
+            ty::Vector::vec2_f32(),
+            [
+                ValueInput::output(TY_F32, value_0_node, 0),
+                ValueInput::output(TY_F32, value_0_node, 0),
+            ],
+        );
+        let store_0_node = rvsdg.add_op_store(
+            region,
+            ValueInput::output(ptr_ty, alloca_0_node, 0),
+            ValueInput::output(TY_VEC2_F32, vector_0_node, 0),
+            StateOrigin::Argument,
+        );
+
+        let alloca_1_node = rvsdg.add_op_alloca(region, TY_VEC2_F32);
+        let value_1_node = rvsdg.add_const_f32(region, 1.0);
+        let vector_1_node = rvsdg.add_op_vector(
+            region,
+            ty::Vector::vec2_f32(),
+            [
+                ValueInput::output(TY_F32, value_1_node, 0),
+                ValueInput::output(TY_F32, value_1_node, 0),
+            ],
+        );
+        let store_1_node = rvsdg.add_op_store(
+            region,
+            ValueInput::output(ptr_ty, alloca_1_node, 0),
+            ValueInput::output(TY_VEC2_F32, vector_1_node, 0),
+            StateOrigin::Node(store_0_node),
+        );
+
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(ptr_ty, alloca_0_node, 0),
+                ValueInput::output(ptr_ty, alloca_1_node, 0),
+            ],
+            vec![ValueOutput::new(ptr_ty)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch_node);
+
+        rvsdg.reconnect_region_result(branch_0, 0, ValueOrigin::Argument(0));
+
+        let branch_1 = rvsdg.add_switch_branch(switch_node);
+
+        rvsdg.reconnect_region_result(branch_1, 0, ValueOrigin::Argument(1));
+
+        let element_index_node = rvsdg.add_const_u32(region, 0);
+        let element_ptr_node = rvsdg.add_op_element_ptr(
+            region,
+            ValueInput::output(ptr_ty, switch_node, 0),
+            ValueInput::output(TY_U32, element_index_node, 0),
+        );
+        let load_node = rvsdg.add_op_load(
+            region,
+            ValueInput::output(element_ptr_ty, element_ptr_node, 0),
+            StateOrigin::Node(store_1_node),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load_node,
+                output: 0,
+            },
+        );
+
+        let mut promoter_legalizer = MemoryPromoterLegalizer::new();
+
+        promoter_legalizer.promote_and_legalize(&mut rvsdg, region);
+
+        assert!(
+            !rvsdg.is_live_node(load_node),
+            "the projected variable-pointer load should be emulated"
+        );
+
+        let ValueOrigin::Output {
+            producer: emulation_node,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("the function result should connect to the emulation node");
+        };
+
+        assert_eq!(
+            rvsdg[emulation_node].expect_switch().value_outputs()[0].ty,
+            TY_F32,
+            "the emulation node should produce the loaded element type"
         );
     }
 
