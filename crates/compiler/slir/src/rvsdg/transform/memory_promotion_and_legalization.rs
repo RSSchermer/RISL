@@ -154,25 +154,38 @@ impl PointerAnalyzer {
                     collection"
                 );
 
-                let trace = self.visit_value_input(rvsdg, owner, arg);
+                let input_trace = self.visit_value_input(rvsdg, owner, arg);
 
                 if result_origin == ValueOrigin::Argument(arg) {
-                    trace
+                    input_trace
                 } else {
                     // If the loop-value is not loop-invariant, we always consider the pointer
                     // "variable", unless it was "blocked" (which supersedes all other
                     // classifications).
 
-                    if let PointerTrace::Blocked = trace {
+                    if let PointerTrace::Alloca(node) = input_trace {
+                        // If the trace resolved to a single OpAlloca node, then the OpAlloca node
+                        // may not yet have been blacklisted for this round, so we do so now.
+                        self.alloca_blacklist.insert(node);
+                    }
+
+                    // Cache a provisional variable trace so following the backedge can revisit
+                    // this loop argument without recursing indefinitely.
+                    self.cache
+                        .insert((region, ValueOrigin::Argument(arg)), PointerTrace::Variable);
+
+                    // If loop-value is not loop-invariant, then we must also trace from the
+                    // corresponding loop-region result.
+                    let result_trace = self.visit_value_origin(rvsdg, region, result_origin);
+
+                    if let PointerTrace::Alloca(node) = result_trace {
+                        self.alloca_blacklist.insert(node);
+                    }
+
+                    if input_trace == PointerTrace::Blocked || result_trace == PointerTrace::Blocked
+                    {
                         PointerTrace::Blocked
                     } else {
-                        if let PointerTrace::Alloca(node) = trace {
-                            // If the trace resolved to a single OpAlloca node, then the OpAlloca
-                            // node may not yet have been blacklisted for this round, so we do so
-                            // now.
-                            self.alloca_blacklist.insert(node);
-                        }
-
                         PointerTrace::Variable
                     }
                 }
