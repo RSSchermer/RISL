@@ -482,7 +482,7 @@ impl Replacer<'_, '_, '_> {
             TypeKind::Enum(_) => {
                 // Enum replacement is handled separately
                 return replace_enum_alloca(&mut self.rvsdg, node, |node, ty| {
-                    if self.ty.kind(ty).is_aggregate() {
+                    if ty_is_candidate(&self.ty, ty) {
                         self.candidate_queue.push_back(Job::Alloca(node));
                     }
                 });
@@ -493,7 +493,7 @@ impl Replacer<'_, '_, '_> {
                 ..
             } => {
                 let element_ptr_ty = self.ty.register(TypeKind::Ptr(*base));
-                let element_is_aggregate = self.ty.kind(*base).is_aggregate();
+                let element_is_candidate = ty_is_candidate(&self.ty, *base);
 
                 for _ in 0..*count {
                     let element_node = self.rvsdg.add_op_alloca(region, *base);
@@ -506,7 +506,7 @@ impl Replacer<'_, '_, '_> {
                         },
                     });
 
-                    if element_is_aggregate {
+                    if element_is_candidate {
                         self.candidate_queue.push_back(Job::Alloca(element_node));
                     }
                 }
@@ -525,7 +525,7 @@ impl Replacer<'_, '_, '_> {
                         },
                     });
 
-                    if self.ty.kind(field_ty).is_aggregate() {
+                    if ty_is_candidate(&self.ty, field_ty) {
                         self.candidate_queue.push_back(Job::Alloca(field_node));
                     }
                 }
