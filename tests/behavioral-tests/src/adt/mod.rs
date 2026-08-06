@@ -1,3 +1,4 @@
+mod struct_ref_array_field_dynamic_index_loop;
 mod struct_single_nested_scalar_field;
 mod struct_single_nested_slice_field;
 mod struct_single_scalar_field;

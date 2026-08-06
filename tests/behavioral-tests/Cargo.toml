@@ -9,6 +9,7 @@ publish = false
 doctest = false
 
 [features]
+test_adt_struct_ref_array_field_dynamic_index_loop = []
 test_adt_struct_single_nested_scalar_field = []
 test_adt_struct_single_nested_slice_field = []
 test_adt_struct_single_scalar_field = []
@@ -195,6 +196,7 @@ test_variable_pointer_if_else_same_address_space = []
 test_variable_pointer_if_else_different_address_spaces = []
 test_variable_pointer_loop_alternating_cycle = []
 test_variable_pointer_loop_alternating_no_cycle = []
+test_variable_pointer_loop_interleaved_variable_pointer_promotion = []
 test_while_loop = []
 
 [dependencies]
