@@ -80,6 +80,16 @@ cargo xtask run-behavioral-tests --features test_enum_result
 Refer to the `[features]` section in `tests/behavioral-tests/Cargo.toml` for a list of available
 features.
 
+#### GPU "Context Loss" Flakiness
+
+Compiling and running many GPU pipelines in quick succession (as happens when running large parts
+of the test-suite in one go) can intermittently trigger GPU "context loss" errors. These failures
+are generally flaky and do not indicate RISL compiler problems: a different test may fail on each
+run. If a behavioral test fails with a GPU "context loss" error (or with a panic that does not
+reproduce), rerun that test individually using its Cargo feature (see "Running Specific Tests"
+above); if it passes in isolation, treat the full-suite failure as a flake rather than a
+regression.
+
 ### RVSDG Analysis
 
 When debugging compiler transformations or structural issues in the RVSDG you may wish to inspect
