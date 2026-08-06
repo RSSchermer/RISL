@@ -1474,7 +1474,12 @@ impl Replacer<'_, '_, '_> {
         // original result connects to, via [OpElementPtr] nodes or [OpExtractElement] nodes,
         // depending on whether the result type is a pointer or an immediate value. This also
         // disconnects the original result.
-        self.redirect_region_result(loop_region, input as usize + 1, prior_result_count);
+        self.redirect_region_result(
+            loop_region,
+            input as usize + 1,
+            prior_result_count,
+            split_input.len(),
+        );
 
         // Now redirect the argument using the argument mapping. We do this after redirecting the
         // results, because otherwise this might try to split the original result again; by doing
@@ -1538,11 +1543,12 @@ impl Replacer<'_, '_, '_> {
         match ty_reg.kind(value_input.ty).deref() {
             TypeKind::Ptr(pointee_ty) => match ty_reg.kind(*pointee_ty).deref() {
                 TypeKind::Array {
-                    element_ty: base,
-                    count,
-                    ..
+                    element_ty: base, ..
+                }
+                | TypeKind::Slice {
+                    element_ty: base, ..
                 } => {
-                    for i in 0..*count {
+                    for i in 0..split_input.len() {
                         let ptr_ty = ty_reg.register(TypeKind::Ptr(*base));
                         let index = self.rvsdg.add_const_u32(outer_region, i as u32);
                         let element = self.rvsdg.add_op_element_ptr(
@@ -1718,14 +1724,15 @@ impl Replacer<'_, '_, '_> {
         region: Region,
         original: usize,
         split_results_start: usize,
+        split_results_count: usize,
     ) {
         let original_input = self.rvsdg[region].value_results()[original];
         let ty_reg = self.rvsdg.ty().clone();
 
         match ty_reg.kind(original_input.ty).deref() {
             TypeKind::Ptr(pointee_ty) => match ty_reg.kind(*pointee_ty).deref() {
-                TypeKind::Array { count, .. } => {
-                    for i in 0..*count {
+                TypeKind::Array { .. } | TypeKind::Slice { .. } => {
+                    for i in 0..split_results_count {
                         let index_node = self.rvsdg.add_const_u32(region, i as u32);
                         let split_node = self.rvsdg.add_op_element_ptr(
                             region,
@@ -1763,8 +1770,8 @@ impl Replacer<'_, '_, '_> {
                 }
                 _ => unreachable!("pointee type is not an aggregate"),
             },
-            TypeKind::Array { count, .. } => {
-                for i in 0..*count {
+            TypeKind::Array { .. } => {
+                for i in 0..split_results_count {
                     let index_node = self.rvsdg.add_const_u32(region, i as u32);
                     let split_node = self.rvsdg.add_op_extract_element(
                         region,
