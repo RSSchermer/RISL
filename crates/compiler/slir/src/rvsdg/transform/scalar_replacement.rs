@@ -1179,8 +1179,55 @@ impl Replacer<'_, '_, '_> {
             SwitchOutputSplitKind::Struct => {
                 self.split_switch_struct_output(node, result, branch, split_input)
             }
-            SwitchOutputSplitKind::Array => self.try_split_switch_array_output(node, result),
+            SwitchOutputSplitKind::Array => {
+                self.pause_switch_array_result(branch, result, split_input);
+                self.try_split_switch_array_output(node, result);
+            }
         }
+    }
+
+    /// "Pauses" the splitting of the value-flow path that arrives at the given switch branch
+    /// `result` by inserting a [Reaggregation] node that records the `split_input` parts.
+    ///
+    /// Array(-pointer) and slice(-pointer) typed switch outputs cannot be split until the part
+    /// count is known for all of the switch node's branches (see the "Splitting switch node
+    /// results and output" section of the module-level documentation). We record the parts that
+    /// are available for the current branch with a [Reaggregation] node and reconnect the branch
+    /// `result` to this node. Once every branch has paused this way,
+    /// [try_split_switch_array_output] will find the switch output ready and complete the split,
+    /// dissolving the [Reaggregation] nodes again.
+    fn pause_switch_array_result(
+        &mut self,
+        branch: Region,
+        result: u32,
+        split_input: &[ValueInput],
+    ) {
+        let original = self.rvsdg[branch].value_results()[result as usize];
+
+        // To ensure we're not interfering with any active traversal over the original origin's
+        // users, insert a ValueProxy node between the original origin and the Reaggregation
+        // node.
+        let proxy = self.rvsdg.proxy_origin_user(
+            branch,
+            original.ty,
+            original.origin,
+            ValueUser::Result(result),
+        );
+
+        let reaggregation = self.rvsdg.add_reaggregation(
+            branch,
+            ValueInput::output(original.ty, proxy, 0),
+            split_input.iter().copied(),
+        );
+
+        self.rvsdg.reconnect_region_result(
+            branch,
+            result,
+            ValueOrigin::Output {
+                producer: reaggregation,
+                output: 0,
+            },
+        );
     }
 
     fn split_switch_struct_output(
@@ -1358,10 +1405,9 @@ impl Replacer<'_, '_, '_> {
                     (part_result_start..part_result_end).into_iter().enumerate()
                 {
                     // In case this branch has fewer reaggregated parts than new result-parts, clamp
-                    // the part index to the number of parts, so that we repeat the last array
-                    // element for the excess result-parts (see also the module level
-                    // documentation).
-                    let part = usize::min(part, reaggregation_count);
+                    // the part index to the last part, so that we repeat the last array element for
+                    // the excess result-parts (see also the module level documentation).
+                    let part = usize::min(part, reaggregation_count - 1);
                     let origin = self.rvsdg[reaggregation_node]
                         .expect_reaggregation()
                         .parts()[part]
@@ -1373,7 +1419,24 @@ impl Replacer<'_, '_, '_> {
 
                 // Now that all parts have been connected, dissolve the reaggregation node and
                 // reconnect the original aggregate value back to the original result.
+                let original_origin = self.rvsdg[reaggregation_node]
+                    .expect_reaggregation()
+                    .original()
+                    .origin;
+
                 self.rvsdg.dissolve_reaggregation(reaggregation_node);
+
+                // The pause inserted a ValueProxy node between the original origin and the
+                // reaggregation node (see [pause_switch_array_result]); dissolve it as well, so
+                // that the original result reconnects to the true original origin.
+                if let ValueOrigin::Output {
+                    producer,
+                    output: 0,
+                } = original_origin
+                    && self.rvsdg[producer].is_value_proxy()
+                {
+                    self.rvsdg.dissolve_value_proxy(producer);
+                }
             }
 
             self.visit_users(node, output, &split_output);
