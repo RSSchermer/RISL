@@ -267,9 +267,11 @@ impl RecurrenceAnalysis {
 
                     self.analyze_value_origin(rvsdg, region, ptr_origin, false)
                 }
-                Simple(OpVariantPtr(_) | OpExtractField(_) | OpExtractElement(_)) => Ok(()),
+                Simple(
+                    ConstFallback(_) | OpVariantPtr(_) | OpExtractField(_) | OpExtractElement(_),
+                ) => Ok(()),
                 Simple(OpLoad(_)) => Err(PointerReconstructionError::NeedsPromotion(producer)),
-                Simple(OpAlloca(_) | ConstFallback(_)) => panic!(
+                Simple(OpAlloca(_)) => panic!(
                     "pointers to values created inside the loop-region scope should not recur; \
                         a value cannot outlive its scope"
                 ),

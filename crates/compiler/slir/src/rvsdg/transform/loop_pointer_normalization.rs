@@ -30,9 +30,9 @@
 //!    loop-values), making this observation true by construction for the graphs this transform
 //!    actually processes.
 //! 2. A pointer may not outlive the scope of the value it points to. This means that all
-//!    pointer-type values that flow to loop-region results must have originated from loop-region
-//!    arguments. Note that such pointer values may be refined inside the loop-region if this does
-//!    not violate the above constraint.
+//!    non-fallback pointer-type values that flow to loop-region results must have originated from
+//!    loop-region arguments. Note that such pointer values may be refined inside the loop-region
+//!    if this does not violate the above constraint.
 //!
 //! From these constraints it follows that there is a fixed set of "shapes" that can represent a
 //! pointer-type loop-value for all iterations of a loop; for any particular iteration, one of these
@@ -131,7 +131,7 @@
 
 use std::ops::Range;
 
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::rvsdg::transform::loop_slice_offset_normalization::normalize_loop_slice_offsets;
@@ -230,25 +230,47 @@ impl VariableLoopPointerNormalizer {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum PointerShapeRoot {
+    LoopValue(u32),
+    Fallback,
+}
+
+impl PointerShapeRoot {
+    fn from_leaf_node(rvsdg: &Rvsdg, leaf_node: &LeafNode) -> Self {
+        match leaf_node.root_pointer.origin {
+            ValueOrigin::Argument(loop_argument) => Self::LoopValue(loop_argument),
+            ValueOrigin::Output {
+                producer,
+                output: 0,
+            } if rvsdg[producer].is_const_fallback() => Self::Fallback,
+            _ => panic!(
+                "expected a pointer-type loop-value to originate from a loop-region argument or \
+                    fallback value, but got: {:?}",
+                leaf_node.root_pointer
+            ),
+        }
+    }
+
+    fn loop_value(&self) -> Option<u32> {
+        match self {
+            Self::LoopValue(loop_value) => Some(*loop_value),
+            Self::Fallback => None,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct PointerShape {
-    loop_value: u32,
+    root: PointerShapeRoot,
     root_ptr_ty: Type,
     access_chain: Vec<Access>,
 }
 
 impl PointerShape {
-    fn from_leaf_node(leaf_node: &LeafNode) -> Self {
-        let ValueOrigin::Argument(loop_argument) = leaf_node.root_pointer.origin else {
-            panic!(
-                "expected a pointer-type loop-value to originate from a loop-region argument, \
-                    but got: {:?}",
-                leaf_node.root_pointer
-            );
-        };
-
+    fn from_leaf_node(rvsdg: &Rvsdg, leaf_node: &LeafNode) -> Self {
         PointerShape {
-            loop_value: loop_argument,
+            root: PointerShapeRoot::from_leaf_node(rvsdg, leaf_node),
             root_ptr_ty: leaf_node.root_pointer.ty,
             access_chain: leaf_node.access_chain.clone(),
         }
@@ -375,7 +397,7 @@ impl NormalizerInternal {
             let initial_shape_index = dep_group
                 .shapes
                 .get_index_of(&PointerShape {
-                    loop_value: *loop_value,
+                    root: PointerShapeRoot::LoopValue(*loop_value),
                     root_ptr_ty: info.ty,
                     access_chain: vec![],
                 })
@@ -499,17 +521,18 @@ impl NormalizerInternal {
         reconstruction_info
             .reconstruction_root
             .visit_leaves(|leaf_node| {
-                shapes.insert(PointerShape::from_leaf_node(leaf_node));
+                shapes.insert(PointerShape::from_leaf_node(rvsdg, leaf_node));
             });
 
         // Collect a set of all unique arguments used by our shape-set as our dependencies.
-        let dependencies = FxHashSet::from_iter(shapes.iter().map(|shape| shape.loop_value));
+        let dependencies =
+            FxHashSet::from_iter(shapes.iter().filter_map(|shape| shape.root.loop_value()));
 
         // The shape set should also include the current loop-value's argument itself, as this sets
         // the initial value for the first iteration. It may already be in the shape set if the
         // loop-value is self-dependent, but in case it's not, we add it here.
         shapes.insert(PointerShape {
-            loop_value,
+            root: PointerShapeRoot::LoopValue(loop_value),
             root_ptr_ty: loop_value_ty,
             access_chain: vec![],
         });
@@ -613,11 +636,14 @@ impl NormalizerInternal {
         // for a dependency that is not part of the same dependency group, we want to use its shape
         // selector's output as an input to the current loop-value's shape selector.
         for shape in &dep_group.shapes {
-            let requires_shape_selector = self.loop_value_info.contains_key(&shape.loop_value);
-            let same_dep_group = dep_group.loop_values.contains(&shape.loop_value);
+            let Some(shape_loop_value) = shape.root.loop_value() else {
+                continue;
+            };
+            let requires_shape_selector = self.loop_value_info.contains_key(&shape_loop_value);
+            let same_dep_group = dep_group.loop_values.contains(&shape_loop_value);
 
-            if shape.loop_value != loop_value && requires_shape_selector && !same_dep_group {
-                self.sequence_shape_selector_construction(shape.loop_value, sequence);
+            if shape_loop_value != loop_value && requires_shape_selector && !same_dep_group {
+                self.sequence_shape_selector_construction(shape_loop_value, sequence);
             }
         }
 
@@ -722,23 +748,32 @@ impl NormalizerInternal {
 
         // Construct a set of unique shape-roots. Shapes may share a root-pointer, with different
         // access chains. Our switch node will only need one input for each unique root-pointer.
-        // We'll use an IndexMap to deduplicate the root-pointers and to assign each root-pointer a
+        // We'll use an IndexSet to deduplicate the root-pointers and to assign each root-pointer a
         // unique index.
-        let mut shape_roots: IndexMap<u32, Type> = IndexMap::default();
-        shape_roots.extend(
-            shapes
-                .iter()
-                .map(|shape| (shape.loop_value, shape.root_ptr_ty)),
-        );
+        let mut shape_roots: IndexSet<(PointerShapeRoot, Type)> = IndexSet::default();
+        shape_roots.extend(shapes.iter().map(|shape| (shape.root, shape.root_ptr_ty)));
 
         // Now we'll construct the input list for the switch node. The first input is the branch
         // selector. Then follow the inputs for the set of unique root-pointers. Finally, a list
         // of dynamic access parameters for element accesses that use runtime-dynamic index values.
         let mut switch_inputs = vec![ValueInput::output(TY_PREDICATE, branch_selector, 0)];
-        switch_inputs.extend(shape_roots.iter().map(|(loop_value, ty)| ValueInput {
-            ty: *ty,
-            origin: loop_value_origin(*loop_value),
-        }));
+
+        for (root, ty) in &shape_roots {
+            let origin = match root {
+                PointerShapeRoot::LoopValue(loop_value) => loop_value_origin(*loop_value),
+                PointerShapeRoot::Fallback => {
+                    let fallback = rvsdg.add_const_fallback(region, *ty);
+
+                    ValueOrigin::Output {
+                        producer: fallback,
+                        output: 0,
+                    }
+                }
+            };
+
+            switch_inputs.push(ValueInput { ty: *ty, origin });
+        }
+
         switch_inputs.extend(
             info.access_param_loop_values
                 .clone()
@@ -758,8 +793,8 @@ impl NormalizerInternal {
         for shape in shapes {
             let branch = rvsdg.add_switch_branch(switch_node);
             let root_arg = shape_roots
-                .get_index_of(&shape.loop_value)
-                .expect("the shape-roots map should contain all loop-values used by the shapes")
+                .get_index_of(&(shape.root, shape.root_ptr_ty))
+                .expect("the shape-roots set should contain all roots used by the shapes")
                 as u32;
 
             let mut current_value = ValueInput::argument(shape.root_ptr_ty, root_arg);
@@ -824,14 +859,11 @@ impl NormalizerInternal {
         // parent branching nodes. This will help us route values from the loop-region to leaf
         // branches nested inside the shape-encoder sub-graph.
         reconstruction_root.propagate_sub_tree_inputs(|leaf, input_set| {
-            let ValueOrigin::Argument(dep_value) = leaf.root_pointer.origin else {
-                panic!(
-                    "expected all pointers in variable loop-pointer system to originate from \
-                        arguments"
-                );
-            };
+            let root = PointerShapeRoot::from_leaf_node(rvsdg, leaf);
 
-            if dep_group.loop_values.contains(&dep_value) {
+            if let PointerShapeRoot::LoopValue(dep_value) = root
+                && dep_group.loop_values.contains(&dep_value)
+            {
                 // The dependency is part of the same dependency cycle as the current loop-value.
                 // We set the serialization of the loop-value for the next iteration, to the
                 // serialization of the dependency for the current iteration. Note that this also
@@ -1006,13 +1038,11 @@ impl ShapeEncoderBuilder<'_> {
             }
         };
 
-        let ValueOrigin::Argument(loop_value) = node.root_pointer.origin else {
-            panic!(
-                "expected all pointers in variable loop-pointer system to originate from arguments"
-            );
-        };
+        let root = PointerShapeRoot::from_leaf_node(self.rvsdg, node);
 
-        if self.dep_group.loop_values.contains(&loop_value) {
+        if let PointerShapeRoot::LoopValue(loop_value) = root
+            && self.dep_group.loop_values.contains(&loop_value)
+        {
             let loop_value_info = &self.loop_value_info[&loop_value];
 
             let mut outputs = Vec::new();
@@ -1032,7 +1062,7 @@ impl ShapeEncoderBuilder<'_> {
             let shape_index = self
                 .dep_group
                 .shapes
-                .get_index_of(&PointerShape::from_leaf_node(node))
+                .get_index_of(&PointerShape::from_leaf_node(self.rvsdg, node))
                 .expect("every leaf-node should have registered an associated shape");
 
             let shape_value = self.rvsdg.add_const_u32(region, shape_index as u32);
@@ -1893,6 +1923,151 @@ mod tests {
             rvsdg[loop_region].value_results()[6].origin,
             ValueOrigin::Argument(4)
         );
+    }
+
+    #[test]
+    fn test_normalize_with_fallback_pointer_shape() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let ptr = rvsdg.add_op_alloca(region, TY_U32);
+
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(TY_PTR_U32, ptr, 0),
+                ValueInput::output(TY_PTR_U32, ptr, 0),
+            ],
+            Some(StateOrigin::Argument),
+        );
+
+        let case = rvsdg.add_const_u32(loop_region, 0);
+        let selector = rvsdg.add_op_case_to_branch_selector(
+            loop_region,
+            ValueInput::output(TY_U32, case, 0),
+            Int::U32,
+            [0],
+        );
+        let fallback = rvsdg.add_const_fallback(loop_region, TY_PTR_U32);
+
+        let switch_node = rvsdg.add_switch(
+            loop_region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector, 0),
+                ValueInput::argument(TY_PTR_U32, 0),
+                ValueInput::output(TY_PTR_U32, fallback, 0),
+            ],
+            vec![ValueOutput::new(TY_PTR_U32)],
+            None,
+        );
+
+        let pointer_branch = rvsdg.add_switch_branch(switch_node);
+
+        rvsdg.reconnect_region_result(pointer_branch, 0, ValueOrigin::Argument(0));
+
+        let fallback_branch = rvsdg.add_switch_branch(switch_node);
+
+        rvsdg.reconnect_region_result(fallback_branch, 0, ValueOrigin::Argument(1));
+
+        let inner_store = rvsdg.add_op_store(
+            loop_region,
+            ValueInput::argument(TY_PTR_U32, 1),
+            ValueInput::output(TY_U32, case, 0),
+            StateOrigin::Argument,
+        );
+
+        let reentry_predicate = rvsdg.add_const_bool(loop_region, false);
+
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: reentry_predicate,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(
+            loop_region,
+            2,
+            ValueOrigin::Output {
+                producer: switch_node,
+                output: 0,
+            },
+        );
+
+        VariableLoopPointerNormalizer::new().normalize_loop_value(&mut rvsdg, loop_node, 1);
+
+        assert_eq!(
+            rvsdg[loop_region].value_results()[2].origin,
+            ValueOrigin::Argument(1),
+            "the normalized pointer loop-value should have become loop-invariant"
+        );
+
+        let ValueOrigin::Output {
+            producer: shape_selector,
+            output: 0,
+        } = rvsdg[inner_store].expect_op_store().ptr_input().origin
+        else {
+            panic!("the inner store should use the shape-selector output")
+        };
+        let shape_selector_data = rvsdg[shape_selector].expect_switch();
+
+        assert_eq!(shape_selector_data.value_inputs().len(), 4);
+        assert_eq!(shape_selector_data.branches().len(), 3);
+
+        let fallback_shape_branch = shape_selector_data.branches()[1];
+
+        assert_eq!(
+            rvsdg[fallback_shape_branch].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+
+        let ValueOrigin::Output {
+            producer: shape_fallback,
+            output: 0,
+        } = shape_selector_data.value_inputs()[2].origin
+        else {
+            panic!("the fallback shape root should be produced by a node")
+        };
+
+        assert!(rvsdg[shape_fallback].is_const_fallback());
+
+        let ValueOrigin::Output {
+            producer: shape_encoder,
+            output: 0,
+        } = rvsdg[loop_region].value_results()[4].origin
+        else {
+            panic!("the shape-index result should be produced by the shape encoder")
+        };
+
+        let fallback_encoder_branch = rvsdg[shape_encoder].expect_switch().branches()[1];
+
+        let ValueOrigin::Output {
+            producer: fallback_shape_index,
+            output: 0,
+        } = rvsdg[fallback_encoder_branch].value_results()[0].origin
+        else {
+            panic!("the fallback encoder branch should return a constant shape index")
+        };
+
+        assert_eq!(rvsdg[fallback_shape_index].expect_const_u32().value(), 1);
     }
 
     #[test]
