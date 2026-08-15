@@ -4,3 +4,4 @@ mod if_else_slice_of_refs;
 mod loop_alternating_cycle;
 mod loop_alternating_no_cycle;
 mod loop_interleaved_variable_pointer_promotion;
+mod loop_slice_offset;

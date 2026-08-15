@@ -16,6 +16,7 @@ pub mod identical_branch_elimination;
 pub mod invalid_ptr_replacement;
 pub mod loop_passthrough_elimination;
 pub mod loop_pointer_normalization;
+pub mod loop_slice_offset_normalization;
 pub mod memory_promotion_and_legalization;
 pub mod memory_transform;
 pub mod node_reduction;

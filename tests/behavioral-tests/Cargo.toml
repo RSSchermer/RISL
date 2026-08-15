@@ -198,6 +198,7 @@ test_variable_pointer_if_else_slice_of_refs = []
 test_variable_pointer_loop_alternating_cycle = []
 test_variable_pointer_loop_alternating_no_cycle = []
 test_variable_pointer_loop_interleaved_variable_pointer_promotion = []
+test_variable_pointer_loop_slice_offset = []
 test_while_loop = []
 
 [dependencies]

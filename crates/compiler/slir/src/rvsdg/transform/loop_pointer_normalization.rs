@@ -21,7 +21,14 @@
 //!    struct `A` contains a field of type `A`, or an array type where the element type is the array
 //!    type itself (recursively). Such self-recursive types are already disallowed in SLIR (they
 //!    cannot be represented in memory unless they are zero-sized, and we don't allow zero-sized
-//!    types).
+//!    types). Note that this type-based argument does not extend to the [OpOffsetSlice] operation,
+//!    which is type-preserving (`ptr<slice<T>> -> ptr<slice<T>>`): a slice-pointer-type loop-value
+//!    *can* be iteratively self-refining through [OpOffsetSlice] nodes. We therefore first apply
+//!    the [loop_slice_offset_normalization] transform to a loop-value before normalizing it; this
+//!    rewrites any offset-accumulating recurrences in that loop-value's dependency closure into
+//!    offset-free recurrences (with the accumulated offsets carried by separate `u32`
+//!    loop-values), making this observation true by construction for the graphs this transform
+//!    actually processes.
 //! 2. A pointer may not outlive the scope of the value it points to. This means that all
 //!    pointer-type values that flow to loop-region results must have originated from loop-region
 //!    arguments. Note that such pointer values may be refined inside the loop-region if this does
@@ -67,7 +74,7 @@
 //! - If there is a dependency cycle, then we combine all shapes for all loop-values that are part
 //!   of the cycle into a single set, such that we assign each shape a consistent index across all
 //!   loop-values that are part of the cycle. Note we still create separate shape selectors and
-//!   separate shape index loop-values (and access paramater loop-values) for each loop-value in the
+//!   separate shape index loop-values (and access parameter loop-values) for each loop-value in the
 //!   cycle. We'll refer to all loop-values that are part of the same dependency cycle as a
 //!   "dependency group".
 //!
@@ -119,6 +126,7 @@
 //! not need to analyze the control-flow inside the loop node; the value output by the loop node
 //! will be identical to the value input into the loop node.
 //!
+//! [loop_slice_offset_normalization]: crate::rvsdg::transform::loop_slice_offset_normalization
 //! [variable_pointer_emulation]: crate::rvsdg::transform::variable_pointer_emulation
 
 use std::ops::Range;
@@ -126,6 +134,7 @@ use std::ops::Range;
 use indexmap::{IndexMap, IndexSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::rvsdg::transform::loop_slice_offset_normalization::normalize_loop_slice_offsets;
 use crate::rvsdg::transform::pointer_reconstruction::{
     Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionError,
     PointerReconstructionNode,
@@ -166,6 +175,33 @@ impl VariableLoopPointerNormalizer {
         // nested loops should not be a common occurrence (especially in GPU code).
 
         while let Some(job) = self.queue.pop() {
+            // Slice-pointer type loop-values may accumulate offset during iteration. These can
+            // effectively be self-refining pointer values, which the variable-loop-pointer-
+            // normalization algorithm assumes do not exist. We therefore run a "pre-normalization"
+            // transform that rewrites these into "offset-free" loop-values first.
+            match normalize_loop_slice_offsets(rvsdg, job.loop_node, job.loop_value) {
+                Ok(_) => {}
+                Err(NeedsLoopPointerNormalization {
+                    loop_node,
+                    loop_value,
+                }) => {
+                    // First push the current job back onto the stack since we didn't finish it
+                    self.queue.push(job);
+
+                    // Then push the new job onto the stack so that it will be processed first on
+                    // the next iteration
+                    self.queue.push(Job {
+                        loop_node,
+                        loop_value,
+                    });
+
+                    continue;
+                }
+                Err(err) => {
+                    panic!("unexpected error: {:?}", err);
+                }
+            }
+
             let mut normalizer = NormalizerInternal::new(rvsdg, job.loop_node);
 
             match normalizer.normalize_loop_value(rvsdg, job.loop_value) {
