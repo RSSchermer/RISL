@@ -120,6 +120,13 @@ impl NodeReducer {
                     self.apply_reduction(rvsdg, node, region, reduced);
                 }
             }
+            Simple(OpBoolToBranchSelector(_)) => {
+                let val = self.resolve_value(rvsdg, node, 0);
+
+                if let Some(reduced) = try_reduce_op_bool_to_branch_selector(val) {
+                    self.apply_reduction(rvsdg, node, region, reduced);
+                }
+            }
             _ => {}
         }
     }
@@ -192,7 +199,8 @@ impl NodeReducer {
                         | OpConvertToI32(_)
                         | OpConvertToF32(_)
                         | OpConvertToBool(_)
-                        | OpCaseToBranchSelector(_) => {
+                        | OpCaseToBranchSelector(_)
+                        | OpBoolToBranchSelector(_) => {
                             self.worklist.insert(*consumer);
                         }
                         _ => {}
@@ -232,7 +240,8 @@ impl<'a> RegionNodesVisitor for CandidateCollector<'a> {
             | OpConvertToI32(_)
             | OpConvertToF32(_)
             | OpConvertToBool(_)
-            | OpCaseToBranchSelector(_),
+            | OpCaseToBranchSelector(_)
+            | OpBoolToBranchSelector(_),
         ) = rvsdg[node].kind()
         {
             self.worklist.insert(node);
@@ -717,13 +726,24 @@ fn try_reduce_op_case_to_branch_selector(
     Some(Predicate(branch_index as u32))
 }
 
+fn try_reduce_op_bool_to_branch_selector(val: MaybeConstantValue) -> Option<MaybeConstantValue> {
+    use MaybeConstantValue::*;
+
+    match val {
+        Bool(true) => Some(Predicate(0)),
+        Bool(false) => Some(Predicate(1)),
+        Variable(_) => None,
+        _ => panic!("op-bool-to-branch-selector input value must be a bool"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use MaybeConstantValue::*;
 
     use super::*;
     use crate::rvsdg::ValueInput;
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_F32, TY_I32, TY_U32};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_F32, TY_I32, TY_PREDICATE, TY_U32};
     use crate::{FnSig, Function, Symbol};
 
     #[test]
@@ -1211,5 +1231,21 @@ mod tests {
             try_reduce_op_case_to_branch_selector(Int::I32, &cases_neg, I32(-1)),
             Some(Predicate(0))
         );
+    }
+
+    #[test]
+    fn test_try_reduce_op_bool_to_branch_selector() {
+        assert_eq!(
+            try_reduce_op_bool_to_branch_selector(Bool(true)),
+            Some(Predicate(0))
+        );
+        assert_eq!(
+            try_reduce_op_bool_to_branch_selector(Bool(false)),
+            Some(Predicate(1))
+        );
+
+        let var = Variable(ValueInput::argument(TY_BOOL, 0));
+
+        assert_eq!(try_reduce_op_bool_to_branch_selector(var), None);
     }
 }
