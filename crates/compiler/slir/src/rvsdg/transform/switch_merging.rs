@@ -175,7 +175,9 @@ impl RegionSwitchMerger {
             });
     }
 
-    fn merge_in_region(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, region: Region) {
+    fn merge_in_region(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, region: Region) -> bool {
+        let mut changed = false;
+
         self.collect_candidates(rvsdg, region);
 
         while let Some(candidate) = self.candidates.pop_front() {
@@ -203,6 +205,7 @@ impl RegionSwitchMerger {
                         candidate.switch_node,
                         other.switch_node,
                     );
+                    changed = true;
 
                     // We break here because the `candidate` switch node no longer exists:
                     // `merge_switch_nodes` merges the first switch node argument into the second
@@ -214,6 +217,8 @@ impl RegionSwitchMerger {
                 }
             }
         }
+
+        changed
     }
 }
 
@@ -242,10 +247,16 @@ impl SwitchMerger {
         }
     }
 
-    pub fn merge_in_fn(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, function: Function) {
+    pub fn merge_in_fn(
+        &mut self,
+        module: &mut Module,
+        rvsdg: &mut Rvsdg,
+        function: Function,
+    ) -> bool {
         let fn_node = rvsdg
             .get_function_node(function)
             .expect("function not registered");
+        let mut changed = false;
         let mut collector = RegionCollector {
             region_stack: &mut self.region_stack,
         };
@@ -253,14 +264,18 @@ impl SwitchMerger {
         collector.visit_node(rvsdg, fn_node);
 
         while let Some(region) = self.region_stack.pop() {
-            self.region_switch_merger
+            changed |= self
+                .region_switch_merger
                 .merge_in_region(module, rvsdg, region);
         }
+
+        changed
     }
 }
 
-pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
     let mut merger = SwitchMerger::new();
+    let mut changed = false;
     let entry_points = module
         .entry_points
         .iter()
@@ -268,8 +283,10 @@ pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
         .collect::<Vec<_>>();
 
     for entry_point in entry_points {
-        merger.merge_in_fn(module, rvsdg, entry_point);
+        changed |= merger.merge_in_fn(module, rvsdg, entry_point);
     }
+
+    changed
 }
 
 #[cfg(test)]
@@ -428,7 +445,7 @@ mod tests {
 
         let mut merger = SwitchMerger::new();
 
-        merger.merge_in_fn(&mut module, &mut rvsdg, function);
+        assert!(merger.merge_in_fn(&mut module, &mut rvsdg, function));
 
         let switch_1_data = rvsdg[switch_1_node].expect_switch();
 
@@ -640,7 +657,7 @@ mod tests {
 
         let mut merger = SwitchMerger::new();
 
-        merger.merge_in_fn(&mut module, &mut rvsdg, function);
+        assert!(merger.merge_in_fn(&mut module, &mut rvsdg, function));
 
         assert!(
             !rvsdg.is_live_node(switch_0_node),
