@@ -106,10 +106,16 @@ impl ConstSwitchInliner {
         }
     }
 
-    pub fn inline_in_fn(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, function: Function) {
+    pub fn inline_in_fn(
+        &mut self,
+        module: &mut Module,
+        rvsdg: &mut Rvsdg,
+        function: Function,
+    ) -> bool {
         let fn_node = rvsdg
             .get_function_node(function)
             .expect("function not registered");
+        let mut changed = false;
         let mut collector = NodeCollector {
             candidate_stack: &mut self.candidate_stack,
         };
@@ -117,26 +123,40 @@ impl ConstSwitchInliner {
         collector.visit_node(rvsdg, fn_node);
 
         while let Some(node) = self.candidate_stack.pop() {
-            self.process_switch_node(module, rvsdg, node);
+            changed |= self.process_switch_node(module, rvsdg, node);
         }
+
+        changed
     }
 
-    fn process_switch_node(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, switch_node: Node) {
+    fn process_switch_node(
+        &mut self,
+        module: &mut Module,
+        rvsdg: &mut Rvsdg,
+        switch_node: Node,
+    ) -> bool {
         let mut finder = ConstPredicateFinder::new(&mut self.visited);
 
         if let Some(predicate) = finder.find(rvsdg, switch_node) {
             inline_switch_branch(module, rvsdg, switch_node, predicate as usize);
+
+            true
+        } else {
+            false
         }
     }
 }
 
-pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
     let mut inliner = ConstSwitchInliner::new();
+    let mut changed = false;
     let entry_points = module.entry_points.iter().map(|e| e.0).collect::<Vec<_>>();
 
     for entry_point in entry_points {
-        inliner.inline_in_fn(module, rvsdg, entry_point);
+        changed |= inliner.inline_in_fn(module, rvsdg, entry_point);
     }
+
+    changed
 }
 
 #[cfg(test)]
@@ -226,7 +246,7 @@ mod tests {
 
         let mut inliner = ConstSwitchInliner::new();
 
-        inliner.inline_in_fn(&mut module, &mut rvsdg, function);
+        assert!(inliner.inline_in_fn(&mut module, &mut rvsdg, function));
 
         let ValueOrigin::Output {
             producer: add_node,
@@ -378,7 +398,7 @@ mod tests {
 
         let mut inliner = ConstSwitchInliner::new();
 
-        inliner.inline_in_fn(&mut module, &mut rvsdg, function);
+        assert!(inliner.inline_in_fn(&mut module, &mut rvsdg, function));
 
         let ValueOrigin::Output {
             producer: add_1_repl_node,
