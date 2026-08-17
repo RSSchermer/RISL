@@ -18,8 +18,9 @@ enum MaybeConstantValue {
     Variable(ValueInput),
 }
 
-pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
     let mut reducer = NodeReducer::new();
+    let mut changed = false;
 
     for (entry_point, _) in module.entry_points.iter() {
         let fn_node = rvsdg
@@ -27,8 +28,10 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
             .expect("function not registered");
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
-        reducer.process_region(rvsdg, body_region);
+        changed |= reducer.process_region(rvsdg, body_region);
     }
+
+    changed
 }
 
 pub struct NodeReducer {
@@ -42,7 +45,8 @@ impl NodeReducer {
         }
     }
 
-    pub fn process_region(&mut self, rvsdg: &mut Rvsdg, region: Region) {
+    pub fn process_region(&mut self, rvsdg: &mut Rvsdg, region: Region) -> bool {
+        let mut changed = false;
         let mut collector = CandidateCollector {
             worklist: &mut self.worklist,
         };
@@ -53,11 +57,13 @@ impl NodeReducer {
                 continue;
             }
 
-            self.try_reduce_node(rvsdg, node);
+            changed |= self.try_reduce_node(rvsdg, node);
         }
+
+        changed
     }
 
-    fn try_reduce_node(&mut self, rvsdg: &mut Rvsdg, node: Node) {
+    fn try_reduce_node(&mut self, rvsdg: &mut Rvsdg, node: Node) -> bool {
         let node_data = &rvsdg[node];
         let region = node_data.region();
 
@@ -73,6 +79,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_binary(op, lhs, rhs) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpUnary(op_unary)) => {
@@ -81,6 +91,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_unary(op, val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpConvertToU32(_)) => {
@@ -88,6 +102,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_convert_to_u32(val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpConvertToI32(_)) => {
@@ -95,6 +113,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_convert_to_i32(val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpConvertToF32(_)) => {
@@ -102,6 +124,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_convert_to_f32(val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpConvertToBool(_)) => {
@@ -109,6 +135,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_convert_to_bool(val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpCaseToBranchSelector(n)) => {
@@ -118,6 +148,10 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_op_case_to_branch_selector(encoding, cases, val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
             Simple(OpBoolToBranchSelector(_)) => {
@@ -125,9 +159,13 @@ impl NodeReducer {
 
                 if let Some(reduced) = try_reduce_op_bool_to_branch_selector(val) {
                     self.apply_reduction(rvsdg, node, region, reduced);
+
+                    true
+                } else {
+                    false
                 }
             }
-            _ => {}
+            _ => false,
         }
     }
 
@@ -793,7 +831,9 @@ mod tests {
 
         let mut reducer = NodeReducer::new();
 
-        reducer.process_region(&mut rvsdg, region);
+        let changed = reducer.process_region(&mut rvsdg, region);
+
+        assert!(changed);
 
         let ValueOrigin::Output {
             producer,
