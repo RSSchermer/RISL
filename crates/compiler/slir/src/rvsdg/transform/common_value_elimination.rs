@@ -25,10 +25,11 @@ impl CommonValueEliminator {
         }
     }
 
-    pub fn process_region(&mut self, rvsdg: &mut Rvsdg, region: Region) {
+    pub fn process_region(&mut self, rvsdg: &mut Rvsdg, region: Region) -> bool {
         // Removing a duplicate value can uncover additional duplicate values. We therefore
         // remove duplicate values in a loop until a loop iteration finds no more duplicates.
 
+        let mut changed = false;
         let mut do_iteration = true;
 
         while do_iteration {
@@ -48,13 +49,17 @@ impl CommonValueEliminator {
                 .duplicate_switch_output_eliminator
                 .process_region(rvsdg, region);
 
-            self.dead_value_eliminator.process_region(rvsdg, region)
+            changed |= do_iteration;
+            self.dead_value_eliminator.process_region(rvsdg, region);
         }
+
+        changed
     }
 }
 
-pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
     let mut eliminator = CommonValueEliminator::new();
+    let mut changed = false;
 
     for (entry_point, _) in module.entry_points.iter() {
         let fn_node = rvsdg
@@ -62,6 +67,8 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
             .expect("function not registered");
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
-        eliminator.process_region(rvsdg, body_region);
+        changed |= eliminator.process_region(rvsdg, body_region);
     }
+
+    changed
 }
