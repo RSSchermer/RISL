@@ -3,7 +3,7 @@ use indexmap::IndexSet;
 use crate::rvsdg::visit::region_nodes::{RegionNodesVisitor, visit_node};
 use crate::rvsdg::visit::reverse_value_flow::{ReverseValueFlowVisitor, visit_region_argument};
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, ValueUser,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin,
 };
 use crate::ty::{Int, IntSize, TY_BOOL, TY_F32, TY_I32, TY_U32};
 use crate::{BinaryOperator, Module, UnaryOperator};
@@ -18,8 +18,18 @@ enum MaybeConstantValue {
     Variable(ValueInput),
 }
 
-pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
+pub fn transform_function(rvsdg: &mut Rvsdg, region: Region) -> bool {
     let mut reducer = NodeReducer::new();
+    let mut changed = false;
+
+    while reducer.process_region(rvsdg, region) {
+        changed = true;
+    }
+
+    changed
+}
+
+pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
     let mut changed = false;
 
     for (entry_point, _) in module.entry_points.iter() {
@@ -28,7 +38,7 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
             .expect("function not registered");
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
-        changed |= reducer.process_region(rvsdg, body_region);
+        changed |= transform_function(rvsdg, body_region);
     }
 
     changed
@@ -53,10 +63,6 @@ impl NodeReducer {
         collector.visit_region(rvsdg, region);
 
         while let Some(node) = self.worklist.pop() {
-            if !rvsdg.is_live_node(node) {
-                continue;
-            }
-
             changed |= self.try_reduce_node(rvsdg, node);
         }
 
@@ -224,28 +230,6 @@ impl NodeReducer {
             producer: node,
             output: 0,
         };
-
-        for user in &rvsdg[node].value_outputs()[0].users {
-            if let ValueUser::Input { consumer, .. } = user {
-                if let NodeKind::Simple(simple) = rvsdg[*consumer].kind() {
-                    use SimpleNode::*;
-
-                    match simple {
-                        OpBinary(_)
-                        | OpUnary(_)
-                        | OpConvertToU32(_)
-                        | OpConvertToI32(_)
-                        | OpConvertToF32(_)
-                        | OpConvertToBool(_)
-                        | OpCaseToBranchSelector(_)
-                        | OpBoolToBranchSelector(_) => {
-                            self.worklist.insert(*consumer);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
 
         rvsdg.reconnect_value_users(region, original_origin, new_origin);
         rvsdg.remove_node(node);
@@ -831,9 +815,11 @@ mod tests {
 
         let mut reducer = NodeReducer::new();
 
-        let changed = reducer.process_region(&mut rvsdg, region);
+        let changed = transform_function(&mut rvsdg, region);
 
         assert!(changed);
+        assert!(!rvsdg.is_live_node(add1));
+        assert!(!rvsdg.is_live_node(add2));
 
         let ValueOrigin::Output {
             producer,
