@@ -36,8 +36,12 @@ pub mod switch_passthrough_elimination;
 pub mod switchify_pred_to_case;
 pub mod variable_pointer_emulation;
 
-use crate::Module;
 use crate::rvsdg::Rvsdg;
+use crate::rvsdg::transform::common_value_elimination::CommonValueEliminator;
+use crate::rvsdg::transform::const_switch_inlining::ConstSwitchInliner;
+use crate::rvsdg::transform::node_reduction::NodeReducer;
+use crate::rvsdg::transform::switch_merging::SwitchMerger;
+use crate::{Function, Module};
 
 pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
@@ -65,5 +69,59 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     dead_value_elimination::transform_entry_points(module, rvsdg);
     identical_branch_elimination::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
+
+    // TODO: this is an expensive and optional optimization loop. We should add some config
+    // to control whether this is run.
+    optimize_entry_points(module, rvsdg);
+
     fallback_value_replacement::transform_entry_points(module, rvsdg);
+}
+
+fn optimize_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
+    let mut optimizer = LoopingOptimizer::new();
+    let entry_points = module.entry_points.iter().collect::<Vec<_>>();
+
+    for (entry_point, _) in entry_points {
+        optimizer.optimize_function(module, rvsdg, entry_point);
+    }
+}
+
+struct LoopingOptimizer {
+    node_reducer: NodeReducer,
+    const_switch_inliner: ConstSwitchInliner,
+    switch_merger: SwitchMerger,
+    common_value_eliminator: CommonValueEliminator,
+}
+
+impl LoopingOptimizer {
+    fn new() -> Self {
+        Self {
+            node_reducer: NodeReducer::new(),
+            const_switch_inliner: ConstSwitchInliner::new(),
+            switch_merger: SwitchMerger::new(),
+            common_value_eliminator: CommonValueEliminator::new(),
+        }
+    }
+
+    fn optimize_function(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, function: Function) {
+        let fn_node = rvsdg
+            .get_function_node(function)
+            .expect("function not registered");
+        let body_region = rvsdg[fn_node].expect_function().body_region();
+
+        let mut do_iteration = true;
+
+        while do_iteration {
+            do_iteration = false;
+
+            do_iteration |= self.node_reducer.process_region(rvsdg, body_region);
+            do_iteration |= self
+                .const_switch_inliner
+                .inline_in_fn(module, rvsdg, function);
+            do_iteration |= self.switch_merger.merge_in_fn(module, rvsdg, function);
+            do_iteration |= self
+                .common_value_eliminator
+                .process_region(rvsdg, body_region);
+        }
+    }
 }
