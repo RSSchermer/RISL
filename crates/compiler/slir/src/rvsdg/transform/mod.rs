@@ -31,6 +31,7 @@ pub mod region_replication;
 pub mod scalar_replacement;
 pub mod store_coalescing;
 pub mod switch_arg_reduction;
+pub mod switch_fallback_unification;
 pub mod switch_merging;
 pub mod switch_passthrough_elimination;
 pub mod switchify_pred_to_case;
@@ -40,6 +41,7 @@ use crate::rvsdg::Rvsdg;
 use crate::rvsdg::transform::common_value_elimination::CommonValueEliminator;
 use crate::rvsdg::transform::const_switch_inlining::ConstSwitchInliner;
 use crate::rvsdg::transform::node_reduction::NodeReducer;
+use crate::rvsdg::transform::switch_fallback_unification::SwitchFallbackUnifier;
 use crate::rvsdg::transform::switch_merging::SwitchMerger;
 use crate::{Function, Module};
 
@@ -91,6 +93,7 @@ struct LoopingOptimizer {
     const_switch_inliner: ConstSwitchInliner,
     switch_merger: SwitchMerger,
     common_value_eliminator: CommonValueEliminator,
+    switch_fallback_unifier: SwitchFallbackUnifier,
 }
 
 impl LoopingOptimizer {
@@ -100,6 +103,7 @@ impl LoopingOptimizer {
             const_switch_inliner: ConstSwitchInliner::new(),
             switch_merger: SwitchMerger::new(),
             common_value_eliminator: CommonValueEliminator::new(),
+            switch_fallback_unifier: SwitchFallbackUnifier::new(),
         }
     }
 
@@ -119,6 +123,9 @@ impl LoopingOptimizer {
                 .const_switch_inliner
                 .inline_in_fn(module, rvsdg, function);
             do_iteration |= self.switch_merger.merge_in_fn(module, rvsdg, function);
+            do_iteration |= self
+                .switch_fallback_unifier
+                .process_region(rvsdg, body_region);
             do_iteration |= self
                 .common_value_eliminator
                 .process_region(rvsdg, body_region);
