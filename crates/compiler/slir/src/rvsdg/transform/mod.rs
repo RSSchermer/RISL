@@ -4,6 +4,7 @@ pub mod common_value_elimination;
 pub mod conditional_ub_elimination;
 pub mod const_dependency_inlining;
 pub mod const_switch_inlining;
+pub mod correlated_switch_simplification;
 pub mod dead_loop_value_normalization;
 pub mod dead_value_elimination;
 pub mod duplicate_loop_value_elimination;
@@ -31,6 +32,7 @@ pub mod region_replication;
 pub mod scalar_replacement;
 pub mod store_coalescing;
 pub mod switch_arg_reduction;
+mod switch_branch_pruning;
 pub mod switch_fallback_unification;
 pub mod switch_merging;
 pub mod switch_passthrough_elimination;
@@ -40,6 +42,7 @@ pub mod variable_pointer_emulation;
 use crate::rvsdg::Rvsdg;
 use crate::rvsdg::transform::common_value_elimination::CommonValueEliminator;
 use crate::rvsdg::transform::const_switch_inlining::ConstSwitchInliner;
+use crate::rvsdg::transform::correlated_switch_simplification::CorrelatedSwitchSimplifier;
 use crate::rvsdg::transform::node_reduction::NodeReducer;
 use crate::rvsdg::transform::switch_fallback_unification::SwitchFallbackUnifier;
 use crate::rvsdg::transform::switch_merging::SwitchMerger;
@@ -77,6 +80,8 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     optimize_entry_points(module, rvsdg);
 
     fallback_value_replacement::transform_entry_points(module, rvsdg);
+
+    rvsdg.dump_to_file("final_transformed.dump").unwrap();
 }
 
 fn optimize_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
@@ -94,6 +99,7 @@ struct LoopingOptimizer {
     switch_merger: SwitchMerger,
     common_value_eliminator: CommonValueEliminator,
     switch_fallback_unifier: SwitchFallbackUnifier,
+    correlated_switch_specializer: CorrelatedSwitchSimplifier,
 }
 
 impl LoopingOptimizer {
@@ -104,6 +110,7 @@ impl LoopingOptimizer {
             switch_merger: SwitchMerger::new(),
             common_value_eliminator: CommonValueEliminator::new(),
             switch_fallback_unifier: SwitchFallbackUnifier::new(),
+            correlated_switch_specializer: CorrelatedSwitchSimplifier::new(),
         }
     }
 
@@ -126,6 +133,9 @@ impl LoopingOptimizer {
             do_iteration |= self
                 .switch_fallback_unifier
                 .process_region(rvsdg, body_region);
+            do_iteration |= self
+                .correlated_switch_specializer
+                .simplify_in_fn(module, rvsdg, function);
             do_iteration |= self
                 .common_value_eliminator
                 .process_region(rvsdg, body_region);

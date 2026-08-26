@@ -2,6 +2,7 @@ use rustc_hash::FxHashSet;
 
 use crate::Module;
 use crate::rvsdg::transform::region_replication::inline_switch_branch;
+use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, visit};
 
@@ -211,63 +212,7 @@ fn apply_elimination(
         // There's only a single branch left: inline it.
         inline_switch_branch(module, rvsdg, switch_node, valid_branches[0]);
     } else {
-        // Multiple branches remain: remove the invalid branches and adjust the branch-selector.
-
-        let region = rvsdg[switch_node].region();
-        let selector_origin = rvsdg[switch_node].expect_switch().branch_selector().origin;
-
-        let new_selector_origin = if let ValueOrigin::Output {
-            producer,
-            output: 0,
-        } = selector_origin
-        {
-            match rvsdg[producer].kind() {
-                NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(n)) => {
-                    let mut new_cases = Vec::new();
-
-                    for i in valid_branches {
-                        if let Some(case) = n.cases().get(*i) {
-                            new_cases.push(*case);
-                        }
-                    }
-
-                    if new_cases.len() == valid_branches.len() {
-                        // There should be one less case than there are branches
-                        new_cases.pop();
-                    }
-
-                    let new_node = rvsdg.add_op_case_to_branch_selector(
-                        region,
-                        rvsdg[producer].value_inputs()[0],
-                        n.encoding(),
-                        new_cases,
-                    );
-
-                    ValueOrigin::Output {
-                        producer: new_node,
-                        output: 0,
-                    }
-                }
-                NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_)) => {
-                    panic!("should have had only one valid branch left")
-                }
-                _ => panic!(
-                    "a switch node's branch-selector input should connect to a node-kind that \
-                    produces a branch selector"
-                ),
-            }
-        } else {
-            panic!(
-                "RVSDG should be in predicate-continuation form before applying this \
-                transformation"
-            );
-        };
-
-        // Keep only the valid branches, discard the invalid ones
-        rvsdg.permute_switch_branches(switch_node, &valid_branches);
-
-        // Remap the selector
-        rvsdg.reconnect_value_input(switch_node, 0, new_selector_origin);
+        retain_switch_branches(rvsdg, switch_node, valid_branches);
     }
 }
 
