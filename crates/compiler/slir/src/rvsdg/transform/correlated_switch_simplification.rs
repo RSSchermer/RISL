@@ -189,6 +189,16 @@ struct UndoLog {
 #[derive(Default)]
 struct FactEnv {
     values: FxHashMap<ValueKey, ValueConstraint>,
+
+    /// Secondary index over [values]: maps a producer node to the region that contains it and the
+    /// outputs of that node for which [values] currently records a fact.
+    ///
+    /// Kept in sync with [values] by [constrain_value] (which adds entries for newly recorded
+    /// output facts) and [pop_scope] (which removes entries when the corresponding facts are
+    /// undone), so that output facts can be looked up by producer node without scanning the whole
+    /// fact map.
+    constrained_outputs: FxHashMap<Node, (Region, SmallVec<[u32; 4]>)>,
+
     known_branches: FxHashMap<Node, usize>,
     scopes: Vec<UndoLog>,
 }
@@ -196,6 +206,7 @@ struct FactEnv {
 impl FactEnv {
     fn clear(&mut self) {
         self.values.clear();
+        self.constrained_outputs.clear();
         self.known_branches.clear();
         self.scopes.clear();
     }
@@ -217,6 +228,19 @@ impl FactEnv {
                 self.values.insert(key, previous);
             } else {
                 self.values.remove(&key);
+
+                if let (_, ValueOrigin::Output { producer, output }) = key {
+                    let (_, outputs) = self
+                        .constrained_outputs
+                        .get_mut(&producer)
+                        .expect("constrained-output index should contain the fact being undone");
+
+                    outputs.retain(|o| *o != output);
+
+                    if outputs.is_empty() {
+                        self.constrained_outputs.remove(&producer);
+                    }
+                }
             }
         }
 
@@ -246,6 +270,20 @@ impl FactEnv {
             || previous.is_none() && combined == ValueConstraint::Unknown
         {
             return false;
+        }
+
+        if previous.is_none()
+            && let (region, ValueOrigin::Output { producer, output }) = value
+        {
+            let (index_region, outputs) = self
+                .constrained_outputs
+                .entry(producer)
+                .or_insert_with(|| (region, SmallVec::new()));
+
+            debug_assert_eq!(*index_region, region);
+            debug_assert!(!outputs.contains(&output));
+
+            outputs.push(output);
         }
 
         self.values.insert(value, combined);
@@ -283,14 +321,24 @@ impl FactEnv {
 
     /// Maps each output value of the given switch node to its accumulated constraint for the
     /// current scope.
-    fn switch_output_constraints(&self, switch: Node) -> Vec<(u32, ValueConstraint)> {
-        self.values
+    fn switch_output_constraints(&self, switch: Node) -> SmallVec<[(u32, ValueConstraint); 4]> {
+        let Some((region, outputs)) = self.constrained_outputs.get(&switch) else {
+            return SmallVec::new();
+        };
+
+        outputs
             .iter()
-            .filter_map(|(&(_, origin), fact)| match origin {
-                ValueOrigin::Output { producer, output } if producer == switch => {
-                    Some((output, fact.clone()))
-                }
-                _ => None,
+            .map(|&output| {
+                let key = (
+                    *region,
+                    ValueOrigin::Output {
+                        producer: switch,
+                        output,
+                    },
+                );
+                let fact = self.values[&key].clone();
+
+                (output, fact)
             })
             .collect()
     }
@@ -561,17 +609,13 @@ impl CorrelatedSwitchSimplifier {
         loop {
             let constrained_switches = self
                 .env
-                .values
-                .keys()
-                .filter_map(|&(region, origin)| match origin {
-                    ValueOrigin::Output { producer, .. }
+                .constrained_outputs
+                .iter()
+                .filter_map(|(&producer, &(region, _))| {
                     // A fact may outlive a switch node that was already simplified away
                     // earlier, so verify that the producer is still live
-                    if rvsdg.is_live_node(producer) && rvsdg[producer].is_switch() =>
-                        {
-                            Some((region, producer))
-                        }
-                    _ => None,
+                    (rvsdg.is_live_node(producer) && rvsdg[producer].is_switch())
+                        .then_some((region, producer))
                 })
                 .collect::<Vec<_>>();
 
