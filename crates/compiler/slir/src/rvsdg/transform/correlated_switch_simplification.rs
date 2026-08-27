@@ -559,17 +559,17 @@ impl CorrelatedSwitchSimplifier {
         }
 
         loop {
-            let constrained_outputs = self
+            let constrained_switches = self
                 .env
                 .values
-                .iter()
-                .filter_map(|(&(region, origin), constraint)| match origin {
-                    ValueOrigin::Output { producer, output }
+                .keys()
+                .filter_map(|&(region, origin)| match origin {
+                    ValueOrigin::Output { producer, .. }
                     // A fact may outlive a switch node that was already simplified away
                     // earlier, so verify that the producer is still live
                     if rvsdg.is_live_node(producer) && rvsdg[producer].is_switch() =>
                         {
-                            Some((region, producer, output, constraint.clone()))
+                            Some((region, producer))
                         }
                     _ => None,
                 })
@@ -577,7 +577,7 @@ impl CorrelatedSwitchSimplifier {
 
             let mut changed = false;
 
-            for (region, switch, output, constraint) in constrained_outputs {
+            for (region, switch) in constrained_switches {
                 let feasible = self.find_feasible_branches(rvsdg, switch);
 
                 let branch = if let Some(&branch) = self.env.known_branches.get(&switch) {
@@ -600,23 +600,15 @@ impl CorrelatedSwitchSimplifier {
                     continue;
                 };
 
-                if let BranchResultSummary::Alias((alias_region, alias_origin)) =
-                    BranchResultSummary::summarize(rvsdg, switch, output, branch)
-                {
-                    let key = canonicalize(rvsdg, alias_region, alias_origin);
-
-                    changed |= self.env.constrain_value(key, constraint);
-                }
-
                 let output_constraints = self.env.switch_output_constraints(switch);
 
-                for (constrained_output, output_constraint) in output_constraints {
+                for (output, constraint) in output_constraints {
                     if let BranchResultSummary::Alias((alias_region, alias_origin)) =
-                        BranchResultSummary::summarize(rvsdg, switch, constrained_output, branch)
+                        BranchResultSummary::summarize(rvsdg, switch, output, branch)
                     {
                         let key = canonicalize(rvsdg, alias_region, alias_origin);
 
-                        changed |= self.env.constrain_value(key, output_constraint);
+                        changed |= self.env.constrain_value(key, constraint);
                     }
                 }
             }
