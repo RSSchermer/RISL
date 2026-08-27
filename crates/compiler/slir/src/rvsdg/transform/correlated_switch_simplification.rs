@@ -43,7 +43,6 @@ use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 use crate::{Function, Module};
 
-const MAX_EVAL_DEPTH: usize = 16;
 const MAX_NOT_IN_VALUES: usize = 32;
 
 type ValueKey = (Region, ValueOrigin);
@@ -201,6 +200,15 @@ struct FactEnv {
 
     known_branches: FxHashMap<Node, usize>,
     scopes: Vec<UndoLog>,
+
+    /// Versions the state of the fact environment.
+    ///
+    /// Used by the [EvalCache] to detect staleness.
+    ///
+    /// The version is incremented implicitly whenever the observable fact state changes
+    /// ([constrain_value], [record_known_branch], [pop_scope], [clear]), and explicitly by
+    /// [bump_version] (meant to be called whenever the RVSDG itself is mutated).
+    version: u64,
 }
 
 impl FactEnv {
@@ -209,6 +217,15 @@ impl FactEnv {
         self.constrained_outputs.clear();
         self.known_branches.clear();
         self.scopes.clear();
+        self.version += 1;
+    }
+
+    /// Increments the environment's version.
+    ///
+    /// Should be called whenever the RVSDG is mutated, as this can invalidate facts even if no
+    /// information is added or removed from the fact environment itself.
+    fn bump_version(&mut self) {
+        self.version += 1;
     }
 
     /// Adds a new scope to the fact environment.
@@ -222,6 +239,10 @@ impl FactEnv {
     /// constraints back to what they were before the scope was entered.
     fn pop_scope(&mut self) {
         let scope = self.scopes.pop().expect("fact scope should be active");
+
+        if !scope.values.is_empty() || !scope.known_branches.is_empty() {
+            self.version += 1;
+        }
 
         for (key, previous) in scope.values.into_iter().rev() {
             if let Some(previous) = previous {
@@ -292,6 +313,7 @@ impl FactEnv {
             .expect("fact scope should be active")
             .values
             .push((value, previous));
+        self.version += 1;
 
         true
     }
@@ -315,6 +337,7 @@ impl FactEnv {
             .expect("fact scope should be active")
             .known_branches
             .push(switch);
+        self.version += 1;
 
         true
     }
@@ -341,6 +364,35 @@ impl FactEnv {
                 (output, fact)
             })
             .collect()
+    }
+}
+
+/// A versioned cache for value evaluation and branch-feasibility queries.
+///
+/// Evaluation ([CorrelatedSwitchSimplifier::eval]) and feasibility computation
+/// ([CorrelatedSwitchSimplifier::compute_feasible_branches]) explore the value graph recursively;
+/// without memoization, shared subgraphs are re-evaluated once per evaluation path within a query
+/// and re-evaluated again by every subsequent query, even when nothing changed in between.
+///
+/// Cached results are only valid for the fact environment and RVSDG state under which they were
+/// computed, as tracked by the fact environment's version number (see [FactEnv::version]);
+/// [sync] lazily clears all entries when the version has changed since the cache was last used.
+#[derive(Default)]
+struct EvalCache {
+    version: u64,
+    values: FxHashMap<ValueKey, ValueConstraint>,
+    feasible_branches: FxHashMap<Node, FeasibleBranches>,
+}
+
+impl EvalCache {
+    /// Prepares the cache for use with a fact environment at the given version, clearing all
+    /// entries if they were recorded for a different version.
+    fn sync(&mut self, version: u64) {
+        if self.version != version {
+            self.values.clear();
+            self.feasible_branches.clear();
+            self.version = version;
+        }
     }
 }
 
@@ -497,6 +549,7 @@ impl BranchResultSummary {
 pub struct CorrelatedSwitchSimplifier {
     env: FactEnv,
     visited: FxHashSet<ValueKey>,
+    cache: EvalCache,
 }
 
 impl CorrelatedSwitchSimplifier {
@@ -504,6 +557,7 @@ impl CorrelatedSwitchSimplifier {
         Self {
             env: FactEnv::default(),
             visited: FxHashSet::default(),
+            cache: EvalCache::default(),
         }
     }
 
@@ -575,10 +629,14 @@ impl CorrelatedSwitchSimplifier {
             1 => {
                 inline_switch_branch(module, rvsdg, switch, feasible_branches[0]);
 
+                self.env.bump_version();
+
                 true
             }
             count if count < branch_count => {
                 retain_switch_branches(rvsdg, switch, &feasible_branches);
+
+                self.env.bump_version();
 
                 true
             }
@@ -669,16 +727,14 @@ impl CorrelatedSwitchSimplifier {
         rvsdg: &Rvsdg,
         region: Region,
         origin: ValueOrigin,
-        depth: usize,
         visited: &mut FxHashSet<ValueKey>,
+        cache: &mut EvalCache,
     ) -> ValueConstraint {
-        // Stop following producer and switch-summary dependencies once the recursion budget is
-        // exhausted; returning Unknown conservatively prevents this path from proving anything.
-        if depth == 0 {
-            return ValueConstraint::Unknown;
-        }
-
         let key = canonicalize(rvsdg, region, origin);
+
+        if let Some(constraint) = cache.values.get(&key) {
+            return constraint.clone();
+        }
 
         // If the key was already recorded for this evaluation path, then there is a cycle in the
         // analysis and we bail.
@@ -699,12 +755,12 @@ impl CorrelatedSwitchSimplifier {
             if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
                 value = value.meet(&ValueConstraint::Const(constant));
             } else if rvsdg[producer].is_switch() {
-                let feasible = self.compute_feasible_branches(rvsdg, producer, depth - 1, visited);
+                let feasible = self.compute_feasible_branches(rvsdg, producer, visited, cache);
 
                 if feasible.len() == 1 {
                     let summary =
                         BranchResultSummary::summarize(rvsdg, producer, output, feasible[0]);
-                    let summary_value = self.eval_summary(rvsdg, summary, depth - 1, visited);
+                    let summary_value = self.eval_summary(rvsdg, summary, visited, cache);
 
                     value = value.meet(&summary_value);
                 } else if !feasible.is_empty() {
@@ -736,6 +792,8 @@ impl CorrelatedSwitchSimplifier {
         // Remove the key so that other independent evaluation paths can inspect it later.
         visited.remove(&key);
 
+        cache.values.insert(key, value.clone());
+
         value
     }
 
@@ -743,26 +801,29 @@ impl CorrelatedSwitchSimplifier {
         &self,
         rvsdg: &Rvsdg,
         summary: BranchResultSummary,
-        depth: usize,
         visited: &mut FxHashSet<ValueKey>,
+        cache: &mut EvalCache,
     ) -> ValueConstraint {
         match summary {
             BranchResultSummary::Const(constant) => ValueConstraint::Const(constant),
             BranchResultSummary::Fallback => ValueConstraint::Unknown,
             BranchResultSummary::Alias((region, origin)) => {
-                self.eval(rvsdg, region, origin, depth, visited)
+                self.eval(rvsdg, region, origin, visited, cache)
             }
         }
     }
 
     fn find_feasible_branches(&mut self, rvsdg: &Rvsdg, switch: Node) -> FeasibleBranches {
         let mut visited = std::mem::take(&mut self.visited);
+        let mut cache = std::mem::take(&mut self.cache);
 
         visited.clear();
+        cache.sync(self.env.version);
 
-        let feasible = self.compute_feasible_branches(rvsdg, switch, MAX_EVAL_DEPTH, &mut visited);
+        let feasible = self.compute_feasible_branches(rvsdg, switch, &mut visited, &mut cache);
 
         self.visited = visited;
+        self.cache = cache;
 
         feasible
     }
@@ -771,11 +832,15 @@ impl CorrelatedSwitchSimplifier {
         &self,
         rvsdg: &Rvsdg,
         switch: Node,
-        depth: usize,
         visited: &mut FxHashSet<ValueKey>,
+        cache: &mut EvalCache,
     ) -> FeasibleBranches {
         if let Some(&branch) = self.env.known_branches.get(&switch) {
             return SmallVec::from_slice(&[branch]);
+        }
+
+        if let Some(feasible) = cache.feasible_branches.get(&switch) {
+            return feasible.clone();
         }
 
         let branch_count = rvsdg[switch].expect_switch().branches().len();
@@ -783,58 +848,56 @@ impl CorrelatedSwitchSimplifier {
 
         let mut feasible = (0..branch_count).collect::<FeasibleBranches>();
 
-        if depth > 0 {
-            let selector_origin = rvsdg[switch].expect_switch().branch_selector().origin;
+        let selector_origin = rvsdg[switch].expect_switch().branch_selector().origin;
 
-            if let ValueOrigin::Output {
-                producer,
-                output: 0,
-            } = selector_origin
-                && rvsdg.is_live_node(producer)
-            {
-                match rvsdg[producer].kind() {
-                    NodeKind::Simple(SimpleNode::ConstPredicate(predicate)) => {
-                        feasible.retain(|branch| *branch == predicate.value() as usize);
-                    }
-                    NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_)) => {
-                        let source = rvsdg[producer].value_inputs()[0].origin;
-
-                        match self.eval(rvsdg, outer_region, source, depth - 1, visited) {
-                            ValueConstraint::Const(ScalarConstant::Bool(true)) => {
-                                feasible.retain(|branch| *branch == 0);
-                            }
-                            ValueConstraint::Const(ScalarConstant::Bool(false)) => {
-                                feasible.retain(|branch| *branch == 1);
-                            }
-                            _ => {}
-                        }
-                    }
-                    NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(selector)) => {
-                        let source = rvsdg[producer].value_inputs()[0].origin;
-
-                        match self.eval(rvsdg, outer_region, source, depth - 1, visited) {
-                            ValueConstraint::Const(constant) => {
-                                if let Some(value) = constant.integer_encoding() {
-                                    let selected = selector
-                                        .cases()
-                                        .iter()
-                                        .position(|case| *case == value)
-                                        .unwrap_or(selector.cases().len());
-
-                                    feasible.retain(|branch| *branch == selected);
-                                }
-                            }
-                            ValueConstraint::NotIn(excluded) => {
-                                feasible.retain(|branch| {
-                                    *branch == selector.cases().len()
-                                        || !excluded.contains(&selector.cases()[*branch])
-                                });
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
+        if let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = selector_origin
+            && rvsdg.is_live_node(producer)
+        {
+            match rvsdg[producer].kind() {
+                NodeKind::Simple(SimpleNode::ConstPredicate(predicate)) => {
+                    feasible.retain(|branch| *branch == predicate.value() as usize);
                 }
+                NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_)) => {
+                    let source = rvsdg[producer].value_inputs()[0].origin;
+
+                    match self.eval(rvsdg, outer_region, source, visited, cache) {
+                        ValueConstraint::Const(ScalarConstant::Bool(true)) => {
+                            feasible.retain(|branch| *branch == 0);
+                        }
+                        ValueConstraint::Const(ScalarConstant::Bool(false)) => {
+                            feasible.retain(|branch| *branch == 1);
+                        }
+                        _ => {}
+                    }
+                }
+                NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(selector)) => {
+                    let source = rvsdg[producer].value_inputs()[0].origin;
+
+                    match self.eval(rvsdg, outer_region, source, visited, cache) {
+                        ValueConstraint::Const(constant) => {
+                            if let Some(value) = constant.integer_encoding() {
+                                let selected = selector
+                                    .cases()
+                                    .iter()
+                                    .position(|case| *case == value)
+                                    .unwrap_or(selector.cases().len());
+
+                                feasible.retain(|branch| *branch == selected);
+                            }
+                        }
+                        ValueConstraint::NotIn(excluded) => {
+                            feasible.retain(|branch| {
+                                *branch == selector.cases().len()
+                                    || !excluded.contains(&selector.cases()[*branch])
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -843,11 +906,13 @@ impl CorrelatedSwitchSimplifier {
         for (output, constraint) in constraints {
             feasible.retain(|branch| {
                 let summary = BranchResultSummary::summarize(rvsdg, switch, output, *branch);
-                let summary_value = self.eval_summary(rvsdg, summary, depth, visited);
+                let summary_value = self.eval_summary(rvsdg, summary, visited, cache);
 
                 !summary_value.meet(&constraint).is_impossible()
             });
         }
+
+        cache.feasible_branches.insert(switch, feasible.clone());
 
         feasible
     }
