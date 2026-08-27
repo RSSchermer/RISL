@@ -377,11 +377,16 @@ impl FactEnv {
 /// Cached results are only valid for the fact environment and RVSDG state under which they were
 /// computed, as tracked by the fact environment's version number (see [FactEnv::version]);
 /// [sync] lazily clears all entries when the version has changed since the cache was last used.
+///
+/// Alongside its result, each entry records the transitive set of fact keys that the computation
+/// of the result read from the fact environment. A cache hit merges this set into the requesting
+/// computation's read set, so that read-dependency tracking (see
+/// [CorrelatedSwitchSimplifier::key_readers]) remains complete when results are reused.
 #[derive(Default)]
 struct EvalCache {
     version: u64,
-    values: FxHashMap<ValueKey, ValueConstraint>,
-    feasible_branches: FxHashMap<Node, FeasibleBranches>,
+    values: FxHashMap<ValueKey, (ValueConstraint, FxHashSet<ValueKey>)>,
+    feasible_branches: FxHashMap<Node, (FeasibleBranches, FxHashSet<ValueKey>)>,
 }
 
 impl EvalCache {
@@ -550,6 +555,30 @@ pub struct CorrelatedSwitchSimplifier {
     env: FactEnv,
     visited: FxHashSet<ValueKey>,
     cache: EvalCache,
+
+    /// Maps a fact key to the switch nodes for which a [find_feasible_branches] query read that
+    /// key.
+    ///
+    /// When a fact is strengthened, the switch nodes recorded for its key are the only switch nodes
+    /// whose feasibility may have changed as a result. Therefore,
+    /// [broadcast_branch_selector_constraint] only needs to reprocess those switch nodes (plus the
+    /// switch node that produces the strengthened key, if any) rather than every constrained
+    /// switch.
+    ///
+    /// Entries are only ever added, never removed: a dependency recorded by an outdated query can
+    /// at worst cause a (cheap and idempotent) spurious reprocess, whereas pruning entries would
+    /// risk missing one.
+    key_readers: FxHashMap<ValueKey, FxHashSet<Node>>,
+
+    /// Scratch set that collects the fact keys read by a [find_feasible_branches] query.
+    reads: FxHashSet<ValueKey>,
+
+    /// Instructs the next [broadcast_branch_selector_constraint] call to reprocess all switch nodes
+    /// that have constrained outputs.
+    ///
+    /// Set whenever the RVSDG is mutated, as constraints that were fully propagated for the
+    /// pre-mutation graph may propagate further through the mutated graph.
+    reprocess_all_switches: bool,
 }
 
 impl CorrelatedSwitchSimplifier {
@@ -558,6 +587,9 @@ impl CorrelatedSwitchSimplifier {
             env: FactEnv::default(),
             visited: FxHashSet::default(),
             cache: EvalCache::default(),
+            key_readers: FxHashMap::default(),
+            reads: FxHashSet::default(),
+            reprocess_all_switches: false,
         }
     }
 
@@ -573,6 +605,8 @@ impl CorrelatedSwitchSimplifier {
         let body = rvsdg[function_node].expect_function().body_region();
 
         self.env.clear();
+        self.key_readers.clear();
+        self.reprocess_all_switches = false;
         self.visit_region(module, rvsdg, body)
     }
 
@@ -630,6 +664,7 @@ impl CorrelatedSwitchSimplifier {
                 inline_switch_branch(module, rvsdg, switch, feasible_branches[0]);
 
                 self.env.bump_version();
+                self.reprocess_all_switches = true;
 
                 true
             }
@@ -637,6 +672,7 @@ impl CorrelatedSwitchSimplifier {
                 retain_switch_branches(rvsdg, switch, &feasible_branches);
 
                 self.env.bump_version();
+                self.reprocess_all_switches = true;
 
                 true
             }
@@ -664,64 +700,132 @@ impl CorrelatedSwitchSimplifier {
             return;
         }
 
-        loop {
-            let constrained_switches = self
-                .env
-                .constrained_outputs
-                .iter()
-                .filter_map(|(&producer, &(region, _))| {
-                    // A fact may outlive a switch node that was already simplified away
-                    // earlier, so verify that the producer is still live
-                    (rvsdg.is_live_node(producer) && rvsdg[producer].is_switch())
-                        .then_some((region, producer))
-                })
-                .collect::<Vec<_>>();
+        // The worklist contains switch nodes whose derived facts may need to be (re)derived;
+        // `queued` mirrors the worklist's contents so that a switch that is already pending is
+        // not enqueued twice.
+        let mut worklist = Vec::new();
+        let mut queued = FxHashSet::default();
 
-            let mut changed = false;
+        // Facts recorded prior to this call were already propagated to a fixpoint when they were
+        // recorded, so normally only the switches affected by the newly strengthened key need to
+        // be processed. However, if the RVSDG was mutated since the previous propagation, facts
+        // that were fully propagated for the pre-mutation graph may propagate further through the
+        // mutated graph, so all constrained switches are reprocessed once to restore the fixpoint
+        // for the mutated graph.
+        if self.reprocess_all_switches {
+            self.reprocess_all_switches = false;
 
-            for (region, switch) in constrained_switches {
-                let feasible = self.find_feasible_branches(rvsdg, switch);
+            for &producer in self.env.constrained_outputs.keys() {
+                if rvsdg.is_live_node(producer)
+                    && rvsdg[producer].is_switch()
+                    && queued.insert(producer)
+                {
+                    worklist.push(producer);
+                }
+            }
+        }
 
-                let branch = if let Some(&branch) = self.env.known_branches.get(&switch) {
-                    branch
-                } else if feasible.len() == 1 {
-                    let branch = feasible[0];
+        self.enqueue_affected_switches(rvsdg, key, &mut worklist, &mut queued);
 
-                    changed |= self.env.record_known_branch(switch, branch);
+        while let Some(switch) = worklist.pop() {
+            queued.remove(&switch);
 
-                    if let Some((origin, selector_constraint)) =
-                        branch_selector_constraint(rvsdg, switch, branch)
-                    {
-                        let key = canonicalize(rvsdg, region, origin);
+            // A fact may outlive a switch node that was already simplified away earlier, so
+            // verify that the switch is still live.
+            if !rvsdg.is_live_node(switch) || !rvsdg[switch].is_switch() {
+                continue;
+            }
 
-                        changed |= self.env.constrain_value(key, selector_constraint);
+            // Only switches with constrained outputs carry facts that can be forwarded.
+            let Some(&(region, _)) = self.env.constrained_outputs.get(&switch) else {
+                continue;
+            };
+
+            let feasible_branches = self.find_feasible_branches(rvsdg, switch);
+
+            let branch = if let Some(&branch) = self.env.known_branches.get(&switch) {
+                branch
+            } else if feasible_branches.len() == 1 {
+                let branch = feasible_branches[0];
+
+                self.env.record_known_branch(switch, branch);
+
+                if let Some((origin, selector_constraint)) =
+                    branch_selector_constraint(rvsdg, switch, branch)
+                {
+                    let key = canonicalize(rvsdg, region, origin);
+
+                    if self.env.constrain_value(key, selector_constraint) {
+                        self.enqueue_affected_switches(rvsdg, key, &mut worklist, &mut queued);
                     }
+                }
 
-                    branch
-                } else {
-                    continue;
-                };
+                branch
+            } else {
+                continue;
+            };
 
-                let output_constraints = self.env.switch_output_constraints(switch);
+            // If there's only a single feasible branch, then for each of the switch node's
+            // constrained outputs, propagate the constraint up the corresponding branch-result
+            // inside the feasible branch.
 
-                for (output, constraint) in output_constraints {
-                    if let BranchResultSummary::Alias((alias_region, alias_origin)) =
-                        BranchResultSummary::summarize(rvsdg, switch, output, branch)
-                    {
-                        let key = canonicalize(rvsdg, alias_region, alias_origin);
+            let output_constraints = self.env.switch_output_constraints(switch);
 
-                        changed |= self.env.constrain_value(key, constraint);
+            for (output, constraint) in output_constraints {
+                if let BranchResultSummary::Alias((alias_region, alias_origin)) =
+                    BranchResultSummary::summarize(rvsdg, switch, output, branch)
+                {
+                    let key = canonicalize(rvsdg, alias_region, alias_origin);
+
+                    if self.env.constrain_value(key, constraint) {
+                        self.enqueue_affected_switches(rvsdg, key, &mut worklist, &mut queued);
                     }
                 }
             }
+        }
+    }
 
-            if !changed {
-                break;
+    /// Enqueues to the broadcast worklist all switch nodes whose derived facts may be affected by a
+    /// strengthening of the constraint recorded for the given value key.
+    ///
+    /// This covers two cases:
+    ///
+    /// - If the key is an output of a (live) switch node, then the strengthened constraint is a new
+    ///   or stronger output constraint for that switch node, which may shrink its set of feasible
+    ///   branches and/or the constraint may need to be propagated inside a branch.
+    /// - Any switch for which a prior feasibility query read the key may now resolve to a smaller
+    ///   set of feasible branches (see [key_readers]).
+    ///
+    fn enqueue_affected_switches(
+        &self,
+        rvsdg: &Rvsdg,
+        key: ValueKey,
+        worklist: &mut Vec<Node>,
+        queued: &mut FxHashSet<Node>,
+    ) {
+        if let (_, ValueOrigin::Output { producer, .. }) = key
+            && rvsdg.is_live_node(producer)
+            && rvsdg[producer].is_switch()
+            && queued.insert(producer)
+        {
+            worklist.push(producer);
+        }
+
+        if let Some(readers) = self.key_readers.get(&key) {
+            for &reader in readers {
+                if rvsdg.is_live_node(reader) && rvsdg[reader].is_switch() && queued.insert(reader)
+                {
+                    worklist.push(reader);
+                }
             }
         }
     }
 
     /// Resolves the strongest known constraint for the given value.
+    ///
+    /// Every constraint key that the evaluation (transitively) reads from the fact environment is
+    /// added to the `reads` set, so that the caller can maintain the read-dependency index (see
+    /// [key_readers]).
     fn eval(
         &self,
         rvsdg: &Rvsdg,
@@ -729,10 +833,13 @@ impl CorrelatedSwitchSimplifier {
         origin: ValueOrigin,
         visited: &mut FxHashSet<ValueKey>,
         cache: &mut EvalCache,
+        reads: &mut FxHashSet<ValueKey>,
     ) -> ValueConstraint {
         let key = canonicalize(rvsdg, region, origin);
 
-        if let Some(constraint) = cache.values.get(&key) {
+        if let Some((constraint, cached_reads)) = cache.values.get(&key) {
+            reads.extend(cached_reads.iter().copied());
+
             return constraint.clone();
         }
 
@@ -741,6 +848,10 @@ impl CorrelatedSwitchSimplifier {
         if !visited.insert(key) {
             return ValueConstraint::Unknown;
         }
+
+        let mut frame_reads = FxHashSet::default();
+
+        frame_reads.insert(key);
 
         let mut value = self
             .env
@@ -755,12 +866,19 @@ impl CorrelatedSwitchSimplifier {
             if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
                 value = value.meet(&ValueConstraint::Const(constant));
             } else if rvsdg[producer].is_switch() {
-                let feasible = self.compute_feasible_branches(rvsdg, producer, visited, cache);
+                let feasible = self.compute_feasible_branches(
+                    rvsdg,
+                    producer,
+                    visited,
+                    cache,
+                    &mut frame_reads,
+                );
 
                 if feasible.len() == 1 {
                     let summary =
                         BranchResultSummary::summarize(rvsdg, producer, output, feasible[0]);
-                    let summary_value = self.eval_summary(rvsdg, summary, visited, cache);
+                    let summary_value =
+                        self.eval_summary(rvsdg, summary, visited, cache, &mut frame_reads);
 
                     value = value.meet(&summary_value);
                 } else if !feasible.is_empty() {
@@ -792,7 +910,10 @@ impl CorrelatedSwitchSimplifier {
         // Remove the key so that other independent evaluation paths can inspect it later.
         visited.remove(&key);
 
-        cache.values.insert(key, value.clone());
+        cache
+            .values
+            .insert(key, (value.clone(), frame_reads.clone()));
+        reads.extend(frame_reads);
 
         value
     }
@@ -803,12 +924,13 @@ impl CorrelatedSwitchSimplifier {
         summary: BranchResultSummary,
         visited: &mut FxHashSet<ValueKey>,
         cache: &mut EvalCache,
+        reads: &mut FxHashSet<ValueKey>,
     ) -> ValueConstraint {
         match summary {
             BranchResultSummary::Const(constant) => ValueConstraint::Const(constant),
             BranchResultSummary::Fallback => ValueConstraint::Unknown,
             BranchResultSummary::Alias((region, origin)) => {
-                self.eval(rvsdg, region, origin, visited, cache)
+                self.eval(rvsdg, region, origin, visited, cache, reads)
             }
         }
     }
@@ -816,14 +938,25 @@ impl CorrelatedSwitchSimplifier {
     fn find_feasible_branches(&mut self, rvsdg: &Rvsdg, switch: Node) -> FeasibleBranches {
         let mut visited = std::mem::take(&mut self.visited);
         let mut cache = std::mem::take(&mut self.cache);
+        let mut reads = std::mem::take(&mut self.reads);
 
         visited.clear();
+        reads.clear();
         cache.sync(self.env.version);
 
-        let feasible = self.compute_feasible_branches(rvsdg, switch, &mut visited, &mut cache);
+        let feasible =
+            self.compute_feasible_branches(rvsdg, switch, &mut visited, &mut cache, &mut reads);
+
+        // Record the reverse read-dependencies for this query, so that if one of the read facts
+        // is later strengthened, the switch nosw's derived facts can be re-derived (see
+        // [broadcast_branch_selector_constraint]).
+        for &key in &reads {
+            self.key_readers.entry(key).or_default().insert(switch);
+        }
 
         self.visited = visited;
         self.cache = cache;
+        self.reads = reads;
 
         feasible
     }
@@ -834,17 +967,35 @@ impl CorrelatedSwitchSimplifier {
         switch: Node,
         visited: &mut FxHashSet<ValueKey>,
         cache: &mut EvalCache,
+        reads: &mut FxHashSet<ValueKey>,
     ) -> FeasibleBranches {
         if let Some(&branch) = self.env.known_branches.get(&switch) {
             return SmallVec::from_slice(&[branch]);
         }
 
-        if let Some(feasible) = cache.feasible_branches.get(&switch) {
+        if let Some((feasible, cached_reads)) = cache.feasible_branches.get(&switch) {
+            reads.extend(cached_reads.iter().copied());
+
             return feasible.clone();
         }
 
         let branch_count = rvsdg[switch].expect_switch().branches().len();
         let outer_region = rvsdg[switch].region();
+
+        let mut frame_reads = FxHashSet::default();
+
+        // The feasibility of the branches depends on the constraints recorded for the switch node's
+        // outputs. Even if an output is currently unconstrained, we still track it as a dependency
+        // in the "reads" set, as constraints may still be added to such an output later.
+        for output in 0..rvsdg[switch].value_outputs().len() {
+            frame_reads.insert((
+                outer_region,
+                ValueOrigin::Output {
+                    producer: switch,
+                    output: output as u32,
+                },
+            ));
+        }
 
         let mut feasible = (0..branch_count).collect::<FeasibleBranches>();
 
@@ -863,7 +1014,14 @@ impl CorrelatedSwitchSimplifier {
                 NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_)) => {
                     let source = rvsdg[producer].value_inputs()[0].origin;
 
-                    match self.eval(rvsdg, outer_region, source, visited, cache) {
+                    match self.eval(
+                        rvsdg,
+                        outer_region,
+                        source,
+                        visited,
+                        cache,
+                        &mut frame_reads,
+                    ) {
                         ValueConstraint::Const(ScalarConstant::Bool(true)) => {
                             feasible.retain(|branch| *branch == 0);
                         }
@@ -876,7 +1034,14 @@ impl CorrelatedSwitchSimplifier {
                 NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(selector)) => {
                     let source = rvsdg[producer].value_inputs()[0].origin;
 
-                    match self.eval(rvsdg, outer_region, source, visited, cache) {
+                    match self.eval(
+                        rvsdg,
+                        outer_region,
+                        source,
+                        visited,
+                        cache,
+                        &mut frame_reads,
+                    ) {
                         ValueConstraint::Const(constant) => {
                             if let Some(value) = constant.integer_encoding() {
                                 let selected = selector
@@ -906,13 +1071,17 @@ impl CorrelatedSwitchSimplifier {
         for (output, constraint) in constraints {
             feasible.retain(|branch| {
                 let summary = BranchResultSummary::summarize(rvsdg, switch, output, *branch);
-                let summary_value = self.eval_summary(rvsdg, summary, visited, cache);
+                let summary_value =
+                    self.eval_summary(rvsdg, summary, visited, cache, &mut frame_reads);
 
                 !summary_value.meet(&constraint).is_impossible()
             });
         }
 
-        cache.feasible_branches.insert(switch, feasible.clone());
+        cache
+            .feasible_branches
+            .insert(switch, (feasible.clone(), frame_reads.clone()));
+        reads.extend(frame_reads);
 
         feasible
     }
