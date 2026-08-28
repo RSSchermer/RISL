@@ -948,7 +948,7 @@ impl CorrelatedSwitchSimplifier {
             self.compute_feasible_branches(rvsdg, switch, &mut visited, &mut cache, &mut reads);
 
         // Record the reverse read-dependencies for this query, so that if one of the read facts
-        // is later strengthened, the switch nosw's derived facts can be re-derived (see
+        // is later strengthened, the switch node's derived facts can be re-derived (see
         // [broadcast_branch_selector_constraint]).
         for &key in &reads {
             self.key_readers.entry(key).or_default().insert(switch);
