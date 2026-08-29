@@ -35,14 +35,16 @@
 //!
 //! [branch_selector_normalization]: crate::rvsdg::transform::branch_selector_normalization
 
+use std::collections::VecDeque;
+use std::hash::Hash;
+
+use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::rvsdg::transform::region_replication::inline_switch_branch;
 use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
-use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, ValueUser,
-};
+use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 use crate::{Function, Module};
 
 const MAX_NOT_IN_VALUES: usize = 32;
@@ -197,7 +199,7 @@ struct FactEnv {
     /// output facts) and [pop_scope] (which removes entries when the corresponding facts are
     /// undone), so that output facts can be looked up by producer node without scanning the whole
     /// fact map.
-    constrained_outputs: FxHashMap<Node, (Region, SmallVec<[u32; 4]>)>,
+    constrained_outputs: IndexMap<Node, (Region, SmallVec<[u32; 4]>)>,
 
     scopes: Vec<UndoLog>,
 
@@ -258,7 +260,7 @@ impl FactEnv {
                     outputs.retain(|o| *o != output);
 
                     if outputs.is_empty() {
-                        self.constrained_outputs.remove(&producer);
+                        self.constrained_outputs.shift_remove(&producer);
                     }
                 }
             }
@@ -365,6 +367,42 @@ impl EvalCache {
             self.feasible_branches.clear();
             self.version = version;
         }
+    }
+}
+
+/// A FIFO worklist which keeps each value queued at most once.
+struct Worklist<T> {
+    queue: VecDeque<T>,
+    queued: FxHashSet<T>,
+}
+
+impl<T> Worklist<T>
+where
+    T: Copy + Eq + Hash,
+{
+    fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            queued: FxHashSet::default(),
+        }
+    }
+
+    fn push(&mut self, value: T) {
+        if self.queued.insert(value) {
+            self.queue.push_back(value);
+        }
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        let value = self.queue.pop_front()?;
+        self.queued.remove(&value);
+
+        Some(value)
+    }
+
+    fn clear(&mut self) {
+        self.queue.clear();
+        self.queued.clear();
     }
 }
 
@@ -522,6 +560,7 @@ pub struct CorrelatedSwitchSimplifier {
     env: FactEnv,
     visited: FxHashSet<ValueKey>,
     cache: EvalCache,
+    worklist: Worklist<Node>,
 }
 
 impl CorrelatedSwitchSimplifier {
@@ -530,6 +569,7 @@ impl CorrelatedSwitchSimplifier {
             env: FactEnv::default(),
             visited: FxHashSet::default(),
             cache: EvalCache::default(),
+            worklist: Worklist::new(),
         }
     }
 
@@ -589,7 +629,7 @@ impl CorrelatedSwitchSimplifier {
             {
                 let key = canonicalize(rvsdg, region, origin);
 
-                self.env.constrain_value(key, constraint);
+                self.saturate_constraints(rvsdg, key, constraint);
             }
 
             let branch_region = rvsdg[switch].expect_switch().branches()[branch_index];
@@ -619,6 +659,110 @@ impl CorrelatedSwitchSimplifier {
                 assert_eq!(count, branch_count);
 
                 changed
+            }
+        }
+    }
+
+    /// Records a branch-local fact and materializes the path-sensitive implications which must be
+    /// shared by independent value evaluations in the branch.
+    fn saturate_constraints(&mut self, rvsdg: &Rvsdg, key: ValueKey, constraint: ValueConstraint) {
+        self.worklist.clear();
+
+        let mut rescan_requested = false;
+
+        self.constrain_and_schedule(rvsdg, key, constraint, &mut rescan_requested);
+
+        loop {
+            while let Some(switch) = self.worklist.pop() {
+                self.propagate_constrained_switch(rvsdg, switch, &mut rescan_requested);
+            }
+
+            if !rescan_requested {
+                break;
+            }
+
+            rescan_requested = false;
+
+            let constrained_switches = self
+                .env
+                .constrained_outputs
+                .keys()
+                .copied()
+                .filter(|&node| rvsdg.is_live_node(node) && rvsdg[node].is_switch())
+                .collect::<Vec<_>>();
+
+            for switch in constrained_switches {
+                self.propagate_constrained_switch(rvsdg, switch, &mut rescan_requested);
+            }
+        }
+    }
+
+    /// Records a value constraint and, if the constraint was strengthened, schedules upstream
+    /// propagation of the constraint.
+    fn constrain_and_schedule(
+        &mut self,
+        rvsdg: &Rvsdg,
+        key: ValueKey,
+        constraint: ValueConstraint,
+        rescan_requested: &mut bool,
+    ) {
+        if !self.env.constrain_value(key, constraint) {
+            return;
+        }
+
+        *rescan_requested = true;
+
+        if let (
+            _,
+            ValueOrigin::Output {
+                producer: switch, ..
+            },
+        ) = key
+            && rvsdg.is_live_node(switch)
+            && rvsdg[switch].is_switch()
+        {
+            self.worklist.push(switch);
+        }
+    }
+
+    /// Propagates facts upstream through a constrained switch node when we can prove that it can
+    /// only select one specific branch under the current fact environment.
+    fn propagate_constrained_switch(
+        &mut self,
+        rvsdg: &Rvsdg,
+        switch: Node,
+        rescan_requested: &mut bool,
+    ) {
+        if !rvsdg.is_live_node(switch) || !rvsdg[switch].is_switch() {
+            return;
+        }
+
+        let output_constraints = self.env.switch_output_constraints(switch);
+
+        if output_constraints.is_empty() {
+            return;
+        }
+
+        let feasible = self.find_feasible_branches(rvsdg, switch);
+
+        if feasible.len() != 1 {
+            return;
+        }
+
+        let selected = feasible[0];
+        let switch_region = rvsdg[switch].region();
+
+        if let Some((origin, constraint)) = branch_selector_constraint(rvsdg, switch, selected) {
+            let key = canonicalize(rvsdg, switch_region, origin);
+
+            self.constrain_and_schedule(rvsdg, key, constraint, rescan_requested);
+        }
+
+        for (output, constraint) in output_constraints {
+            if let BranchResultSummary::Alias(key) =
+                BranchResultSummary::summarize(rvsdg, switch, output, selected)
+            {
+                self.constrain_and_schedule(rvsdg, key, constraint, rescan_requested);
             }
         }
     }
@@ -657,11 +801,6 @@ impl CorrelatedSwitchSimplifier {
         // from the value's origin ("from above").
         let origin_constraints = self.eval_origin_constraints(rvsdg, key, visited, cache);
         value = value.meet(&origin_constraints);
-
-        // Lastly, we attempt to strengthen the constraint with constraints we can derive from the
-        // value's users ("from below").
-        let user_constraints = self.eval_user_constraints(rvsdg, key, visited, cache);
-        value = value.meet(&user_constraints);
 
         // Remove the key so that other independent evaluation paths can inspect it later.
         visited.remove(&key);
@@ -717,135 +856,6 @@ impl CorrelatedSwitchSimplifier {
                     if all_constant && let Some(constant) = common {
                         value = value.meet(&ValueConstraint::Const(constant));
                     }
-                }
-            }
-        }
-
-        value
-    }
-
-    /// Derives constraints on `key` from switches that consume an alias of the value.
-    fn eval_user_constraints(
-        &self,
-        rvsdg: &Rvsdg,
-        key: ValueKey,
-        visited: &mut FxHashSet<ValueKey>,
-        cache: &mut EvalCache,
-    ) -> ValueConstraint {
-        let mut value = ValueConstraint::Unknown;
-        let mut pending = vec![key];
-        let mut traversed = FxHashSet::default();
-
-        while let Some((region, origin)) = pending.pop() {
-            if !traversed.insert((region, origin)) {
-                continue;
-            }
-
-            let users = match origin {
-                ValueOrigin::Argument(argument) if rvsdg.is_live_region(region) => rvsdg[region]
-                    .value_arguments()
-                    .get(argument as usize)
-                    .map(|argument| &argument.users),
-                ValueOrigin::Output { producer, output } if rvsdg.is_live_node(producer) => rvsdg
-                    [producer]
-                    .value_outputs()
-                    .get(output as usize)
-                    .map(|output| &output.users),
-                _ => None,
-            };
-
-            let Some(users) = users else {
-                continue;
-            };
-
-            for user in users.iter().copied() {
-                let ValueUser::Input { consumer, input } = user else {
-                    continue;
-                };
-
-                if !rvsdg.is_live_node(consumer) {
-                    continue;
-                }
-
-                match rvsdg[consumer].kind() {
-                    NodeKind::Simple(SimpleNode::ValueProxy(_)) if input == 0 => {
-                        pending.push((
-                            rvsdg[consumer].region(),
-                            ValueOrigin::Output {
-                                producer: consumer,
-                                output: 0,
-                            },
-                        ));
-                    }
-                    NodeKind::Simple(
-                        SimpleNode::OpBoolToBranchSelector(_)
-                        | SimpleNode::OpCaseToBranchSelector(_),
-                    ) if input == 0 => {
-                        for selector_user in
-                            rvsdg[consumer].value_outputs()[0].users.iter().copied()
-                        {
-                            let ValueUser::Input {
-                                consumer: switch,
-                                input: 0,
-                            } = selector_user
-                            else {
-                                continue;
-                            };
-
-                            if !rvsdg.is_live_node(switch) || !rvsdg[switch].is_switch() {
-                                continue;
-                            }
-
-                            let feasible =
-                                self.compute_feasible_branches(rvsdg, switch, visited, cache);
-
-                            if feasible.len() == 1
-                                && let Some((origin, constraint)) =
-                                    branch_selector_constraint(rvsdg, switch, feasible[0])
-                                && canonicalize(rvsdg, rvsdg[switch].region(), origin) == key
-                            {
-                                value = value.meet(&constraint);
-                            }
-                        }
-                    }
-                    NodeKind::Switch(switch_node) if input > 0 => {
-                        let feasible =
-                            self.compute_feasible_branches(rvsdg, consumer, visited, cache);
-
-                        if feasible.len() == 1 {
-                            for (output, constraint) in self.env.switch_output_constraints(consumer)
-                            {
-                                if let BranchResultSummary::Alias(alias) =
-                                    BranchResultSummary::summarize(
-                                        rvsdg,
-                                        consumer,
-                                        output,
-                                        feasible[0],
-                                    )
-                                    && alias == key
-                                {
-                                    value = value.meet(&constraint);
-                                }
-                            }
-                        }
-
-                        let argument = input - 1;
-
-                        for &branch in switch_node.branches() {
-                            pending.push((branch, ValueOrigin::Argument(argument)));
-                        }
-                    }
-                    NodeKind::Loop(loop_node) => {
-                        let loop_region = loop_node.loop_region();
-                        let result = input as usize + 1;
-
-                        if rvsdg[loop_region].value_results()[result].origin
-                            == ValueOrigin::Argument(input)
-                        {
-                            pending.push((loop_region, ValueOrigin::Argument(input)));
-                        }
-                    }
-                    _ => {}
                 }
             }
         }
@@ -1444,6 +1454,211 @@ mod tests {
             producer,
             output: 0,
         } = rvsdg[outer_branch_0].value_results()[0].origin
+        else {
+            panic!("expected the correlated branch to return a constant");
+        };
+        assert_eq!(rvsdg[producer].expect_const_u32().value(), 100);
+    }
+
+    #[test]
+    fn correlated_switch_constraint_transfers_through_nested_switch_output() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_BOOL,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_BOOL,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
+
+        let upstream_selector =
+            rvsdg.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
+        let upstream_switch = rvsdg.add_switch(
+            body,
+            vec![
+                ValueInput::output(TY_PREDICATE, upstream_selector, 0),
+                ValueInput::argument(TY_BOOL, 1),
+            ],
+            vec![ValueOutput::new(TY_U32), ValueOutput::new(TY_BOOL)],
+            None,
+        );
+
+        let upstream_branch_0 = rvsdg.add_switch_branch(upstream_switch);
+        let upstream_branch_0_value = rvsdg.add_const_u32(upstream_branch_0, 0);
+        let upstream_branch_0_predicate = rvsdg.add_const_bool(upstream_branch_0, false);
+
+        rvsdg.reconnect_region_result(
+            upstream_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: upstream_branch_0_value,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(
+            upstream_branch_0,
+            1,
+            ValueOrigin::Output {
+                producer: upstream_branch_0_predicate,
+                output: 0,
+            },
+        );
+
+        let upstream_branch_1 = rvsdg.add_switch_branch(upstream_switch);
+        let nested_selector = rvsdg
+            .add_op_bool_to_branch_selector(upstream_branch_1, ValueInput::argument(TY_BOOL, 0));
+        let nested_switch = rvsdg.add_switch(
+            upstream_branch_1,
+            vec![ValueInput::output(TY_PREDICATE, nested_selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let nested_branch_0 = rvsdg.add_switch_branch(nested_switch);
+        let nested_branch_0_value = rvsdg.add_const_u32(nested_branch_0, 1);
+
+        rvsdg.reconnect_region_result(
+            nested_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: nested_branch_0_value,
+                output: 0,
+            },
+        );
+
+        let nested_branch_1 = rvsdg.add_switch_branch(nested_switch);
+        let nested_branch_1_value = rvsdg.add_const_u32(nested_branch_1, 0);
+
+        rvsdg.reconnect_region_result(
+            nested_branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: nested_branch_1_value,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            upstream_branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: nested_switch,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(upstream_branch_1, 1, ValueOrigin::Argument(0));
+
+        let outer_selector = rvsdg.add_op_case_to_branch_selector(
+            body,
+            ValueInput::output(TY_U32, upstream_switch, 0),
+            Int::U32,
+            [0],
+        );
+        let outer_switch = rvsdg.add_switch(
+            body,
+            vec![
+                ValueInput::output(TY_PREDICATE, outer_selector, 0),
+                ValueInput::output(TY_BOOL, upstream_switch, 1),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let outer_branch_0 = rvsdg.add_switch_branch(outer_switch);
+        let outer_branch_0_value = rvsdg.add_const_u32(outer_branch_0, 200);
+
+        rvsdg.reconnect_region_result(
+            outer_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: outer_branch_0_value,
+                output: 0,
+            },
+        );
+
+        let outer_branch_1 = rvsdg.add_switch_branch(outer_switch);
+        let consumer_selector =
+            rvsdg.add_op_bool_to_branch_selector(outer_branch_1, ValueInput::argument(TY_BOOL, 0));
+        let consumer_switch = rvsdg.add_switch(
+            outer_branch_1,
+            vec![ValueInput::output(TY_PREDICATE, consumer_selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let consumer_branch_0 = rvsdg.add_switch_branch(consumer_switch);
+        let consumer_branch_0_value = rvsdg.add_const_u32(consumer_branch_0, 100);
+
+        rvsdg.reconnect_region_result(
+            consumer_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: consumer_branch_0_value,
+                output: 0,
+            },
+        );
+
+        let consumer_branch_1 = rvsdg.add_switch_branch(consumer_switch);
+        let consumer_branch_1_value = rvsdg.add_const_u32(consumer_branch_1, 101);
+
+        rvsdg.reconnect_region_result(
+            consumer_branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: consumer_branch_1_value,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(
+            outer_branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: consumer_switch,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            body,
+            0,
+            ValueOrigin::Output {
+                producer: outer_switch,
+                output: 0,
+            },
+        );
+
+        let mut simplifier = CorrelatedSwitchSimplifier::new();
+
+        assert!(simplifier.simplify_in_fn(&mut module, &mut rvsdg, function));
+
+        assert!(rvsdg.is_live_node(upstream_switch));
+        assert!(rvsdg.is_live_node(nested_switch));
+        assert!(rvsdg.is_live_node(outer_switch));
+        assert!(!rvsdg.is_live_node(consumer_switch));
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[outer_branch_1].value_results()[0].origin
         else {
             panic!("expected the correlated branch to return a constant");
         };
