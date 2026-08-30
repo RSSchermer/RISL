@@ -48,8 +48,6 @@ use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 use crate::{Function, Module};
 
-const MAX_NOT_IN_VALUES: usize = 32;
-
 type ValueKey = (Region, ValueOrigin);
 type FeasibleBranches = SmallVec<[usize; 4]>;
 
@@ -105,7 +103,7 @@ enum ValueConstraint {
     Const(ScalarConstant),
 
     /// The value is known not to be in the given set of values.
-    NotIn(Vec<u128>),
+    NotIn(SmallVec<[u128; 4]>),
 
     /// The value would reflect an impossibility.
     ///
@@ -121,8 +119,7 @@ impl ValueConstraint {
     /// `Unknown` leaves the other constraint unchanged, while `Impossible` remains impossible.
     /// Equal constants remain constant and unequal constants are impossible. A constant combined
     /// with `NotIn` is impossible when its integer encoding is excluded and otherwise remains
-    /// constant. Two `NotIn` constraints combine their exclusions; if their union would exceed
-    /// [`MAX_NOT_IN_VALUES`], the existing exclusions are retained as a conservative result.
+    /// constant. Two `NotIn` constraints combine their exclusions.
     fn meet(&self, other: &Self) -> Self {
         use ValueConstraint::*;
 
@@ -151,10 +148,6 @@ impl ValueConstraint {
 
                 for value in right {
                     if !values.contains(value) {
-                        if values.len() == MAX_NOT_IN_VALUES {
-                            return NotIn(left.clone());
-                        }
-
                         values.push(*value);
                     }
                 }
@@ -498,7 +491,7 @@ fn branch_selector_constraint(
 
                 ValueConstraint::Const(constant)
             } else if branch == cases.len() {
-                ValueConstraint::NotIn(cases.to_vec())
+                ValueConstraint::NotIn(cases.iter().copied().collect())
             } else {
                 return None;
             };
