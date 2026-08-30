@@ -415,12 +415,47 @@ where
     }
 }
 
+enum BranchSelectorInfo<'a> {
+    Predicate(u32),
+    Bool(ValueOrigin),
+    Case {
+        source: ValueOrigin,
+        cases: &'a [u128],
+        signed: bool,
+    },
+}
+
+/// Provides a description of how the given switch node's branch selector is resolved.
+fn branch_selector_info(rvsdg: &Rvsdg, switch: Node) -> BranchSelectorInfo<'_> {
+    use NodeKind::*;
+    use SimpleNode::*;
+
+    let ValueOrigin::Output {
+        producer,
+        output: 0,
+    } = rvsdg[switch].expect_switch().branch_selector().origin
+    else {
+        panic!("expected switch branch selector to be produced by an output");
+    };
+
+    match rvsdg[producer].kind() {
+        Simple(ConstPredicate(predicate)) => BranchSelectorInfo::Predicate(predicate.value()),
+        Simple(OpBoolToBranchSelector(_)) => {
+            BranchSelectorInfo::Bool(rvsdg[producer].value_inputs()[0].origin)
+        }
+        Simple(OpCaseToBranchSelector(selector)) => BranchSelectorInfo::Case {
+            source: rvsdg[producer].value_inputs()[0].origin,
+            cases: selector.cases(),
+            signed: selector.encoding().signed,
+        },
+        _ => panic!("expected a node-kind that produces a branch-selector"),
+    }
+}
+
 /// Derives the constraint on the value that produces the given switch node's branch selector, as
 /// implied by entering the given branch.
 ///
-/// This assumes that the RVSDG is in predicate continuation form and that the switch node's
-/// branch-selector input connects directly to an [OpBoolToBranchSelector] or
-/// [OpCaseToBranchSelector] node. The constraint implied on its input depends on the node kind:
+/// The constraint implied on the selector operation's input depends on the node kind:
 ///
 /// - If the branch-selector is produced by an [OpBoolToBranchSelector] node, then branch `0`
 ///   implies that the input value is `true`; branch `1` implies that the input value is `false`.
@@ -433,45 +468,42 @@ fn branch_selector_constraint(
     switch: Node,
     branch: usize,
 ) -> Option<(ValueOrigin, ValueConstraint)> {
-    use NodeKind::*;
-    use SimpleNode::*;
-
-    let ValueOrigin::Output {
-        producer,
-        output: 0,
-    } = rvsdg[switch].expect_switch().branch_selector().origin
-    else {
-        return None;
-    };
-
-    match rvsdg[producer].kind() {
-        Simple(OpBoolToBranchSelector(_)) => {
+    match branch_selector_info(rvsdg, switch) {
+        BranchSelectorInfo::Bool(source) => {
             let fact = match branch {
                 0 => ValueConstraint::Const(ScalarConstant::Bool(true)),
                 1 => ValueConstraint::Const(ScalarConstant::Bool(false)),
                 _ => return None,
             };
 
-            Some((rvsdg[producer].value_inputs()[0].origin, fact))
+            Some((source, fact))
         }
-        Simple(OpCaseToBranchSelector(selector)) => {
-            let fact = if let Some(&case) = selector.cases().get(branch) {
-                let constant = if selector.encoding().signed {
+        BranchSelectorInfo::Case {
+            source,
+            cases,
+            signed,
+        } => {
+            let fact = if let Some(&case) = cases.get(branch) {
+                let constant = if signed {
                     ScalarConstant::I32(case as u32 as i32)
                 } else {
                     ScalarConstant::U32(case as u32)
                 };
 
                 ValueConstraint::Const(constant)
-            } else if branch == selector.cases().len() {
-                ValueConstraint::NotIn(selector.cases().to_vec())
+            } else if branch == cases.len() {
+                ValueConstraint::NotIn(cases.to_vec())
             } else {
                 return None;
             };
 
-            Some((rvsdg[producer].value_inputs()[0].origin, fact))
+            Some((source, fact))
         }
-        _ => None,
+        BranchSelectorInfo::Predicate(_) => {
+            // A constant predicate has no underlying source value that we need to propagate a
+            // constraint to.
+            None
+        }
     }
 }
 
@@ -929,9 +961,6 @@ impl CorrelatedSwitchSimplifier {
     }
 
     fn compute_feasible_branches(&mut self, rvsdg: &Rvsdg, switch: Node) -> FeasibleBranches {
-        use NodeKind::*;
-        use SimpleNode::*;
-
         if let Some(feasible) = self.cache.feasible_branches.get(&switch) {
             return feasible.clone();
         }
@@ -941,56 +970,38 @@ impl CorrelatedSwitchSimplifier {
 
         let mut feasible = (0..branch_count).collect::<FeasibleBranches>();
 
-        let selector_origin = rvsdg[switch].expect_switch().branch_selector().origin;
-
-        if let ValueOrigin::Output {
-            producer,
-            output: 0,
-        } = selector_origin
-            && rvsdg.is_live_node(producer)
-        {
-            match rvsdg[producer].kind() {
-                Simple(ConstPredicate(predicate)) => {
-                    feasible.retain(|branch| *branch == predicate.value() as usize);
+        match branch_selector_info(rvsdg, switch) {
+            BranchSelectorInfo::Predicate(predicate) => {
+                feasible.retain(|branch| *branch == predicate as usize);
+            }
+            BranchSelectorInfo::Bool(source) => match self.eval(rvsdg, outer_region, source) {
+                ValueConstraint::Const(ScalarConstant::Bool(true)) => {
+                    feasible.retain(|branch| *branch == 0);
                 }
-                Simple(OpBoolToBranchSelector(_)) => {
-                    let source = rvsdg[producer].value_inputs()[0].origin;
-
-                    match self.eval(rvsdg, outer_region, source) {
-                        ValueConstraint::Const(ScalarConstant::Bool(true)) => {
-                            feasible.retain(|branch| *branch == 0);
-                        }
-                        ValueConstraint::Const(ScalarConstant::Bool(false)) => {
-                            feasible.retain(|branch| *branch == 1);
-                        }
-                        _ => {}
-                    }
-                }
-                Simple(OpCaseToBranchSelector(selector)) => {
-                    let source = rvsdg[producer].value_inputs()[0].origin;
-
-                    match self.eval(rvsdg, outer_region, source) {
-                        ValueConstraint::Const(constant) => {
-                            if let Some(value) = constant.integer_encoding() {
-                                let selected = selector
-                                    .cases()
-                                    .iter()
-                                    .position(|case| *case == value)
-                                    .unwrap_or(selector.cases().len());
-
-                                feasible.retain(|branch| *branch == selected);
-                            }
-                        }
-                        ValueConstraint::NotIn(excluded) => {
-                            feasible.retain(|branch| {
-                                *branch == selector.cases().len()
-                                    || !excluded.contains(&selector.cases()[*branch])
-                            });
-                        }
-                        _ => {}
-                    }
+                ValueConstraint::Const(ScalarConstant::Bool(false)) => {
+                    feasible.retain(|branch| *branch == 1);
                 }
                 _ => {}
+            },
+            BranchSelectorInfo::Case { source, cases, .. } => {
+                match self.eval(rvsdg, outer_region, source) {
+                    ValueConstraint::Const(constant) => {
+                        if let Some(value) = constant.integer_encoding() {
+                            let selected = cases
+                                .iter()
+                                .position(|case| *case == value)
+                                .unwrap_or(cases.len());
+
+                            feasible.retain(|branch| *branch == selected);
+                        }
+                    }
+                    ValueConstraint::NotIn(excluded) => {
+                        feasible.retain(|branch| {
+                            *branch == cases.len() || !excluded.contains(&cases[*branch])
+                        });
+                    }
+                    _ => {}
+                }
             }
         }
 
