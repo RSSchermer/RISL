@@ -424,6 +424,9 @@ fn branch_selector_constraint(
     switch: Node,
     branch: usize,
 ) -> Option<(ValueOrigin, ValueConstraint)> {
+    use NodeKind::*;
+    use SimpleNode::*;
+
     let ValueOrigin::Output {
         producer,
         output: 0,
@@ -433,7 +436,7 @@ fn branch_selector_constraint(
     };
 
     match rvsdg[producer].kind() {
-        NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_)) => {
+        Simple(OpBoolToBranchSelector(_)) => {
             let fact = match branch {
                 0 => ValueConstraint::Const(ScalarConstant::Bool(true)),
                 1 => ValueConstraint::Const(ScalarConstant::Bool(false)),
@@ -442,7 +445,7 @@ fn branch_selector_constraint(
 
             Some((rvsdg[producer].value_inputs()[0].origin, fact))
         }
-        NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(selector)) => {
+        Simple(OpCaseToBranchSelector(selector)) => {
             let fact = if let Some(&case) = selector.cases().get(branch) {
                 let constant = if selector.encoding().signed {
                     ScalarConstant::I32(case as u32 as i32)
@@ -464,13 +467,16 @@ fn branch_selector_constraint(
 }
 
 fn canonicalize(rvsdg: &Rvsdg, mut region: Region, mut origin: ValueOrigin) -> ValueKey {
+    use NodeKind::*;
+    use SimpleNode::*;
+
     loop {
         match origin {
             ValueOrigin::Output {
                 producer,
                 output: 0,
             } if rvsdg.is_live_node(producer) => {
-                if let NodeKind::Simple(SimpleNode::ValueProxy(proxy)) = rvsdg[producer].kind() {
+                if let Simple(ValueProxy(proxy)) = rvsdg[producer].kind() {
                     region = rvsdg[producer].region();
                     origin = proxy.value_inputs()[0].origin;
 
@@ -489,13 +495,13 @@ fn canonicalize(rvsdg: &Rvsdg, mut region: Region, mut origin: ValueOrigin) -> V
                 let outer_region = rvsdg[owner].region();
 
                 match rvsdg[owner].kind() {
-                    NodeKind::Switch(switch) => {
+                    Switch(switch) => {
                         origin = switch.value_inputs()[argument as usize + 1].origin;
                         region = outer_region;
 
                         continue;
                     }
-                    NodeKind::Loop(loop_node) => {
+                    Loop(loop_node) => {
                         let loop_region = loop_node.loop_region();
                         let result = argument as usize + 1;
 
@@ -590,21 +596,23 @@ impl CorrelatedSwitchSimplifier {
     }
 
     fn visit_region(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, region: Region) -> bool {
+        use NodeKind::*;
+
         let nodes = rvsdg[region]
             .nodes()
             .iter()
             .copied()
-            .filter(|&node| matches!(rvsdg[node].kind(), NodeKind::Loop(_) | NodeKind::Switch(_)))
+            .filter(|&node| matches!(rvsdg[node].kind(), Loop(_) | Switch(_)))
             .collect::<Vec<_>>();
 
         let mut changed = false;
 
         for node in nodes {
             match rvsdg[node].kind() {
-                NodeKind::Loop(loop_node) => {
+                Loop(loop_node) => {
                     changed |= self.visit_region(module, rvsdg, loop_node.loop_region());
                 }
-                NodeKind::Switch(_) => {
+                Switch(_) => {
                     changed |= self.visit_switch(module, rvsdg, node);
                 }
                 _ => {}
@@ -768,23 +776,16 @@ impl CorrelatedSwitchSimplifier {
     }
 
     /// Resolves the strongest known constraint for the given value.
-    fn eval(
-        &self,
-        rvsdg: &Rvsdg,
-        region: Region,
-        origin: ValueOrigin,
-        visited: &mut FxHashSet<ValueKey>,
-        cache: &mut EvalCache,
-    ) -> ValueConstraint {
+    fn eval(&mut self, rvsdg: &Rvsdg, region: Region, origin: ValueOrigin) -> ValueConstraint {
         let key = canonicalize(rvsdg, region, origin);
 
-        if let Some(constraint) = cache.values.get(&key) {
+        if let Some(constraint) = self.cache.values.get(&key) {
             return constraint.clone();
         }
 
         // If the key was already recorded for this evaluation path, then there is a cycle in the
         // analysis and we bail.
-        if !visited.insert(key) {
+        if !self.visited.insert(key) {
             return ValueConstraint::Unknown;
         }
 
@@ -799,25 +800,19 @@ impl CorrelatedSwitchSimplifier {
 
         // We then attempt to strengthen the constraint with additional constraints we can derive
         // from the value's origin ("from above").
-        let origin_constraints = self.eval_origin_constraints(rvsdg, key, visited, cache);
+        let origin_constraints = self.eval_origin_constraints(rvsdg, key);
         value = value.meet(&origin_constraints);
 
         // Remove the key so that other independent evaluation paths can inspect it later.
-        visited.remove(&key);
+        self.visited.remove(&key);
 
-        cache.values.insert(key, value.clone());
+        self.cache.values.insert(key, value.clone());
 
         value
     }
 
     /// Derives constraints on `key` from the value's origin.
-    fn eval_origin_constraints(
-        &self,
-        rvsdg: &Rvsdg,
-        key: ValueKey,
-        visited: &mut FxHashSet<ValueKey>,
-        cache: &mut EvalCache,
-    ) -> ValueConstraint {
+    fn eval_origin_constraints(&mut self, rvsdg: &Rvsdg, key: ValueKey) -> ValueConstraint {
         let mut value = ValueConstraint::Unknown;
 
         if let ValueOrigin::Output { producer, output } = key.1
@@ -826,12 +821,12 @@ impl CorrelatedSwitchSimplifier {
             if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
                 value = value.meet(&ValueConstraint::Const(constant));
             } else if rvsdg[producer].is_switch() {
-                let feasible = self.compute_feasible_branches(rvsdg, producer, visited, cache);
+                let feasible = self.compute_feasible_branches(rvsdg, producer);
 
                 if feasible.len() == 1 {
                     let summary =
                         BranchResultSummary::summarize(rvsdg, producer, output, feasible[0]);
-                    let summary_value = self.eval_summary(rvsdg, summary, visited, cache);
+                    let summary_value = self.eval_summary(rvsdg, summary);
 
                     value = value.meet(&summary_value);
                 } else if !feasible.is_empty() {
@@ -863,45 +858,26 @@ impl CorrelatedSwitchSimplifier {
         value
     }
 
-    fn eval_summary(
-        &self,
-        rvsdg: &Rvsdg,
-        summary: BranchResultSummary,
-        visited: &mut FxHashSet<ValueKey>,
-        cache: &mut EvalCache,
-    ) -> ValueConstraint {
+    fn eval_summary(&mut self, rvsdg: &Rvsdg, summary: BranchResultSummary) -> ValueConstraint {
         match summary {
             BranchResultSummary::Const(constant) => ValueConstraint::Const(constant),
             BranchResultSummary::Fallback => ValueConstraint::Unknown,
-            BranchResultSummary::Alias((region, origin)) => {
-                self.eval(rvsdg, region, origin, visited, cache)
-            }
+            BranchResultSummary::Alias((region, origin)) => self.eval(rvsdg, region, origin),
         }
     }
 
     fn find_feasible_branches(&mut self, rvsdg: &Rvsdg, switch: Node) -> FeasibleBranches {
-        let mut visited = std::mem::take(&mut self.visited);
-        let mut cache = std::mem::take(&mut self.cache);
+        self.visited.clear();
+        self.cache.sync(self.env.version);
 
-        visited.clear();
-        cache.sync(self.env.version);
-
-        let feasible = self.compute_feasible_branches(rvsdg, switch, &mut visited, &mut cache);
-
-        self.visited = visited;
-        self.cache = cache;
-
-        feasible
+        self.compute_feasible_branches(rvsdg, switch)
     }
 
-    fn compute_feasible_branches(
-        &self,
-        rvsdg: &Rvsdg,
-        switch: Node,
-        visited: &mut FxHashSet<ValueKey>,
-        cache: &mut EvalCache,
-    ) -> FeasibleBranches {
-        if let Some(feasible) = cache.feasible_branches.get(&switch) {
+    fn compute_feasible_branches(&mut self, rvsdg: &Rvsdg, switch: Node) -> FeasibleBranches {
+        use NodeKind::*;
+        use SimpleNode::*;
+
+        if let Some(feasible) = self.cache.feasible_branches.get(&switch) {
             return feasible.clone();
         }
 
@@ -919,13 +895,13 @@ impl CorrelatedSwitchSimplifier {
             && rvsdg.is_live_node(producer)
         {
             match rvsdg[producer].kind() {
-                NodeKind::Simple(SimpleNode::ConstPredicate(predicate)) => {
+                Simple(ConstPredicate(predicate)) => {
                     feasible.retain(|branch| *branch == predicate.value() as usize);
                 }
-                NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_)) => {
+                Simple(OpBoolToBranchSelector(_)) => {
                     let source = rvsdg[producer].value_inputs()[0].origin;
 
-                    match self.eval(rvsdg, outer_region, source, visited, cache) {
+                    match self.eval(rvsdg, outer_region, source) {
                         ValueConstraint::Const(ScalarConstant::Bool(true)) => {
                             feasible.retain(|branch| *branch == 0);
                         }
@@ -935,10 +911,10 @@ impl CorrelatedSwitchSimplifier {
                         _ => {}
                     }
                 }
-                NodeKind::Simple(SimpleNode::OpCaseToBranchSelector(selector)) => {
+                Simple(OpCaseToBranchSelector(selector)) => {
                     let source = rvsdg[producer].value_inputs()[0].origin;
 
-                    match self.eval(rvsdg, outer_region, source, visited, cache) {
+                    match self.eval(rvsdg, outer_region, source) {
                         ValueConstraint::Const(constant) => {
                             if let Some(value) = constant.integer_encoding() {
                                 let selected = selector
@@ -968,13 +944,15 @@ impl CorrelatedSwitchSimplifier {
         for (output, constraint) in constraints {
             feasible.retain(|branch| {
                 let summary = BranchResultSummary::summarize(rvsdg, switch, output, *branch);
-                let summary_value = self.eval_summary(rvsdg, summary, visited, cache);
+                let summary_value = self.eval_summary(rvsdg, summary);
 
                 !summary_value.meet(&constraint).is_impossible()
             });
         }
 
-        cache.feasible_branches.insert(switch, feasible.clone());
+        self.cache
+            .feasible_branches
+            .insert(switch, feasible.clone());
 
         feasible
     }
