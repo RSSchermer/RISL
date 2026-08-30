@@ -36,6 +36,7 @@
 //! [branch_selector_normalization]: crate::rvsdg::transform::branch_selector_normalization
 
 use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
 
 use indexmap::IndexMap;
@@ -278,17 +279,26 @@ impl FactEnv {
     /// Any strengthening of the constraint is also recorded into the top scope's "undo log", so
     /// that the strengthening can be undone when the scope is popped.
     fn constrain_value(&mut self, value: ValueKey, constraint: ValueConstraint) -> bool {
-        let previous = self.values.get(&value).cloned();
-        let combined = previous
-            .as_ref()
-            .unwrap_or(&ValueConstraint::Unknown)
-            .meet(&constraint);
+        let previous = match self.values.entry(value) {
+            Entry::Occupied(mut entry) => {
+                let combined = entry.get().meet(&constraint);
 
-        if previous.as_ref() == Some(&combined)
-            || previous.is_none() && combined == ValueConstraint::Unknown
-        {
-            return false;
-        }
+                if entry.get() == &combined {
+                    return false;
+                }
+
+                Some(entry.insert(combined))
+            }
+            Entry::Vacant(entry) => {
+                if constraint == ValueConstraint::Unknown {
+                    return false;
+                }
+
+                entry.insert(constraint);
+
+                None
+            }
+        };
 
         if previous.is_none()
             && let (region, ValueOrigin::Output { producer, output }) = value
@@ -304,7 +314,6 @@ impl FactEnv {
             outputs.push(output);
         }
 
-        self.values.insert(value, combined);
         self.scopes
             .last_mut()
             .expect("fact scope should be active")
