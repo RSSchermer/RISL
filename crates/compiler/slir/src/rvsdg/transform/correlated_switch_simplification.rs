@@ -409,6 +409,12 @@ where
         Some(value)
     }
 
+    fn is_empty(&self) -> bool {
+        debug_assert_eq!(self.queue.is_empty(), self.queued.is_empty());
+
+        self.queue.is_empty()
+    }
+
     fn clear(&mut self) {
         self.queue.clear();
         self.queued.clear();
@@ -730,7 +736,7 @@ impl CorrelatedSwitchSimplifier {
         key: ValueKey,
         constraint: ValueConstraint,
     ) -> bool {
-        self.worklist.clear();
+        debug_assert!(self.worklist.is_empty());
 
         let mut rescan_requested = false;
 
@@ -954,7 +960,8 @@ impl CorrelatedSwitchSimplifier {
     }
 
     fn find_feasible_branches(&mut self, rvsdg: &Rvsdg, switch: Node) -> FeasibleBranches {
-        self.visited.clear();
+        debug_assert!(self.visited.is_empty());
+
         self.cache.sync(self.env.version);
 
         self.compute_feasible_branches(rvsdg, switch)
