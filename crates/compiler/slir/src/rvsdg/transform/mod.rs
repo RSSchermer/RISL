@@ -15,7 +15,6 @@ pub mod fallback_value_replacement;
 pub mod function_inlining;
 pub mod identical_branch_elimination;
 pub mod invalid_ptr_replacement;
-pub mod loop_passthrough_elimination;
 pub mod loop_pointer_normalization;
 pub mod loop_slice_offset_normalization;
 pub mod memory_promotion_and_legalization;
@@ -23,6 +22,7 @@ pub mod memory_transform;
 pub mod node_reduction;
 pub mod offset_slice_elaboration;
 pub mod offset_slice_replacement;
+pub mod passthrough_elimination;
 pub mod pointer_reconstruction;
 pub mod pred_to_case_extraction;
 pub mod pred_to_case_to_pred_merging;
@@ -35,7 +35,6 @@ pub mod switch_arg_reduction;
 mod switch_branch_pruning;
 pub mod switch_fallback_unification;
 pub mod switch_merging;
-pub mod switch_passthrough_elimination;
 pub mod switchify_pred_to_case;
 pub mod variable_pointer_emulation;
 
@@ -50,8 +49,7 @@ use crate::{Function, Module};
 
 pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     function_inlining::transform_entry_points(module, rvsdg);
-    switch_passthrough_elimination::transform_entry_points(module, rvsdg);
-    loop_passthrough_elimination::transform_entry_points(module, rvsdg);
+    passthrough_elimination::transform_entry_points(module, rvsdg);
     offset_slice_elaboration::transform_entry_points(module, rvsdg);
     memory_transform::transform_entry_points(module, rvsdg);
     redundant_state_link_elimination::transform_entry_points(module, rvsdg);
@@ -68,8 +66,7 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     switch_merging::transform_entry_points(module, rvsdg);
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
-    switch_passthrough_elimination::transform_entry_points(module, rvsdg);
-    loop_passthrough_elimination::transform_entry_points(module, rvsdg);
+    passthrough_elimination::transform_entry_points(module, rvsdg);
     dead_loop_value_normalization::transform_entry_points(module, rvsdg);
     dead_value_elimination::transform_entry_points(module, rvsdg);
     identical_branch_elimination::transform_entry_points(module, rvsdg);
