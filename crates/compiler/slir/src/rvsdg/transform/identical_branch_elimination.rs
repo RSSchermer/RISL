@@ -58,8 +58,15 @@ impl IdenticalBranchElimination {
         }
     }
 
-    pub fn inline_in_region(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, region: Region) {
+    pub fn inline_in_region(
+        &mut self,
+        module: &mut Module,
+        rvsdg: &mut Rvsdg,
+        region: Region,
+    ) -> bool {
         self.job_stack.clear();
+
+        let mut changed = false;
 
         JobCollector {
             checker: &mut self.checker,
@@ -69,14 +76,19 @@ impl IdenticalBranchElimination {
 
         while let Some(switch_node) = self.job_stack.pop() {
             inline_switch_branch(module, rvsdg, switch_node, 0);
+
+            changed = true;
         }
+
+        changed
     }
 }
 
 /// A transformation pass that eliminates `Switch` nodes where all branches are structurally
 /// identical.
-pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
     let mut transformer = IdenticalBranchElimination::new();
+    let mut changed = false;
 
     let entry_points = module
         .entry_points
@@ -90,8 +102,10 @@ pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
             .expect("Function must exist in RVSDG");
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
-        transformer.inline_in_region(module, rvsdg, body_region);
+        changed |= transformer.inline_in_region(module, rvsdg, body_region);
     }
+
+    changed
 }
 
 #[cfg(test)]
@@ -210,7 +224,7 @@ mod tests {
 
         let mut transformer = IdenticalBranchElimination::new();
 
-        transformer.inline_in_region(&mut module, &mut rvsdg, region);
+        assert!(transformer.inline_in_region(&mut module, &mut rvsdg, region));
 
         let res = &rvsdg[region].value_results()[0];
 
