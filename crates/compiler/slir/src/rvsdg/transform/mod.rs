@@ -42,6 +42,7 @@ use crate::rvsdg::Rvsdg;
 use crate::rvsdg::transform::common_value_elimination::CommonValueEliminator;
 use crate::rvsdg::transform::const_switch_inlining::ConstSwitchInliner;
 use crate::rvsdg::transform::correlated_switch_simplification::CorrelatedSwitchSimplifier;
+use crate::rvsdg::transform::dead_loop_value_normalization::DeadLoopValueNormalizer;
 use crate::rvsdg::transform::node_reduction::NodeReducer;
 use crate::rvsdg::transform::passthrough_elimination::PassthroughEliminator;
 use crate::rvsdg::transform::switch_fallback_unification::SwitchFallbackUnifier;
@@ -99,6 +100,7 @@ struct LoopingOptimizer {
     switch_fallback_unifier: SwitchFallbackUnifier,
     correlated_switch_specializer: CorrelatedSwitchSimplifier,
     passthrough_eliminator: PassthroughEliminator,
+    dead_loop_value_normalizer: DeadLoopValueNormalizer,
 }
 
 impl LoopingOptimizer {
@@ -111,6 +113,7 @@ impl LoopingOptimizer {
             switch_fallback_unifier: SwitchFallbackUnifier::new(),
             correlated_switch_specializer: CorrelatedSwitchSimplifier::new(),
             passthrough_eliminator: PassthroughEliminator::new(),
+            dead_loop_value_normalizer: DeadLoopValueNormalizer::new(),
         }
     }
 
@@ -137,6 +140,9 @@ impl LoopingOptimizer {
                 .correlated_switch_specializer
                 .simplify_in_fn(module, rvsdg, function);
             do_iteration |= self.passthrough_eliminator.eliminate_in_fn(rvsdg, function);
+            do_iteration |= self
+                .dead_loop_value_normalizer
+                .transform_region(rvsdg, body_region);
             do_iteration |= self
                 .common_value_eliminator
                 .process_region(rvsdg, body_region);

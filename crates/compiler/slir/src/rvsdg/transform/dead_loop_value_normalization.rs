@@ -212,7 +212,7 @@ impl DeadLoopValueNormalizer {
         }
     }
 
-    pub fn transform_region(&mut self, rvsdg: &mut Rvsdg, region: Region) {
+    pub fn transform_region(&mut self, rvsdg: &mut Rvsdg, region: Region) -> bool {
         let mut collector = LoopNodeCollector {
             candidates: &mut self.candidates,
         };
@@ -220,31 +220,45 @@ impl DeadLoopValueNormalizer {
         collector.visit_region(rvsdg, region);
 
         let mut candidates = mem::replace(&mut self.candidates, Vec::new());
+        let mut changed = false;
 
         for node in candidates.drain(..) {
-            self.normalize_loop_values(rvsdg, node);
+            changed |= self.normalize_loop_values(rvsdg, node);
         }
 
         self.candidates = candidates;
+
+        changed
     }
 
-    fn normalize_loop_values(&mut self, rvsdg: &mut Rvsdg, loop_node: Node) {
+    fn normalize_loop_values(&mut self, rvsdg: &mut Rvsdg, loop_node: Node) -> bool {
         let loop_data = rvsdg[loop_node].expect_loop();
         let loop_region = loop_data.loop_region();
         let loop_value_count = loop_data.value_outputs().len() as u32;
+
+        let mut changed = false;
 
         for i in 0..loop_value_count {
             if !self.analyzer.loop_value_is_used(rvsdg, loop_node, i) {
                 let result = i + 1;
 
-                rvsdg.reconnect_region_result(loop_region, result, ValueOrigin::Argument(i));
+                if rvsdg[loop_region].value_results()[result as usize].origin
+                    != ValueOrigin::Argument(i)
+                {
+                    rvsdg.reconnect_region_result(loop_region, result, ValueOrigin::Argument(i));
+
+                    changed = true;
+                }
             }
         }
+
+        changed
     }
 }
 
-pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
     let mut normalizer = DeadLoopValueNormalizer::new();
+    let mut changed = false;
 
     for (entry_point, _) in module.entry_points.iter() {
         let fn_node = rvsdg
@@ -252,8 +266,10 @@ pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
             .expect("function not registered");
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
-        normalizer.transform_region(rvsdg, body_region);
+        changed |= normalizer.transform_region(rvsdg, body_region);
     }
+
+    changed
 }
 
 #[cfg(test)]
@@ -272,6 +288,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -308,6 +325,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -343,6 +361,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -386,6 +405,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -443,6 +463,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -489,6 +510,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -553,6 +575,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -611,6 +634,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -663,6 +687,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -723,6 +748,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -779,6 +805,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -845,7 +872,8 @@ mod tests {
         // The value-outputs for loop-values 1 and 3 are unused.
 
         let mut normalizer = DeadLoopValueNormalizer::new();
-        normalizer.transform_region(&mut rvsdg, region);
+
+        assert!(normalizer.transform_region(&mut rvsdg, region));
 
         // Verify that results 2 and 4 (loop-values 1 and 3) now connect directly to their
         // arguments, and that the other results remain connected to their respective proxy nodes.
@@ -888,6 +916,7 @@ mod tests {
             name: Symbol::from_ref("f"),
             module: Symbol::from_ref("m"),
         };
+
         module.fn_sigs.register(
             function,
             FnSig {
@@ -921,7 +950,8 @@ mod tests {
 
         // Transform.
         let mut normalizer = DeadLoopValueNormalizer::new();
-        normalizer.transform_region(&mut rvsdg, region);
+
+        assert!(!normalizer.transform_region(&mut rvsdg, region));
 
         // All loop-values should still be connected as they were, because they are all used.
         let loop_data = rvsdg[loop_node].expect_loop();
