@@ -45,34 +45,40 @@ impl PassthroughEliminator {
         }
     }
 
-    pub fn eliminate_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) {
+    pub fn eliminate_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) -> bool {
         let fn_node = rvsdg
             .get_function_node(function)
             .expect("function not registered");
 
         self.collector.visit_node(rvsdg, fn_node);
+        let mut changed = false;
 
         while let Some(node) = self.collector.nodes.pop() {
-            match rvsdg[node].kind() {
+            changed |= match rvsdg[node].kind() {
                 NodeKind::Loop(_) => eliminate_loop_passthroughs(rvsdg, node),
                 NodeKind::Switch(_) => eliminate_switch_passthroughs(rvsdg, node),
                 _ => unreachable!(),
-            }
+            };
         }
+
+        changed
     }
 }
 
-fn eliminate_loop_passthroughs(rvsdg: &mut Rvsdg, loop_node: Node) {
+fn eliminate_loop_passthroughs(rvsdg: &mut Rvsdg, loop_node: Node) -> bool {
     let outer_region = rvsdg[loop_node].region();
     let loop_data = rvsdg[loop_node].expect_loop();
     let loop_region = loop_data.loop_region();
     let num_outputs = loop_data.value_outputs().len();
+    let mut changed = false;
 
     for output in 0..num_outputs {
         // Loop region result 0 is the reentry condition; results 1..N+1 are loop values.
         let result_origin = rvsdg[loop_region].value_results()[output + 1].origin;
 
-        if result_origin == ValueOrigin::Argument(output as u32) {
+        if result_origin == ValueOrigin::Argument(output as u32)
+            && !rvsdg[loop_node].value_outputs()[output].users.is_empty()
+        {
             let input_origin = rvsdg[loop_node].value_inputs()[output].origin;
 
             rvsdg.reconnect_value_users(
@@ -83,12 +89,16 @@ fn eliminate_loop_passthroughs(rvsdg: &mut Rvsdg, loop_node: Node) {
                 },
                 input_origin,
             );
+            changed = true;
         }
     }
+
+    changed
 }
 
-fn eliminate_switch_passthroughs(rvsdg: &mut Rvsdg, switch_node: Node) {
+fn eliminate_switch_passthroughs(rvsdg: &mut Rvsdg, switch_node: Node) -> bool {
     let num_outputs = rvsdg[switch_node].expect_switch().value_outputs().len();
+    let mut changed = false;
 
     for output in (0..num_outputs).rev() {
         let switch_data = rvsdg[switch_node].expect_switch();
@@ -127,16 +137,22 @@ fn eliminate_switch_passthroughs(rvsdg: &mut Rvsdg, switch_node: Node) {
             );
 
             rvsdg.remove_switch_output(switch_node, output as u32);
+            changed = true;
         }
     }
+
+    changed
 }
 
-pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) {
+pub fn transform_entry_points(module: &Module, rvsdg: &mut Rvsdg) -> bool {
     let mut eliminator = PassthroughEliminator::new();
+    let mut changed = false;
 
     for (entry_point, _) in module.entry_points.iter() {
-        eliminator.eliminate_in_fn(rvsdg, entry_point);
+        changed |= eliminator.eliminate_in_fn(rvsdg, entry_point);
     }
+
+    changed
 }
 
 #[cfg(test)]
@@ -207,7 +223,10 @@ mod tests {
         let user_0 = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, loop_node, 0));
         let user_1 = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, loop_node, 1));
 
-        PassthroughEliminator::new().eliminate_in_fn(&mut rvsdg, function);
+        let mut eliminator = PassthroughEliminator::new();
+
+        assert!(eliminator.eliminate_in_fn(&mut rvsdg, function));
+        assert!(!eliminator.eliminate_in_fn(&mut rvsdg, function));
 
         assert_eq!(
             rvsdg[user_0].value_inputs()[0].origin,
@@ -287,7 +306,10 @@ mod tests {
         let user_1 = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, switch_node, 1));
         let user_2 = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, switch_node, 2));
 
-        PassthroughEliminator::new().eliminate_in_fn(&mut rvsdg, function);
+        let mut eliminator = PassthroughEliminator::new();
+
+        assert!(eliminator.eliminate_in_fn(&mut rvsdg, function));
+        assert!(!eliminator.eliminate_in_fn(&mut rvsdg, function));
 
         assert_eq!(
             rvsdg[user_0].value_inputs()[0].origin,
@@ -399,7 +421,10 @@ mod tests {
 
         let user = rvsdg.add_value_proxy(region, ValueInput::output(TY_U32, outer_switch, 0));
 
-        PassthroughEliminator::new().eliminate_in_fn(&mut rvsdg, function);
+        let mut eliminator = PassthroughEliminator::new();
+
+        assert!(eliminator.eliminate_in_fn(&mut rvsdg, function));
+        assert!(!eliminator.eliminate_in_fn(&mut rvsdg, function));
 
         assert_eq!(
             rvsdg[user].value_inputs()[0].origin,
