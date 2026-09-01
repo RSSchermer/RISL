@@ -69,10 +69,6 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     switch_merging::transform_entry_points(module, rvsdg);
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
-    passthrough_elimination::transform_entry_points(module, rvsdg);
-    dead_loop_value_normalization::transform_entry_points(module, rvsdg);
-    dead_value_elimination::transform_entry_points(module, rvsdg);
-    identical_branch_elimination::transform_entry_points(module, rvsdg);
     common_value_elimination::transform_entry_points(module, rvsdg);
 
     // TODO: this is an expensive and optional optimization loop. We should add some config
