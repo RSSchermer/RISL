@@ -43,6 +43,7 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::rvsdg::transform::region_replication::inline_switch_branch;
 use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
@@ -50,44 +51,6 @@ use crate::{Function, Module};
 
 type ValueKey = (Region, ValueOrigin);
 type FeasibleBranches = SmallVec<[usize; 4]>;
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ScalarConstant {
-    U32(u32),
-    I32(i32),
-    F32(u32),
-    Bool(bool),
-    Predicate(u32),
-}
-
-impl ScalarConstant {
-    fn from_node(rvsdg: &Rvsdg, node: Node, output: u32) -> Option<Self> {
-        if output != 0 {
-            return None;
-        }
-
-        match rvsdg[node].kind() {
-            NodeKind::Simple(SimpleNode::ConstU32(value)) => Some(Self::U32(value.value())),
-            NodeKind::Simple(SimpleNode::ConstI32(value)) => Some(Self::I32(value.value())),
-            NodeKind::Simple(SimpleNode::ConstF32(value)) => {
-                Some(Self::F32(value.value().to_bits()))
-            }
-            NodeKind::Simple(SimpleNode::ConstBool(value)) => Some(Self::Bool(value.value())),
-            NodeKind::Simple(SimpleNode::ConstPredicate(value)) => {
-                Some(Self::Predicate(value.value()))
-            }
-            _ => None,
-        }
-    }
-
-    fn integer_encoding(self) -> Option<u128> {
-        match self {
-            Self::U32(value) => Some(value as u128),
-            Self::I32(value) => Some(value as u32 as u128),
-            _ => None,
-        }
-    }
-}
 
 /// A fact known about a value while traversing a particular switch branch.
 ///
