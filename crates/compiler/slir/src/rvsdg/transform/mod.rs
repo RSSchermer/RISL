@@ -4,6 +4,7 @@ pub mod common_value_elimination;
 pub mod conditional_ub_elimination;
 pub mod const_dependency_inlining;
 pub mod const_switch_inlining;
+pub mod const_switch_output_extraction;
 pub mod correlated_switch_simplification;
 pub mod dead_loop_value_normalization;
 pub mod dead_value_elimination;
@@ -41,6 +42,7 @@ pub mod variable_pointer_emulation;
 use crate::rvsdg::Rvsdg;
 use crate::rvsdg::transform::common_value_elimination::CommonValueEliminator;
 use crate::rvsdg::transform::const_switch_inlining::ConstSwitchInliner;
+use crate::rvsdg::transform::const_switch_output_extraction::ConstSwitchOutputExtractor;
 use crate::rvsdg::transform::correlated_switch_simplification::CorrelatedSwitchSimplifier;
 use crate::rvsdg::transform::dead_loop_value_normalization::DeadLoopValueNormalizer;
 use crate::rvsdg::transform::identical_branch_elimination::IdenticalBranchElimination;
@@ -96,6 +98,7 @@ struct LoopingOptimizer {
     common_value_eliminator: CommonValueEliminator,
     switch_fallback_unifier: SwitchFallbackUnifier,
     correlated_switch_specializer: CorrelatedSwitchSimplifier,
+    const_switch_output_extractor: ConstSwitchOutputExtractor,
     passthrough_eliminator: PassthroughEliminator,
     dead_loop_value_normalizer: DeadLoopValueNormalizer,
     identical_branch_eliminator: IdenticalBranchElimination,
@@ -110,6 +113,7 @@ impl LoopingOptimizer {
             common_value_eliminator: CommonValueEliminator::new(),
             switch_fallback_unifier: SwitchFallbackUnifier::new(),
             correlated_switch_specializer: CorrelatedSwitchSimplifier::new(),
+            const_switch_output_extractor: ConstSwitchOutputExtractor::new(),
             passthrough_eliminator: PassthroughEliminator::new(),
             dead_loop_value_normalizer: DeadLoopValueNormalizer::new(),
             identical_branch_eliminator: IdenticalBranchElimination::new(),
@@ -138,6 +142,9 @@ impl LoopingOptimizer {
             do_iteration |= self
                 .correlated_switch_specializer
                 .simplify_in_fn(module, rvsdg, function);
+            do_iteration |= self
+                .const_switch_output_extractor
+                .process_region(rvsdg, body_region);
             do_iteration |= self.passthrough_eliminator.eliminate_in_fn(rvsdg, function);
             do_iteration |= self
                 .dead_loop_value_normalizer
