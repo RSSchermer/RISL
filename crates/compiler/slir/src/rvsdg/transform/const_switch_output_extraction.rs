@@ -6,11 +6,9 @@
 //!
 //! [dead_value_elimination]: crate::rvsdg::transform::dead_value_elimination
 
-use rustc_hash::FxHashSet;
-
-use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
+use crate::rvsdg::analyse::value_resolution::{ResolvedValue, ValueResolver};
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
-use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, visit};
+use crate::rvsdg::{Connectivity, Node, Region, Rvsdg, ValueOrigin, visit};
 
 struct SwitchNodeCollector<'a> {
     queue: &'a mut Vec<Node>,
@@ -26,89 +24,16 @@ impl RegionNodesVisitor for SwitchNodeCollector<'_> {
     }
 }
 
-struct ConstantResolver {
-    visited: FxHashSet<(Region, ValueOrigin)>,
-}
-
-impl ConstantResolver {
-    fn new() -> Self {
-        Self {
-            visited: FxHashSet::default(),
-        }
-    }
-
-    fn resolve(
-        &mut self,
-        rvsdg: &Rvsdg,
-        mut region: Region,
-        mut origin: ValueOrigin,
-    ) -> Option<ScalarConstant> {
-        self.visited.clear();
-
-        loop {
-            if !self.visited.insert((region, origin)) {
-                return None;
-            }
-
-            match origin {
-                ValueOrigin::Output { producer, output } => {
-                    if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
-                        return Some(constant);
-                    }
-
-                    if output == 0
-                        && let NodeKind::Simple(SimpleNode::ValueProxy(proxy)) =
-                            rvsdg[producer].kind()
-                    {
-                        region = rvsdg[producer].region();
-                        origin = proxy.value_inputs()[0].origin;
-
-                        continue;
-                    }
-
-                    return None;
-                }
-                ValueOrigin::Argument(argument) if region != rvsdg.global_region() => {
-                    let owner = rvsdg[region].owner();
-                    let outer_region = rvsdg[owner].region();
-
-                    match rvsdg[owner].kind() {
-                        NodeKind::Switch(switch) => {
-                            origin = switch.value_inputs()[argument as usize + 1].origin;
-                            region = outer_region;
-                        }
-                        NodeKind::Loop(loop_node) => {
-                            let loop_region = loop_node.loop_region();
-                            let result = argument as usize + 1;
-
-                            if rvsdg[loop_region].value_results()[result].origin
-                                != ValueOrigin::Argument(argument)
-                            {
-                                return None;
-                            }
-
-                            origin = loop_node.value_inputs()[argument as usize].origin;
-                            region = outer_region;
-                        }
-                        _ => return None,
-                    }
-                }
-                _ => return None,
-            }
-        }
-    }
-}
-
 pub struct ConstSwitchOutputExtractor {
     switch_node_queue: Vec<Node>,
-    resolver: ConstantResolver,
+    resolver: ValueResolver,
 }
 
 impl ConstSwitchOutputExtractor {
     pub fn new() -> Self {
         Self {
             switch_node_queue: Vec::new(),
-            resolver: ConstantResolver::new(),
+            resolver: ValueResolver::new(),
         }
     }
 
@@ -147,7 +72,9 @@ impl ConstSwitchOutputExtractor {
             for branch in branches {
                 let origin = rvsdg[branch].value_results()[output].origin;
 
-                let Some(constant) = self.resolver.resolve(rvsdg, branch, origin) else {
+                let ResolvedValue::Constant(constant) =
+                    self.resolver.resolve(rvsdg, branch, origin)
+                else {
                     common = None;
 
                     break;
@@ -188,7 +115,8 @@ impl ConstSwitchOutputExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rvsdg::{StateOrigin, ValueInput, ValueOutput};
+    use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
+    use crate::rvsdg::{ValueInput, ValueOutput};
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_U32};
     use crate::{FnSig, Function, Module, Symbol};
 
