@@ -48,6 +48,7 @@ use crate::rvsdg::transform::dead_loop_value_normalization::DeadLoopValueNormali
 use crate::rvsdg::transform::identical_branch_elimination::IdenticalBranchElimination;
 use crate::rvsdg::transform::node_reduction::NodeReducer;
 use crate::rvsdg::transform::passthrough_elimination::PassthroughEliminator;
+use crate::rvsdg::transform::redundant_state_link_elimination::RedundantStateLinkEliminator;
 use crate::rvsdg::transform::switch_fallback_unification::SwitchFallbackUnifier;
 use crate::rvsdg::transform::switch_merging::SwitchMerger;
 use crate::{Function, Module};
@@ -100,6 +101,7 @@ struct LoopingOptimizer {
     correlated_switch_specializer: CorrelatedSwitchSimplifier,
     const_switch_output_extractor: ConstSwitchOutputExtractor,
     passthrough_eliminator: PassthroughEliminator,
+    redundant_state_link_eliminator: RedundantStateLinkEliminator,
     dead_loop_value_normalizer: DeadLoopValueNormalizer,
     identical_branch_eliminator: IdenticalBranchElimination,
 }
@@ -115,6 +117,7 @@ impl LoopingOptimizer {
             correlated_switch_specializer: CorrelatedSwitchSimplifier::new(),
             const_switch_output_extractor: ConstSwitchOutputExtractor::new(),
             passthrough_eliminator: PassthroughEliminator::new(),
+            redundant_state_link_eliminator: RedundantStateLinkEliminator::new(),
             dead_loop_value_normalizer: DeadLoopValueNormalizer::new(),
             identical_branch_eliminator: IdenticalBranchElimination::new(),
         }
@@ -155,6 +158,9 @@ impl LoopingOptimizer {
             do_iteration |= self
                 .common_value_eliminator
                 .process_region(rvsdg, body_region);
+            do_iteration |= self
+                .redundant_state_link_eliminator
+                .eliminate_in_fn(rvsdg, function);
         }
     }
 }

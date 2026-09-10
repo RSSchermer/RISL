@@ -53,13 +53,15 @@ impl RedundantStateLinkEliminator {
         }
     }
 
-    pub fn eliminate_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) {
+    pub fn eliminate_in_fn(&mut self, rvsdg: &mut Rvsdg, function: Function) -> bool {
         let fn_node = rvsdg
             .get_function_node(function)
             .expect("function not registered");
 
         self.collector.nodes.clear();
         self.collector.visit_node(rvsdg, fn_node);
+
+        let mut changed = false;
 
         while let Some(node) = self.collector.nodes.pop() {
             if rvsdg[node].state().is_none() {
@@ -75,6 +77,8 @@ impl RedundantStateLinkEliminator {
 
                     if all_stateless {
                         rvsdg.unlink_switch_state(node);
+
+                        changed = true;
                     }
                 }
                 NodeKind::Loop(loop_node) => {
@@ -83,11 +87,15 @@ impl RedundantStateLinkEliminator {
 
                     if stateless {
                         rvsdg.unlink_loop_state(node);
+
+                        changed = true;
                     }
                 }
                 _ => {}
             }
         }
+
+        changed
     }
 }
 
@@ -143,7 +151,8 @@ mod tests {
         assert!(rvsdg[switch].state().is_some());
 
         let mut elim = RedundantStateLinkEliminator::new();
-        elim.eliminate_in_fn(&mut rvsdg, function);
+        assert!(elim.eliminate_in_fn(&mut rvsdg, function));
+        assert!(!elim.eliminate_in_fn(&mut rvsdg, function));
 
         assert!(
             rvsdg[switch].state().is_none(),
@@ -188,7 +197,8 @@ mod tests {
         assert!(rvsdg[loop_node].state().is_some());
 
         let mut elim = RedundantStateLinkEliminator::new();
-        elim.eliminate_in_fn(&mut rvsdg, function);
+        assert!(elim.eliminate_in_fn(&mut rvsdg, function));
+        assert!(!elim.eliminate_in_fn(&mut rvsdg, function));
 
         assert!(
             rvsdg[loop_node].state().is_none(),
