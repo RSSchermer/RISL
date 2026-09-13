@@ -304,6 +304,59 @@ impl AbstractI32 {
         }))
     }
 
+    /// Returns the abstract result of multiplying this value by `other`.
+    pub fn abstract_mul(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) || other.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if self.to_singleton() == Some(1) {
+            other.clone()
+        } else if other.to_singleton() == Some(1) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left.wrapping_mul(right))
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of dividing this value by `other`.
+    pub fn abstract_div(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if other.to_singleton() == Some(0) {
+            Self::top()
+        } else if self.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if other.to_singleton() == Some(1) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton())
+            && right != 0
+        {
+            Self::from_constant(left.wrapping_div(right))
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the remainder of this value divided by `other`.
+    pub fn abstract_mod(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if other.to_singleton() == Some(0) {
+            Self::top()
+        } else if self.to_singleton() == Some(0) || matches!(other.to_singleton(), Some(1 | -1)) {
+            Self::from_constant(0)
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton())
+            && right != 0
+        {
+            Self::from_constant(left.wrapping_rem(right))
+        } else {
+            Self::top()
+        }
+    }
+
     /// Returns the abstract result of comparing this value equal to `other`.
     pub fn abstract_eq(&self, other: &Self) -> AbstractBool {
         if self.is_bottom() || other.is_bottom() {
@@ -583,6 +636,158 @@ mod tests {
         );
         assert_eq!(
             AbstractI32::top().abstract_sub(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_mul() {
+        assert_eq!(
+            AbstractI32::from_constant(-6).abstract_mul(&AbstractI32::from_constant(7)),
+            AbstractI32::from_constant(-42)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MAX).abstract_mul(&AbstractI32::from_constant(2)),
+            AbstractI32::from_constant(-2)
+        );
+
+        let value = AbstractI32::from_intervals([2..=3]);
+
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_mul(&value),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_mul(&AbstractI32::from_constant(0)),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(AbstractI32::from_constant(1).abstract_mul(&value), value);
+        assert_eq!(value.abstract_mul(&AbstractI32::from_constant(1)), value);
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_mul(&AbstractI32::top()),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_mul(&AbstractI32::from_constant(0)),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(1).abstract_mul(&AbstractI32::top()),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_mul(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([2..=3]).abstract_mul(&AbstractI32::from_constant(4)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_mul(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_mul(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_div() {
+        assert_eq!(
+            AbstractI32::from_constant(-43).abstract_div(&AbstractI32::from_constant(7)),
+            AbstractI32::from_constant(-6)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN).abstract_div(&AbstractI32::from_constant(-1)),
+            AbstractI32::from_constant(i32::MIN)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(1).abstract_div(&AbstractI32::from_constant(0)),
+            AbstractI32::top()
+        );
+
+        let value = AbstractI32::from_intervals([4..=6]);
+
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_div(&value),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(value.abstract_div(&AbstractI32::from_constant(1)), value);
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_div(&AbstractI32::top()),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_div(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_div(&AbstractI32::from_constant(0)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            value.abstract_div(&AbstractI32::from_constant(2)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_div(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_div(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_mod() {
+        assert_eq!(
+            AbstractI32::from_constant(-43).abstract_mod(&AbstractI32::from_constant(7)),
+            AbstractI32::from_constant(-1)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN).abstract_mod(&AbstractI32::from_constant(-1)),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(1).abstract_mod(&AbstractI32::from_constant(0)),
+            AbstractI32::top()
+        );
+
+        let value = AbstractI32::from_intervals([4..=6]);
+
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_mod(&value),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_mod(&AbstractI32::from_constant(1)),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_mod(&AbstractI32::from_constant(-1)),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_mod(&AbstractI32::top()),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_mod(&AbstractI32::from_constant(0)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            value.abstract_mod(&AbstractI32::from_constant(2)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_mod(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_mod(&AbstractI32::bottom()),
             AbstractI32::bottom()
         );
     }
