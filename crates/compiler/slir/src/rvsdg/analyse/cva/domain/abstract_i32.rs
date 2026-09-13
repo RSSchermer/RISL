@@ -3,6 +3,22 @@ use core::ops::RangeInclusive;
 use super::{AbstractBool, AbstractU32, MAX_INTEGER_INTERVALS};
 
 const TOP_INTERVALS: &[RangeInclusive<i32>] = &[i32::MIN..=i32::MAX];
+const I32_MODULUS: i64 = 1i64 << 32;
+
+/// Wraps an `i64` interval into the `i32` domain.
+fn wrapping_intervals(start: i64, end: i64) -> Vec<RangeInclusive<i32>> {
+    [-I32_MODULUS, 0, I32_MODULUS]
+        .into_iter()
+        .filter_map(|offset| {
+            let domain_start = i64::from(i32::MIN) + offset;
+            let domain_end = i64::from(i32::MAX) + offset;
+            let start = start.max(domain_start);
+            let end = end.min(domain_end);
+
+            (start <= end).then_some((start - offset) as i32..=(end - offset) as i32)
+        })
+        .collect()
+}
 
 /// A (possibly constrained) signed 32-bit integer value.
 ///
@@ -257,6 +273,37 @@ impl AbstractI32 {
         Self::from_intervals(remaining)
     }
 
+    /// Returns the abstract result of arithmetically negating this value.
+    pub fn abstract_neg(&self) -> Self {
+        Self::from_intervals(self.0.iter().flat_map(|interval| {
+            wrapping_intervals(-i64::from(*interval.end()), -i64::from(*interval.start()))
+        }))
+    }
+
+    /// Returns the abstract result of adding `other` to this value.
+    pub fn abstract_add(&self, other: &Self) -> Self {
+        Self::from_intervals(self.0.iter().flat_map(|left| {
+            other.0.iter().flat_map(|right| {
+                wrapping_intervals(
+                    i64::from(*left.start()) + i64::from(*right.start()),
+                    i64::from(*left.end()) + i64::from(*right.end()),
+                )
+            })
+        }))
+    }
+
+    /// Returns the abstract result of subtracting `other` from this value.
+    pub fn abstract_sub(&self, other: &Self) -> Self {
+        Self::from_intervals(self.0.iter().flat_map(|left| {
+            other.0.iter().flat_map(|right| {
+                wrapping_intervals(
+                    i64::from(*left.start()) - i64::from(*right.end()),
+                    i64::from(*left.end()) - i64::from(*right.start()),
+                )
+            })
+        }))
+    }
+
     /// Returns the abstract result of comparing this value equal to `other`.
     pub fn abstract_eq(&self, other: &Self) -> AbstractBool {
         if self.is_bottom() || other.is_bottom() {
@@ -472,6 +519,72 @@ mod tests {
         let cases = [-7i32, -3, 1, 5].map(|value| u128::from(value as u32));
 
         assert_eq!(wide_value.exclude_cases(&cases), wide_value);
+    }
+
+    #[test]
+    fn abstract_neg() {
+        assert_eq!(
+            AbstractI32::from_intervals([-5..=-3, 2..=4]).abstract_neg(),
+            AbstractI32::from_intervals([-4..=-2, 3..=5])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([i32::MIN..=i32::MIN + 2]).abstract_neg(),
+            AbstractI32::from_intervals([i32::MIN..=i32::MIN, i32::MAX - 1..=i32::MAX])
+        );
+        assert_eq!(AbstractI32::top().abstract_neg(), AbstractI32::top());
+        assert_eq!(AbstractI32::bottom().abstract_neg(), AbstractI32::bottom());
+    }
+
+    #[test]
+    fn abstract_add() {
+        assert_eq!(
+            AbstractI32::from_intervals([1..=3])
+                .abstract_add(&AbstractI32::from_intervals([4..=6])),
+            AbstractI32::from_intervals([5..=9])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([i32::MAX - 1..=i32::MAX])
+                .abstract_add(&AbstractI32::from_intervals([1..=2])),
+            AbstractI32::from_intervals([i32::MIN..=i32::MIN + 1, i32::MAX..=i32::MAX])
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_add(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_add(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_add(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_sub() {
+        assert_eq!(
+            AbstractI32::from_intervals([4..=6])
+                .abstract_sub(&AbstractI32::from_intervals([1..=2])),
+            AbstractI32::from_intervals([2..=5])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([i32::MIN..=i32::MIN + 1])
+                .abstract_sub(&AbstractI32::from_intervals([1..=2])),
+            AbstractI32::from_intervals([i32::MIN..=i32::MIN, i32::MAX - 1..=i32::MAX])
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_sub(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_sub(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_sub(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
     }
 
     #[test]
