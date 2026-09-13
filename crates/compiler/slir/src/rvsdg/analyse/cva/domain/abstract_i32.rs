@@ -1,6 +1,6 @@
 use core::ops::RangeInclusive;
 
-use super::{AbstractU32, MAX_INTEGER_INTERVALS};
+use super::{AbstractBool, AbstractU32, MAX_INTEGER_INTERVALS};
 
 const TOP_INTERVALS: &[RangeInclusive<i32>] = &[i32::MIN..=i32::MAX];
 
@@ -256,6 +256,80 @@ impl AbstractI32 {
 
         Self::from_intervals(remaining)
     }
+
+    /// Returns the abstract result of comparing this value equal to `other`.
+    pub fn abstract_eq(&self, other: &Self) -> AbstractBool {
+        if self.is_bottom() || other.is_bottom() {
+            AbstractBool::Bottom
+        } else if self.is_disjoint(other) {
+            AbstractBool::Const(false)
+        } else {
+            // TODO: use else if let ... instead?
+            match (self.to_singleton(), other.to_singleton()) {
+                (Some(left), Some(right)) => AbstractBool::Const(left == right),
+                _ => AbstractBool::Top,
+            }
+        }
+    }
+
+    /// Returns the abstract result of comparing this value not equal to `other`.
+    pub fn abstract_not_eq(&self, other: &Self) -> AbstractBool {
+        self.abstract_eq(other).abstract_not()
+    }
+
+    /// Returns the abstract result of comparing this value less than `other`.
+    pub fn abstract_lt(&self, other: &Self) -> AbstractBool {
+        if self.is_bottom() || other.is_bottom() {
+            return AbstractBool::Bottom;
+        }
+
+        // We now neither interval set is empty because of the is_bottom check above, so we can
+        // unwrap here
+        let self_min = self.0.first().unwrap().start();
+        let self_max = self.0.last().unwrap().end();
+        let other_min = other.0.first().unwrap().start();
+        let other_max = other.0.last().unwrap().end();
+
+        if self_max < other_min {
+            AbstractBool::Const(true)
+        } else if self_min >= other_max {
+            AbstractBool::Const(false)
+        } else {
+            AbstractBool::Top
+        }
+    }
+
+    /// Returns the abstract result of comparing this value less than or equal to `other`.
+    pub fn abstract_lt_eq(&self, other: &Self) -> AbstractBool {
+        if self.is_bottom() || other.is_bottom() {
+            return AbstractBool::Bottom;
+        }
+
+        // We now neither interval set is empty because of the is_bottom check above, so we can
+        // unwrap here
+        let self_min = self.0.first().unwrap().start();
+        let self_max = self.0.last().unwrap().end();
+        let other_min = other.0.first().unwrap().start();
+        let other_max = other.0.last().unwrap().end();
+
+        if self_max <= other_min {
+            AbstractBool::Const(true)
+        } else if self_min > other_max {
+            AbstractBool::Const(false)
+        } else {
+            AbstractBool::Top
+        }
+    }
+
+    /// Returns the abstract result of comparing this value greater than `other`.
+    pub fn abstract_gt(&self, other: &Self) -> AbstractBool {
+        other.abstract_lt(self)
+    }
+
+    /// Returns the abstract result of comparing this value greater than or equal to `other`.
+    pub fn abstract_gt_eq(&self, other: &Self) -> AbstractBool {
+        other.abstract_lt_eq(self)
+    }
 }
 
 #[cfg(test)]
@@ -398,5 +472,155 @@ mod tests {
         let cases = [-7i32, -3, 1, 5].map(|value| u128::from(value as u32));
 
         assert_eq!(wide_value.exclude_cases(&cases), wide_value);
+    }
+
+    #[test]
+    fn abstract_eq() {
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_eq(&AbstractI32::from_constant(-1)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-3..=-1])
+                .abstract_eq(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-1..=1]).abstract_eq(&AbstractI32::from_constant(0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_eq(&AbstractI32::top()),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_eq(&AbstractI32::top()),
+            AbstractBool::Bottom
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_eq(&AbstractI32::bottom()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_not_eq() {
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_not_eq(&AbstractI32::from_constant(-1)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-3..=-1])
+                .abstract_not_eq(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-1..=1]).abstract_not_eq(&AbstractI32::from_constant(0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_not_eq(&AbstractI32::top()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_lt() {
+        assert_eq!(
+            AbstractI32::from_intervals([-4..=-2])
+                .abstract_lt(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([1..=3])
+                .abstract_lt(&AbstractI32::from_intervals([-4..=-2])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(1).abstract_lt(&AbstractI32::from_constant(1)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-2..=2])
+                .abstract_lt(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_lt(&AbstractI32::top()),
+            AbstractBool::Bottom
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_lt(&AbstractI32::bottom()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_lt_eq() {
+        assert_eq!(
+            AbstractI32::from_intervals([-4..=-2])
+                .abstract_lt_eq(&AbstractI32::from_intervals([-2..=1])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([1..=3])
+                .abstract_lt_eq(&AbstractI32::from_intervals([-4..=0])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-2..=2])
+                .abstract_lt_eq(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_lt_eq(&AbstractI32::top()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_gt() {
+        assert_eq!(
+            AbstractI32::from_intervals([1..=3])
+                .abstract_gt(&AbstractI32::from_intervals([-4..=-2])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-4..=-2])
+                .abstract_gt(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-2..=2])
+                .abstract_gt(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_gt(&AbstractI32::top()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_gt_eq() {
+        assert_eq!(
+            AbstractI32::from_intervals([-2..=1])
+                .abstract_gt_eq(&AbstractI32::from_intervals([-4..=-2])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-4..=0])
+                .abstract_gt_eq(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-2..=2])
+                .abstract_gt_eq(&AbstractI32::from_intervals([1..=3])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_gt_eq(&AbstractI32::bottom()),
+            AbstractBool::Bottom
+        );
     }
 }
