@@ -8,18 +8,22 @@ const TOP_INTERVALS: &[RangeInclusive<i32>] = &[i32::MIN..=i32::MAX];
 const I32_MODULUS: i64 = 1i64 << 32;
 
 /// Wraps an `i64` interval into the `i32` domain.
-fn wrapping_intervals(start: i64, end: i64) -> SmallVec<[RangeInclusive<i32>; 3]> {
-    [-I32_MODULUS, 0, I32_MODULUS]
-        .into_iter()
-        .filter_map(|offset| {
-            let domain_start = i64::from(i32::MIN) + offset;
-            let domain_end = i64::from(i32::MAX) + offset;
-            let start = start.max(domain_start);
-            let end = end.min(domain_end);
+fn wrapping_intervals(start: i64, end: i64) -> SmallVec<[RangeInclusive<i32>; 2]> {
+    let span = end - start;
 
-            (start <= end).then_some((start - offset) as i32..=(end - offset) as i32)
-        })
-        .collect()
+    if span >= I32_MODULUS - 1 {
+        return smallvec::smallvec![i32::MIN..=i32::MAX];
+    }
+
+    let start =
+        ((start - i64::from(i32::MIN)).rem_euclid(I32_MODULUS) + i64::from(i32::MIN)) as i32;
+    let end = i64::from(start) + span;
+
+    if end <= i64::from(i32::MAX) {
+        smallvec::smallvec![start..=end as i32]
+    } else {
+        smallvec::smallvec![start..=i32::MAX, i32::MIN..=(end - I32_MODULUS) as i32]
+    }
 }
 
 /// A (possibly constrained) signed 32-bit integer value.
@@ -307,20 +311,47 @@ impl AbstractI32 {
     }
 
     /// Returns the abstract result of multiplying this value by `other`.
+    ///
+    /// For each pair of intervals, this multiplies all four combinations of their endpoints and
+    /// uses the minimum and maximum products as an "interval hull". This does not compute the
+    /// tightest possible constraints we could infer, but rather an overapproximation that can be
+    /// represented in a small number of intervals. For example, multiplying `2..=3` by `4..=5`
+    /// produces the hull interval `8..=15`. The tightest possible set of values we could prove the
+    /// abstract multiplication can produce is `{8, 10, 12, 15}`. However, this would require four
+    /// intervals (`8..=8`, `10..=10`, `12..=12`, and `15..=15`). The hull approximation requires
+    /// only one interval, at a tradeoff for accuracy: it also includes `9`, `11`, `13`, and `14`.
+    ///
+    /// In this example, the "tight" evaluation produces only four intervals, but the number of
+    /// intervals rapidly increases with the size of the input intervals; it could easily produce
+    /// very large numbers of intervals. This would force us to fall back to "top". Therefore, while
+    /// the hull approximation is less precise in some cases, it is more accurate than the tight
+    /// evaluation with a fallback to "top" when the number of intervals produced exceeds
+    /// [MAX_INTEGER_INTERVALS].
+    ///
+    /// Note that the hull approximation is equal to the tight evaluation when:
+    ///
+    /// - Both the left-hand-side and right-hand-side are singletons.
+    /// - Either side is `0`.
+    /// - Either side is `1`.
+    /// - Either side is `-1`.
+    ///
+    /// If any hull interval spans `2^32` or more integers, the result will be a "top" value.
     pub fn abstract_mul(&self, other: &Self) -> Self {
-        if self.is_bottom() || other.is_bottom() {
-            Self::bottom()
-        } else if self.to_singleton() == Some(0) || other.to_singleton() == Some(0) {
-            Self::from_constant(0)
-        } else if self.to_singleton() == Some(1) {
-            other.clone()
-        } else if other.to_singleton() == Some(1) {
-            self.clone()
-        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
-            Self::from_constant(left.wrapping_mul(right))
-        } else {
-            Self::top()
-        }
+        Self::from_intervals(self.0.iter().flat_map(|left| {
+            other.0.iter().flat_map(|right| {
+                let products = [
+                    i64::from(*left.start()) * i64::from(*right.start()),
+                    i64::from(*left.start()) * i64::from(*right.end()),
+                    i64::from(*left.end()) * i64::from(*right.start()),
+                    i64::from(*left.end()) * i64::from(*right.end()),
+                ];
+
+                wrapping_intervals(
+                    *products.iter().min().unwrap(),
+                    *products.iter().max().unwrap(),
+                )
+            })
+        }))
     }
 
     /// Returns the abstract result of dividing this value by `other`.
@@ -753,6 +784,16 @@ mod tests {
             AbstractI32::from_constant(i32::MAX).abstract_mul(&AbstractI32::from_constant(2)),
             AbstractI32::from_constant(-2)
         );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MAX)
+                .abstract_mul(&AbstractI32::from_constant(i32::MAX)),
+            AbstractI32::from_constant(1)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN)
+                .abstract_mul(&AbstractI32::from_constant(i32::MAX)),
+            AbstractI32::from_constant(i32::MIN)
+        );
 
         let value = AbstractI32::from_intervals([2..=3]);
 
@@ -767,6 +808,31 @@ mod tests {
         assert_eq!(AbstractI32::from_constant(1).abstract_mul(&value), value);
         assert_eq!(value.abstract_mul(&AbstractI32::from_constant(1)), value);
         assert_eq!(
+            AbstractI32::from_intervals([2..=3])
+                .abstract_mul(&AbstractI32::from_intervals([4..=5])),
+            AbstractI32::from_intervals([8..=15])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([2..=3, 5..=6])
+                .abstract_mul(&AbstractI32::from_intervals([4..=5])),
+            AbstractI32::from_intervals([8..=15, 20..=30])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-2..=3])
+                .abstract_mul(&AbstractI32::from_intervals([-4..=5])),
+            AbstractI32::from_intervals([-12..=15])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([i32::MAX - 1..=i32::MAX])
+                .abstract_mul(&AbstractI32::from_constant(2)),
+            AbstractI32::from_intervals([-4..=-2])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([i32::MAX - 1..=i32::MAX])
+                .abstract_mul(&AbstractI32::from_intervals([1..=2])),
+            AbstractI32::from_intervals([i32::MIN..=-2, i32::MAX - 1..=i32::MAX])
+        );
+        assert_eq!(
             AbstractI32::from_constant(0).abstract_mul(&AbstractI32::top()),
             AbstractI32::from_constant(0)
         );
@@ -780,10 +846,6 @@ mod tests {
         );
         assert_eq!(
             AbstractI32::top().abstract_mul(&AbstractI32::from_constant(1)),
-            AbstractI32::top()
-        );
-        assert_eq!(
-            AbstractI32::from_intervals([2..=3]).abstract_mul(&AbstractI32::from_constant(4)),
             AbstractI32::top()
         );
         assert_eq!(
