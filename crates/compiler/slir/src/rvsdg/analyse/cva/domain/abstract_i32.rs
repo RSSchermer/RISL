@@ -357,6 +357,60 @@ impl AbstractI32 {
         }
     }
 
+    /// Returns the abstract result of shifting this value left by the unsigned `other` modulo the
+    /// bit-width.
+    pub fn abstract_shl(&self, other: &AbstractU32) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if let Some(other) = other.to_singleton() {
+            // SLIR's shift intrinsics follow the WGSL specification for shift operations. The spec
+            // prescribes that the RHS shift amount is taken module the bit-width of the LHS.
+            let shift = other % i32::BITS;
+
+            if shift == 0 {
+                self.clone()
+            } else if let Some(value) = self.to_singleton() {
+                // Rust also provides a wrapping_shl operation that matches the WGSL behavior.
+                // However, since we want to special-case a `0` RHS above, we have to compute our
+                // own masked RHS anyway, so we'll use that with a regular unmasked shift.
+                Self::from_constant(value << shift)
+            } else {
+                Self::top()
+            }
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of shifting this value right by the unsigned `other` modulo the
+    /// bit-width.
+    pub fn abstract_shr(&self, other: &AbstractU32) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if let Some(other) = other.to_singleton() {
+            // SLIR's shift intrinsics follow the WGSL specification for shift operations. The spec
+            // prescribes that the RHS shift amount is taken module the bit-width of the LHS.
+            let shift = other % i32::BITS;
+
+            if shift == 0 {
+                self.clone()
+            } else if let Some(value) = self.to_singleton() {
+                // Rust also provides a wrapping_shr operation that matches the WGSL behavior.
+                // However, since we want to special-case a `0` RHS above, we have to compute our
+                // own masked RHS anyway, so we'll use that with a regular unmasked shift.
+                Self::from_constant(value >> shift)
+            } else {
+                Self::top()
+            }
+        } else {
+            Self::top()
+        }
+    }
+
     /// Returns the abstract result of comparing this value equal to `other`.
     pub fn abstract_eq(&self, other: &Self) -> AbstractBool {
         if self.is_bottom() || other.is_bottom() {
@@ -788,6 +842,72 @@ mod tests {
         );
         assert_eq!(
             AbstractI32::top().abstract_mod(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_shl() {
+        assert_eq!(
+            AbstractI32::from_constant(3).abstract_shl(&AbstractU32::from_constant(2)),
+            AbstractI32::from_constant(12)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(1).abstract_shl(&AbstractU32::from_constant(u32::MAX)),
+            AbstractI32::from_constant(i32::MIN)
+        );
+
+        let value = AbstractI32::from_intervals([4..=6]);
+
+        assert_eq!(value.abstract_shl(&AbstractU32::from_constant(32)), value);
+        assert_eq!(value.abstract_shl(&AbstractU32::from_constant(64)), value);
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_shl(&AbstractU32::top()),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_shl(&AbstractU32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_shl(&AbstractU32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_shl(&AbstractU32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_shr() {
+        assert_eq!(
+            AbstractI32::from_constant(-16).abstract_shr(&AbstractU32::from_constant(2)),
+            AbstractI32::from_constant(-4)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN).abstract_shr(&AbstractU32::from_constant(63)),
+            AbstractI32::from_constant(-1)
+        );
+
+        let value = AbstractI32::from_intervals([-6..=-4]);
+
+        assert_eq!(value.abstract_shr(&AbstractU32::from_constant(32)), value);
+        assert_eq!(value.abstract_shr(&AbstractU32::from_constant(64)), value);
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_shr(&AbstractU32::top()),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_shr(&AbstractU32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_shr(&AbstractU32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_shr(&AbstractU32::bottom()),
             AbstractI32::bottom()
         );
     }
