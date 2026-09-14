@@ -1,12 +1,14 @@
 use core::ops::RangeInclusive;
 
+use smallvec::SmallVec;
+
 use super::{AbstractBool, AbstractU32, MAX_INTEGER_INTERVALS};
 
 const TOP_INTERVALS: &[RangeInclusive<i32>] = &[i32::MIN..=i32::MAX];
 const I32_MODULUS: i64 = 1i64 << 32;
 
 /// Wraps an `i64` interval into the `i32` domain.
-fn wrapping_intervals(start: i64, end: i64) -> Vec<RangeInclusive<i32>> {
+fn wrapping_intervals(start: i64, end: i64) -> SmallVec<[RangeInclusive<i32>; 3]> {
     [-I32_MODULUS, 0, I32_MODULUS]
         .into_iter()
         .filter_map(|offset| {
@@ -466,12 +468,10 @@ impl AbstractI32 {
             AbstractBool::Bottom
         } else if self.is_disjoint(other) {
             AbstractBool::Const(false)
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            AbstractBool::Const(left == right)
         } else {
-            // TODO: use else if let ... instead?
-            match (self.to_singleton(), other.to_singleton()) {
-                (Some(left), Some(right)) => AbstractBool::Const(left == right),
-                _ => AbstractBool::Top,
-            }
+            AbstractBool::Top
         }
     }
 
