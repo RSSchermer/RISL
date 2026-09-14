@@ -357,6 +357,55 @@ impl AbstractI32 {
         }
     }
 
+    /// Returns the abstract result of taking the bitwise AND of this value and `other`.
+    pub fn abstract_bit_and(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) || other.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if self.to_singleton() == Some(-1) {
+            other.clone()
+        } else if other.to_singleton() == Some(-1) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left & right)
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the bitwise OR of this value and `other`.
+    pub fn abstract_bit_or(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(-1) || other.to_singleton() == Some(-1) {
+            Self::from_constant(-1)
+        } else if self.to_singleton() == Some(0) {
+            other.clone()
+        } else if other.to_singleton() == Some(0) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left | right)
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the bitwise XOR of this value and `other`.
+    pub fn abstract_bit_xor(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) {
+            other.clone()
+        } else if other.to_singleton() == Some(0) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left ^ right)
+        } else {
+            Self::top()
+        }
+    }
+
     /// Returns the abstract result of shifting this value left by the unsigned `other` modulo the
     /// bit-width.
     pub fn abstract_shl(&self, other: &AbstractU32) -> Self {
@@ -842,6 +891,122 @@ mod tests {
         );
         assert_eq!(
             AbstractI32::top().abstract_mod(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_and() {
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_bit_and(&AbstractI32::from_constant(42)),
+            AbstractI32::from_constant(42)
+        );
+
+        let value = AbstractI32::from_intervals([2..=3]);
+
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_bit_and(&value),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_bit_and(&AbstractI32::from_constant(0)),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_bit_and(&value),
+            value
+        );
+        assert_eq!(
+            value.abstract_bit_and(&AbstractI32::from_constant(-1)),
+            value
+        );
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_bit_and(&AbstractI32::top()),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_bit_and(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_bit_and(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_bit_and(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_or() {
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN)
+                .abstract_bit_or(&AbstractI32::from_constant(i32::MAX)),
+            AbstractI32::from_constant(-1)
+        );
+
+        let value = AbstractI32::from_intervals([2..=3]);
+
+        assert_eq!(AbstractI32::from_constant(0).abstract_bit_or(&value), value);
+        assert_eq!(value.abstract_bit_or(&AbstractI32::from_constant(0)), value);
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_bit_or(&value),
+            AbstractI32::from_constant(-1)
+        );
+        assert_eq!(
+            value.abstract_bit_or(&AbstractI32::from_constant(-1)),
+            AbstractI32::from_constant(-1)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_bit_or(&AbstractI32::top()),
+            AbstractI32::from_constant(-1)
+        );
+        assert_eq!(
+            value.abstract_bit_or(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_bit_or(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_bit_or(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_xor() {
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_bit_xor(&AbstractI32::from_constant(i32::MAX)),
+            AbstractI32::from_constant(i32::MIN)
+        );
+
+        let value = AbstractI32::from_intervals([2..=3]);
+
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_bit_xor(&value),
+            value
+        );
+        assert_eq!(
+            value.abstract_bit_xor(&AbstractI32::from_constant(0)),
+            value
+        );
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_bit_xor(&AbstractI32::top()),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            value.abstract_bit_xor(&AbstractI32::from_constant(1)),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_bit_xor(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_bit_xor(&AbstractI32::bottom()),
             AbstractI32::bottom()
         );
     }
