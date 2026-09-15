@@ -1,8 +1,29 @@
 use core::ops::RangeInclusive;
 
-use super::{AbstractI32, MAX_INTEGER_INTERVALS};
+use smallvec::SmallVec;
+
+use super::{AbstractBool, AbstractI32, MAX_INTEGER_INTERVALS};
 
 const TOP_INTERVALS: &[RangeInclusive<u32>] = &[0..=u32::MAX];
+const U32_MODULUS: i128 = 1i128 << 32;
+
+/// Wraps an integer interval into the `u32` domain.
+fn wrapping_intervals(start: i128, end: i128) -> SmallVec<[RangeInclusive<u32>; 2]> {
+    let span = end - start;
+
+    if span >= U32_MODULUS - 1 {
+        return smallvec::smallvec![0..=u32::MAX];
+    }
+
+    let start = start.rem_euclid(U32_MODULUS) as u32;
+    let end = i128::from(start) + span;
+
+    if end <= i128::from(u32::MAX) {
+        smallvec::smallvec![start..=end as u32]
+    } else {
+        smallvec::smallvec![start..=u32::MAX, 0..=(end - U32_MODULUS) as u32]
+    }
+}
 
 /// A (possibly constrained) unsigned 32-bit integer value.
 ///
@@ -250,6 +271,282 @@ impl AbstractU32 {
 
         Self::from_intervals(remaining)
     }
+
+    /// Returns the abstract result of adding `other` to this value.
+    pub fn abstract_add(&self, other: &Self) -> Self {
+        Self::from_intervals(self.0.iter().flat_map(|left| {
+            other.0.iter().flat_map(|right| {
+                wrapping_intervals(
+                    i128::from(*left.start()) + i128::from(*right.start()),
+                    i128::from(*left.end()) + i128::from(*right.end()),
+                )
+            })
+        }))
+    }
+
+    /// Returns the abstract result of subtracting `other` from this value.
+    pub fn abstract_sub(&self, other: &Self) -> Self {
+        Self::from_intervals(self.0.iter().flat_map(|left| {
+            other.0.iter().flat_map(|right| {
+                wrapping_intervals(
+                    i128::from(*left.start()) - i128::from(*right.end()),
+                    i128::from(*left.end()) - i128::from(*right.start()),
+                )
+            })
+        }))
+    }
+
+    /// Returns the abstract result of multiplying this value by `other`.
+    ///
+    /// For each pair of intervals, this multiplies all four combinations of their endpoints and
+    /// uses the minimum and maximum products as an "interval hull". This does not compute the
+    /// tightest possible constraints we could infer, but rather an overapproximation that can be
+    /// represented in a small number of intervals. For example, multiplying `2..=3` by `4..=5`
+    /// produces the hull interval `8..=15`. The tightest possible set of values we could prove the
+    /// abstract multiplication can produce is `{8, 10, 12, 15}`. However, this would require four
+    /// intervals (`8..=8`, `10..=10`, `12..=12`, and `15..=15`). The hull approximation requires
+    /// only one interval, at a tradeoff for accuracy: it also includes `9`, `11`, `13`, and `14`.
+    ///
+    /// In this example, the "tight" evaluation produces only four intervals, but the number of
+    /// intervals rapidly increases with the size of the input intervals; it could easily produce
+    /// very large numbers of intervals. This would force us to fall back to "top". Therefore, while
+    /// the hull approximation is less precise in some cases, it is more accurate than the tight
+    /// evaluation with a fallback to "top" when the number of intervals produced exceeds
+    /// [MAX_INTEGER_INTERVALS].
+    ///
+    /// Note that the hull approximation is equal to the tight evaluation when:
+    ///
+    /// - Both the left-hand-side and right-hand-side are singletons.
+    /// - Either side is `0`.
+    /// - Either side is `1`.
+    ///
+    /// If any hull interval spans `2^32` or more integers, the result will be a "top" value.
+    pub fn abstract_mul(&self, other: &Self) -> Self {
+        Self::from_intervals(self.0.iter().flat_map(|left| {
+            other.0.iter().flat_map(|right| {
+                let products = [
+                    i128::from(*left.start()) * i128::from(*right.start()),
+                    i128::from(*left.start()) * i128::from(*right.end()),
+                    i128::from(*left.end()) * i128::from(*right.start()),
+                    i128::from(*left.end()) * i128::from(*right.end()),
+                ];
+
+                wrapping_intervals(
+                    *products.iter().min().unwrap(),
+                    *products.iter().max().unwrap(),
+                )
+            })
+        }))
+    }
+
+    /// Returns the abstract result of dividing this value by `other`.
+    pub fn abstract_div(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if other.to_singleton() == Some(0) {
+            Self::top()
+        } else if self.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if other.to_singleton() == Some(1) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton())
+            && right != 0
+        {
+            Self::from_constant(left.wrapping_div(right))
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the remainder of this value divided by `other`.
+    pub fn abstract_mod(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if other.to_singleton() == Some(0) {
+            Self::top()
+        } else if self.to_singleton() == Some(0) || other.to_singleton() == Some(1) {
+            Self::from_constant(0)
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton())
+            && right != 0
+        {
+            Self::from_constant(left.wrapping_rem(right))
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the bitwise AND of this value and `other`.
+    pub fn abstract_bit_and(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) || other.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if self.to_singleton() == Some(u32::MAX) {
+            other.clone()
+        } else if other.to_singleton() == Some(u32::MAX) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left & right)
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the bitwise OR of this value and `other`.
+    pub fn abstract_bit_or(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(u32::MAX) || other.to_singleton() == Some(u32::MAX) {
+            Self::from_constant(u32::MAX)
+        } else if self.to_singleton() == Some(0) {
+            other.clone()
+        } else if other.to_singleton() == Some(0) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left | right)
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of taking the bitwise XOR of this value and `other`.
+    pub fn abstract_bit_xor(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) {
+            other.clone()
+        } else if other.to_singleton() == Some(0) {
+            self.clone()
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            Self::from_constant(left ^ right)
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of shifting this value left by `other` modulo the bit-width.
+    pub fn abstract_shl(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if let Some(other) = other.to_singleton() {
+            // SLIR's shift intrinsics follow the WGSL specification for shift operations. The spec
+            // prescribes that the RHS shift amount is taken modulo the bit-width of the LHS.
+            let shift = other % u32::BITS;
+
+            if shift == 0 {
+                self.clone()
+            } else if let Some(value) = self.to_singleton() {
+                // Rust also provides a wrapping_shl operation that matches the WGSL behavior.
+                // However, since we want to special-case a `0` RHS above, we have to compute our
+                // own masked RHS anyway, so we'll use that with a regular unmasked shift.
+                Self::from_constant(value << shift)
+            } else {
+                Self::top()
+            }
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of shifting this value right by `other` modulo the bit-width.
+    pub fn abstract_shr(&self, other: &Self) -> Self {
+        if self.is_bottom() || other.is_bottom() {
+            Self::bottom()
+        } else if self.to_singleton() == Some(0) {
+            Self::from_constant(0)
+        } else if let Some(other) = other.to_singleton() {
+            // SLIR's shift intrinsics follow the WGSL specification for shift operations. The spec
+            // prescribes that the RHS shift amount is taken modulo the bit-width of the LHS.
+            let shift = other % u32::BITS;
+
+            if shift == 0 {
+                self.clone()
+            } else if let Some(value) = self.to_singleton() {
+                // Rust also provides a wrapping_shr operation that matches the WGSL behavior.
+                // However, since we want to special-case a `0` RHS above, we have to compute our
+                // own masked RHS anyway, so we'll use that with a regular unmasked shift.
+                Self::from_constant(value >> shift)
+            } else {
+                Self::top()
+            }
+        } else {
+            Self::top()
+        }
+    }
+
+    /// Returns the abstract result of comparing this value equal to `other`.
+    pub fn abstract_eq(&self, other: &Self) -> AbstractBool {
+        if self.is_bottom() || other.is_bottom() {
+            AbstractBool::Bottom
+        } else if self.is_disjoint(other) {
+            AbstractBool::Const(false)
+        } else if let (Some(left), Some(right)) = (self.to_singleton(), other.to_singleton()) {
+            AbstractBool::Const(left == right)
+        } else {
+            AbstractBool::Top
+        }
+    }
+
+    /// Returns the abstract result of comparing this value not equal to `other`.
+    pub fn abstract_not_eq(&self, other: &Self) -> AbstractBool {
+        self.abstract_eq(other).abstract_not()
+    }
+
+    /// Returns the abstract result of comparing this value less than `other`.
+    pub fn abstract_lt(&self, other: &Self) -> AbstractBool {
+        if self.is_bottom() || other.is_bottom() {
+            return AbstractBool::Bottom;
+        }
+
+        // We know neither interval set is empty because of the is_bottom check above, so we can
+        // unwrap here.
+        let self_min = self.0.first().unwrap().start();
+        let self_max = self.0.last().unwrap().end();
+        let other_min = other.0.first().unwrap().start();
+        let other_max = other.0.last().unwrap().end();
+
+        if self_max < other_min {
+            AbstractBool::Const(true)
+        } else if self_min >= other_max {
+            AbstractBool::Const(false)
+        } else {
+            AbstractBool::Top
+        }
+    }
+
+    /// Returns the abstract result of comparing this value less than or equal to `other`.
+    pub fn abstract_lt_eq(&self, other: &Self) -> AbstractBool {
+        if self.is_bottom() || other.is_bottom() {
+            return AbstractBool::Bottom;
+        }
+
+        // We know neither interval set is empty because of the is_bottom check above, so we can
+        // unwrap here.
+        let self_min = self.0.first().unwrap().start();
+        let self_max = self.0.last().unwrap().end();
+        let other_min = other.0.first().unwrap().start();
+        let other_max = other.0.last().unwrap().end();
+
+        if self_max <= other_min {
+            AbstractBool::Const(true)
+        } else if self_min > other_max {
+            AbstractBool::Const(false)
+        } else {
+            AbstractBool::Top
+        }
+    }
+
+    /// Returns the abstract result of comparing this value greater than `other`.
+    pub fn abstract_gt(&self, other: &Self) -> AbstractBool {
+        other.abstract_lt(self)
+    }
+
+    /// Returns the abstract result of comparing this value greater than or equal to `other`.
+    pub fn abstract_gt_eq(&self, other: &Self) -> AbstractBool {
+        other.abstract_lt_eq(self)
+    }
 }
 
 #[cfg(test)]
@@ -391,5 +688,527 @@ mod tests {
         let wide_value = AbstractU32::from_intervals([0..=10]);
 
         assert_eq!(wide_value.exclude_cases(&[1, 3, 5, 7]), wide_value);
+    }
+
+    #[test]
+    fn abstract_add() {
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3])
+                .abstract_add(&AbstractU32::from_intervals([4..=6])),
+            AbstractU32::from_intervals([5..=9])
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([u32::MAX - 1..=u32::MAX])
+                .abstract_add(&AbstractU32::from_intervals([1..=2])),
+            AbstractU32::from_intervals([0..=1, u32::MAX..=u32::MAX])
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_add(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_add(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_add(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_sub() {
+        assert_eq!(
+            AbstractU32::from_intervals([4..=6])
+                .abstract_sub(&AbstractU32::from_intervals([1..=2])),
+            AbstractU32::from_intervals([2..=5])
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([0..=1])
+                .abstract_sub(&AbstractU32::from_intervals([1..=2])),
+            AbstractU32::from_intervals([0..=0, u32::MAX - 1..=u32::MAX])
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_sub(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_sub(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_sub(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_mul() {
+        assert_eq!(
+            AbstractU32::from_constant(6).abstract_mul(&AbstractU32::from_constant(7)),
+            AbstractU32::from_constant(42)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).abstract_mul(&AbstractU32::from_constant(2)),
+            AbstractU32::from_constant(u32::MAX - 1)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX)
+                .abstract_mul(&AbstractU32::from_constant(u32::MAX)),
+            AbstractU32::from_constant(1)
+        );
+
+        let value = AbstractU32::from_intervals([2..=3]);
+
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_mul(&value),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_mul(&AbstractU32::from_constant(0)),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(AbstractU32::from_constant(1).abstract_mul(&value), value);
+        assert_eq!(value.abstract_mul(&AbstractU32::from_constant(1)), value);
+        assert_eq!(
+            AbstractU32::from_intervals([2..=3])
+                .abstract_mul(&AbstractU32::from_intervals([4..=5])),
+            AbstractU32::from_intervals([8..=15])
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([2..=3, 5..=6])
+                .abstract_mul(&AbstractU32::from_intervals([4..=5])),
+            AbstractU32::from_intervals([8..=15, 20..=30])
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([u32::MAX - 1..=u32::MAX])
+                .abstract_mul(&AbstractU32::from_constant(2)),
+            AbstractU32::from_intervals([u32::MAX - 3..=u32::MAX - 1])
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([u32::MAX - 1..=u32::MAX])
+                .abstract_mul(&AbstractU32::from_intervals([1..=2])),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_mul(&AbstractU32::top()),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_mul(&AbstractU32::from_constant(0)),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_mul(&AbstractU32::top()),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_mul(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_mul(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_div() {
+        assert_eq!(
+            AbstractU32::from_constant(43).abstract_div(&AbstractU32::from_constant(7)),
+            AbstractU32::from_constant(6)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_div(&AbstractU32::from_constant(0)),
+            AbstractU32::top()
+        );
+
+        let value = AbstractU32::from_intervals([4..=6]);
+
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_div(&value),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(value.abstract_div(&AbstractU32::from_constant(1)), value);
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_div(&AbstractU32::top()),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_div(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_div(&AbstractU32::from_constant(0)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            value.abstract_div(&AbstractU32::from_constant(2)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_div(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_div(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_mod() {
+        assert_eq!(
+            AbstractU32::from_constant(43).abstract_mod(&AbstractU32::from_constant(7)),
+            AbstractU32::from_constant(1)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_mod(&AbstractU32::from_constant(0)),
+            AbstractU32::top()
+        );
+
+        let value = AbstractU32::from_intervals([4..=6]);
+
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_mod(&value),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_mod(&AbstractU32::from_constant(1)),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_mod(&AbstractU32::top()),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_mod(&AbstractU32::from_constant(0)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            value.abstract_mod(&AbstractU32::from_constant(2)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_mod(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_mod(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_and() {
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).abstract_bit_and(&AbstractU32::from_constant(42)),
+            AbstractU32::from_constant(42)
+        );
+
+        let value = AbstractU32::from_intervals([2..=3]);
+
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_bit_and(&value),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_bit_and(&AbstractU32::from_constant(0)),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).abstract_bit_and(&value),
+            value
+        );
+        assert_eq!(
+            value.abstract_bit_and(&AbstractU32::from_constant(u32::MAX)),
+            value
+        );
+        assert_eq!(
+            value.abstract_bit_and(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_bit_and(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_bit_and(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_or() {
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_bit_or(&AbstractU32::from_constant(2)),
+            AbstractU32::from_constant(3)
+        );
+
+        let value = AbstractU32::from_intervals([2..=3]);
+
+        assert_eq!(AbstractU32::from_constant(0).abstract_bit_or(&value), value);
+        assert_eq!(value.abstract_bit_or(&AbstractU32::from_constant(0)), value);
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).abstract_bit_or(&value),
+            AbstractU32::from_constant(u32::MAX)
+        );
+        assert_eq!(
+            value.abstract_bit_or(&AbstractU32::from_constant(u32::MAX)),
+            AbstractU32::from_constant(u32::MAX)
+        );
+        assert_eq!(
+            value.abstract_bit_or(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_bit_or(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_bit_or(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_xor() {
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX)
+                .abstract_bit_xor(&AbstractU32::from_constant(u32::MAX - 1)),
+            AbstractU32::from_constant(1)
+        );
+
+        let value = AbstractU32::from_intervals([2..=3]);
+
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_bit_xor(&value),
+            value
+        );
+        assert_eq!(
+            value.abstract_bit_xor(&AbstractU32::from_constant(0)),
+            value
+        );
+        assert_eq!(
+            value.abstract_bit_xor(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_bit_xor(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_bit_xor(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_shl() {
+        assert_eq!(
+            AbstractU32::from_constant(3).abstract_shl(&AbstractU32::from_constant(2)),
+            AbstractU32::from_constant(12)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_shl(&AbstractU32::from_constant(u32::MAX)),
+            AbstractU32::from_constant(1 << 31)
+        );
+
+        let value = AbstractU32::from_intervals([4..=6]);
+
+        assert_eq!(value.abstract_shl(&AbstractU32::from_constant(32)), value);
+        assert_eq!(value.abstract_shl(&AbstractU32::from_constant(64)), value);
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_shl(&AbstractU32::top()),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_shl(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_shl(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_shl(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_shr() {
+        assert_eq!(
+            AbstractU32::from_constant(16).abstract_shr(&AbstractU32::from_constant(2)),
+            AbstractU32::from_constant(4)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).abstract_shr(&AbstractU32::from_constant(63)),
+            AbstractU32::from_constant(1)
+        );
+
+        let value = AbstractU32::from_intervals([4..=6]);
+
+        assert_eq!(value.abstract_shr(&AbstractU32::from_constant(32)), value);
+        assert_eq!(value.abstract_shr(&AbstractU32::from_constant(64)), value);
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_shr(&AbstractU32::top()),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            value.abstract_shr(&AbstractU32::from_constant(1)),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_shr(&AbstractU32::top()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_shr(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_eq() {
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_eq(&AbstractU32::from_constant(1)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3]).abstract_eq(&AbstractU32::from_intervals([5..=7])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3]).abstract_eq(&AbstractU32::from_constant(2)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_eq(&AbstractU32::top()),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_eq(&AbstractU32::top()),
+            AbstractBool::Bottom
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_eq(&AbstractU32::bottom()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_not_eq() {
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_not_eq(&AbstractU32::from_constant(1)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3])
+                .abstract_not_eq(&AbstractU32::from_intervals([5..=7])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3]).abstract_not_eq(&AbstractU32::from_constant(2)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_not_eq(&AbstractU32::top()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_lt() {
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3]).abstract_lt(&AbstractU32::from_intervals([5..=7])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([5..=7]).abstract_lt(&AbstractU32::from_intervals([1..=3])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(1).abstract_lt(&AbstractU32::from_constant(1)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=5]).abstract_lt(&AbstractU32::from_intervals([3..=7])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_lt(&AbstractU32::top()),
+            AbstractBool::Bottom
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_lt(&AbstractU32::bottom()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_lt_eq() {
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3])
+                .abstract_lt_eq(&AbstractU32::from_intervals([3..=5])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([5..=7])
+                .abstract_lt_eq(&AbstractU32::from_intervals([1..=4])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=5])
+                .abstract_lt_eq(&AbstractU32::from_intervals([3..=7])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_lt_eq(&AbstractU32::top()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_gt() {
+        assert_eq!(
+            AbstractU32::from_intervals([5..=7]).abstract_gt(&AbstractU32::from_intervals([1..=3])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3]).abstract_gt(&AbstractU32::from_intervals([5..=7])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=5]).abstract_gt(&AbstractU32::from_intervals([3..=7])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_gt(&AbstractU32::top()),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_gt_eq() {
+        assert_eq!(
+            AbstractU32::from_intervals([3..=5])
+                .abstract_gt_eq(&AbstractU32::from_intervals([1..=3])),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=4])
+                .abstract_gt_eq(&AbstractU32::from_intervals([5..=7])),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=5])
+                .abstract_gt_eq(&AbstractU32::from_intervals([3..=7])),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_gt_eq(&AbstractU32::top()),
+            AbstractBool::Bottom
+        );
     }
 }
