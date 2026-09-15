@@ -11,6 +11,7 @@ pub use self::abstract_predicate::AbstractPredicate;
 pub use self::abstract_u32::AbstractU32;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
+use crate::{BinaryOperator, UnaryOperator};
 
 /// The maximum number of disjoint intervals retained by an integer-type abstract value.
 pub const MAX_INTEGER_INTERVALS: usize = 4;
@@ -160,6 +161,86 @@ impl AbstractValue {
         };
 
         value
+    }
+
+    /// Returns the abstract result of applying `operator` to this value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value's type does not support `operator`.
+    pub fn abstract_unary_op(&self, operator: UnaryOperator) -> Self {
+        use UnaryOperator::*;
+
+        match (self, operator) {
+            (Self::Bool(value), Not) => value.abstract_not().into(),
+            (Self::F32(value), Neg) => value.abstract_neg().into(),
+            (Self::I32(value), Neg) => value.abstract_neg().into(),
+            _ => panic!("operator {operator} not supported by value kind"),
+        }
+    }
+
+    /// Returns the abstract result of applying `operator` to this value and `other`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operand types do not support `operator`.
+    pub fn abstract_binary_op(&self, operator: BinaryOperator, other: &Self) -> Self {
+        use BinaryOperator::*;
+
+        match (self, operator, other) {
+            (Self::Bool(left), And, Self::Bool(right)) => left.abstract_and(right).into(),
+            (Self::Bool(left), Or, Self::Bool(right)) => left.abstract_or(right).into(),
+            (Self::Bool(left), Eq, Self::Bool(right)) => left.abstract_eq(right).into(),
+            (Self::Bool(left), NotEq, Self::Bool(right)) => left.abstract_not_eq(right).into(),
+
+            (Self::F32(left), Add, Self::F32(right)) => left.abstract_add(right).into(),
+            (Self::F32(left), Sub, Self::F32(right)) => left.abstract_sub(right).into(),
+            (Self::F32(left), Mul, Self::F32(right)) => left.abstract_mul(right).into(),
+            (Self::F32(left), Div, Self::F32(right)) => left.abstract_div(right).into(),
+            (Self::F32(left), Mod, Self::F32(right)) => left.abstract_mod(right).into(),
+            (Self::F32(left), Eq, Self::F32(right)) => left.abstract_eq(right).into(),
+            (Self::F32(left), NotEq, Self::F32(right)) => left.abstract_not_eq(right).into(),
+            (Self::F32(left), Gt, Self::F32(right)) => left.abstract_gt(right).into(),
+            (Self::F32(left), GtEq, Self::F32(right)) => left.abstract_gt_eq(right).into(),
+            (Self::F32(left), Lt, Self::F32(right)) => left.abstract_lt(right).into(),
+            (Self::F32(left), LtEq, Self::F32(right)) => left.abstract_lt_eq(right).into(),
+
+            (Self::I32(left), Add, Self::I32(right)) => left.abstract_add(right).into(),
+            (Self::I32(left), Sub, Self::I32(right)) => left.abstract_sub(right).into(),
+            (Self::I32(left), Mul, Self::I32(right)) => left.abstract_mul(right).into(),
+            (Self::I32(left), Div, Self::I32(right)) => left.abstract_div(right).into(),
+            (Self::I32(left), Mod, Self::I32(right)) => left.abstract_mod(right).into(),
+            (Self::I32(left), BitOr, Self::I32(right)) => left.abstract_bit_or(right).into(),
+            (Self::I32(left), BitAnd, Self::I32(right)) => left.abstract_bit_and(right).into(),
+            (Self::I32(left), BitXor, Self::I32(right)) => left.abstract_bit_xor(right).into(),
+            (Self::I32(left), Shl, Self::U32(right)) => left.abstract_shl(right).into(),
+            (Self::I32(left), Shr, Self::U32(right)) => left.abstract_shr(right).into(),
+            (Self::I32(left), Eq, Self::I32(right)) => left.abstract_eq(right).into(),
+            (Self::I32(left), NotEq, Self::I32(right)) => left.abstract_not_eq(right).into(),
+            (Self::I32(left), Gt, Self::I32(right)) => left.abstract_gt(right).into(),
+            (Self::I32(left), GtEq, Self::I32(right)) => left.abstract_gt_eq(right).into(),
+            (Self::I32(left), Lt, Self::I32(right)) => left.abstract_lt(right).into(),
+            (Self::I32(left), LtEq, Self::I32(right)) => left.abstract_lt_eq(right).into(),
+
+            (Self::U32(left), Add, Self::U32(right)) => left.abstract_add(right).into(),
+            (Self::U32(left), Sub, Self::U32(right)) => left.abstract_sub(right).into(),
+            (Self::U32(left), Mul, Self::U32(right)) => left.abstract_mul(right).into(),
+            (Self::U32(left), Div, Self::U32(right)) => left.abstract_div(right).into(),
+            (Self::U32(left), Mod, Self::U32(right)) => left.abstract_mod(right).into(),
+            (Self::U32(left), BitOr, Self::U32(right)) => left.abstract_bit_or(right).into(),
+            (Self::U32(left), BitAnd, Self::U32(right)) => left.abstract_bit_and(right).into(),
+            (Self::U32(left), BitXor, Self::U32(right)) => left.abstract_bit_xor(right).into(),
+            (Self::U32(left), Shl, Self::U32(right)) => left.abstract_shl(right).into(),
+            (Self::U32(left), Shr, Self::U32(right)) => left.abstract_shr(right).into(),
+            (Self::U32(left), Eq, Self::U32(right)) => left.abstract_eq(right).into(),
+            (Self::U32(left), NotEq, Self::U32(right)) => left.abstract_not_eq(right).into(),
+            (Self::U32(left), Gt, Self::U32(right)) => left.abstract_gt(right).into(),
+            (Self::U32(left), GtEq, Self::U32(right)) => left.abstract_gt_eq(right).into(),
+            (Self::U32(left), Lt, Self::U32(right)) => left.abstract_lt(right).into(),
+            (Self::U32(left), LtEq, Self::U32(right)) => left.abstract_lt_eq(right).into(),
+
+            _ => panic!("operator {operator} not supported by value kinds"),
+        }
     }
 
     /// Returns whether the value is an unconstrained "top" value.
