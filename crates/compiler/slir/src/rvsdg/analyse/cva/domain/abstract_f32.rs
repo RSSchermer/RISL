@@ -10,6 +10,24 @@ fn is_safe_f32(value: f32) -> bool {
     value.is_normal() || value == 0.0
 }
 
+fn abstract_binary_operation(
+    left: &AbstractF32,
+    right: &AbstractF32,
+    operation: impl FnOnce(f32, f32) -> Option<f32>,
+) -> AbstractF32 {
+    match (left, right) {
+        (AbstractF32::Bottom, _) | (_, AbstractF32::Bottom) => AbstractF32::Bottom,
+        (AbstractF32::Const(left), AbstractF32::Const(right))
+            if is_safe_f32(*left) && is_safe_f32(*right) =>
+        {
+            operation(*left, *right)
+                .filter(|result| is_safe_f32(*result))
+                .map_or(AbstractF32::Top, AbstractF32::Const)
+        }
+        _ => AbstractF32::Top,
+    }
+}
+
 /// A (possibly constrained) `f32` value.
 ///
 /// See also [AbstractValue](super::AbstractValue).
@@ -108,6 +126,52 @@ impl AbstractF32 {
             (Self::Top, _) | (_, Self::Bottom) => false,
             (Self::Const(left), Self::Const(right)) => left.to_bits() == right.to_bits(),
         }
+    }
+
+    /// Returns the abstract result of negating this value.
+    pub fn abstract_neg(&self) -> Self {
+        match self {
+            Self::Bottom => Self::Bottom,
+            Self::Const(value) if is_safe_f32(*value) => {
+                let result = -*value;
+
+                if is_safe_f32(result) {
+                    Self::Const(result)
+                } else {
+                    Self::Top
+                }
+            }
+            _ => Self::Top,
+        }
+    }
+
+    /// Returns the abstract result of adding this value and `other`.
+    pub fn abstract_add(&self, other: &Self) -> Self {
+        abstract_binary_operation(self, other, |left, right| Some(left + right))
+    }
+
+    /// Returns the abstract result of subtracting `other` from this value.
+    pub fn abstract_sub(&self, other: &Self) -> Self {
+        abstract_binary_operation(self, other, |left, right| Some(left - right))
+    }
+
+    /// Returns the abstract result of multiplying this value by `other`.
+    pub fn abstract_mul(&self, other: &Self) -> Self {
+        abstract_binary_operation(self, other, |left, right| Some(left * right))
+    }
+
+    /// Returns the abstract result of dividing this value by `other`.
+    pub fn abstract_div(&self, other: &Self) -> Self {
+        abstract_binary_operation(self, other, |left, right| {
+            (right != 0.0).then(|| left / right)
+        })
+    }
+
+    /// Returns the abstract result of taking the remainder of this value divided by `other`.
+    pub fn abstract_mod(&self, other: &Self) -> Self {
+        abstract_binary_operation(self, other, |left, right| {
+            (right != 0.0).then(|| left % right)
+        })
     }
 
     /// Returns the abstract result of comparing this value equal to `other`.
@@ -330,6 +394,146 @@ mod tests {
         assert!(!AbstractF32::Const(0.0).is_subset(&AbstractF32::Const(-0.0)));
         assert!(AbstractF32::Const(NAN_A).is_subset(&AbstractF32::Top));
         assert!(!AbstractF32::Top.is_subset(&AbstractF32::Const(NAN_A)));
+    }
+
+    #[test]
+    fn abstract_neg() {
+        assert_eq!(
+            AbstractF32::Const(2.0).abstract_neg(),
+            AbstractF32::Const(-2.0)
+        );
+        assert_eq!(
+            AbstractF32::Const(0.0).abstract_neg(),
+            AbstractF32::Const(-0.0)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::INFINITY).abstract_neg(),
+            AbstractF32::Top
+        );
+        assert_eq!(AbstractF32::Top.abstract_neg(), AbstractF32::Top);
+        assert_eq!(AbstractF32::Bottom.abstract_neg(), AbstractF32::Bottom);
+    }
+
+    #[test]
+    fn abstract_add() {
+        assert_eq!(
+            AbstractF32::Const(1.5).abstract_add(&AbstractF32::Const(2.0)),
+            AbstractF32::Const(3.5)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::MAX).abstract_add(&AbstractF32::Const(f32::MAX)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_add(&AbstractF32::Top),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_add(&AbstractF32::Const(1.0)),
+            AbstractF32::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_sub() {
+        assert_eq!(
+            AbstractF32::Const(3.5).abstract_sub(&AbstractF32::Const(2.0)),
+            AbstractF32::Const(1.5)
+        );
+
+        let next_normal = f32::from_bits(f32::MIN_POSITIVE.to_bits() + 1);
+
+        assert_eq!(
+            AbstractF32::Const(f32::MIN_POSITIVE).abstract_sub(&AbstractF32::Const(next_normal)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_sub(&AbstractF32::Const(1.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_sub(&AbstractF32::Bottom),
+            AbstractF32::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_mul() {
+        assert_eq!(
+            AbstractF32::Const(1.5).abstract_mul(&AbstractF32::Const(2.0)),
+            AbstractF32::Const(3.0)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::MIN_POSITIVE).abstract_mul(&AbstractF32::Const(0.5)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_mul(&AbstractF32::Const(0.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_mul(&AbstractF32::Const(0.0)),
+            AbstractF32::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_div() {
+        assert_eq!(
+            AbstractF32::Const(3.0).abstract_div(&AbstractF32::Const(2.0)),
+            AbstractF32::Const(1.5)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::MIN_POSITIVE).abstract_div(&AbstractF32::Const(2.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_div(&AbstractF32::Const(0.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_div(&AbstractF32::Const(-0.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_div(&AbstractF32::Const(1.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_div(&AbstractF32::Bottom),
+            AbstractF32::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_mod() {
+        assert_eq!(
+            AbstractF32::Const(5.5).abstract_mod(&AbstractF32::Const(2.0)),
+            AbstractF32::Const(1.5)
+        );
+
+        let next_normal = f32::from_bits(f32::MIN_POSITIVE.to_bits() + 1);
+
+        assert_eq!(
+            AbstractF32::Const(next_normal).abstract_mod(&AbstractF32::Const(f32::MIN_POSITIVE)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_mod(&AbstractF32::Const(0.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_mod(&AbstractF32::Const(-0.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_mod(&AbstractF32::Const(1.0)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_mod(&AbstractF32::Const(1.0)),
+            AbstractF32::Bottom
+        );
     }
 
     #[test]
