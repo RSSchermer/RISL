@@ -1,5 +1,15 @@
 use core::hash::{Hash, Hasher};
 
+use super::AbstractBool;
+
+// There are some discrepancies between floating point arithmetic in Rust and floating point
+// arithmetic in WGSL. To avoid such discrepancies, we use this helper function to conservatively
+// only apply concrete operations involving `f32` values when it is "safe" to do so, falling back
+// to "top" otherwise.
+fn is_safe_f32(value: f32) -> bool {
+    value.is_normal() || value == 0.0
+}
+
 /// A (possibly constrained) `f32` value.
 ///
 /// See also [AbstractValue](super::AbstractValue).
@@ -97,6 +107,84 @@ impl AbstractF32 {
             (Self::Bottom, _) | (_, Self::Top) => true,
             (Self::Top, _) | (_, Self::Bottom) => false,
             (Self::Const(left), Self::Const(right)) => left.to_bits() == right.to_bits(),
+        }
+    }
+
+    /// Returns the abstract result of comparing this value equal to `other`.
+    pub fn abstract_eq(&self, other: &Self) -> AbstractBool {
+        match (self, other) {
+            (Self::Bottom, _) | (_, Self::Bottom) => AbstractBool::Bottom,
+            (Self::Const(left), Self::Const(right))
+                if is_safe_f32(*left) && is_safe_f32(*right) =>
+            {
+                AbstractBool::Const(left == right)
+            }
+            _ => AbstractBool::Top,
+        }
+    }
+
+    /// Returns the abstract result of comparing this value not equal to `other`.
+    pub fn abstract_not_eq(&self, other: &Self) -> AbstractBool {
+        match (self, other) {
+            (Self::Bottom, _) | (_, Self::Bottom) => AbstractBool::Bottom,
+            (Self::Const(left), Self::Const(right))
+                if is_safe_f32(*left) && is_safe_f32(*right) =>
+            {
+                AbstractBool::Const(left != right)
+            }
+            _ => AbstractBool::Top,
+        }
+    }
+
+    /// Returns the abstract result of comparing this value less than `other`.
+    pub fn abstract_lt(&self, other: &Self) -> AbstractBool {
+        match (self, other) {
+            (Self::Bottom, _) | (_, Self::Bottom) => AbstractBool::Bottom,
+            (Self::Const(left), Self::Const(right))
+                if is_safe_f32(*left) && is_safe_f32(*right) =>
+            {
+                AbstractBool::Const(left < right)
+            }
+            _ => AbstractBool::Top,
+        }
+    }
+
+    /// Returns the abstract result of comparing this value less than or equal to `other`.
+    pub fn abstract_lt_eq(&self, other: &Self) -> AbstractBool {
+        match (self, other) {
+            (Self::Bottom, _) | (_, Self::Bottom) => AbstractBool::Bottom,
+            (Self::Const(left), Self::Const(right))
+                if is_safe_f32(*left) && is_safe_f32(*right) =>
+            {
+                AbstractBool::Const(left <= right)
+            }
+            _ => AbstractBool::Top,
+        }
+    }
+
+    /// Returns the abstract result of comparing this value greater than `other`.
+    pub fn abstract_gt(&self, other: &Self) -> AbstractBool {
+        match (self, other) {
+            (Self::Bottom, _) | (_, Self::Bottom) => AbstractBool::Bottom,
+            (Self::Const(left), Self::Const(right))
+                if is_safe_f32(*left) && is_safe_f32(*right) =>
+            {
+                AbstractBool::Const(left > right)
+            }
+            _ => AbstractBool::Top,
+        }
+    }
+
+    /// Returns the abstract result of comparing this value greater than or equal to `other`.
+    pub fn abstract_gt_eq(&self, other: &Self) -> AbstractBool {
+        match (self, other) {
+            (Self::Bottom, _) | (_, Self::Bottom) => AbstractBool::Bottom,
+            (Self::Const(left), Self::Const(right))
+                if is_safe_f32(*left) && is_safe_f32(*right) =>
+            {
+                AbstractBool::Const(left >= right)
+            }
+            _ => AbstractBool::Top,
         }
     }
 }
@@ -242,5 +330,169 @@ mod tests {
         assert!(!AbstractF32::Const(0.0).is_subset(&AbstractF32::Const(-0.0)));
         assert!(AbstractF32::Const(NAN_A).is_subset(&AbstractF32::Top));
         assert!(!AbstractF32::Top.is_subset(&AbstractF32::Const(NAN_A)));
+    }
+
+    #[test]
+    fn abstract_eq() {
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_eq(&AbstractF32::Const(2.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(0.0).abstract_eq(&AbstractF32::Const(-0.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(NAN_A).abstract_eq(&AbstractF32::Const(NAN_A)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_not_eq() {
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_not_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_not_eq(&AbstractF32::Const(2.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(0.0).abstract_not_eq(&AbstractF32::Const(-0.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::INFINITY).abstract_not_eq(&AbstractF32::Const(f32::INFINITY)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_not_eq(&AbstractF32::Top),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_not_eq(&AbstractF32::Bottom),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_lt() {
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_lt(&AbstractF32::Const(2.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(2.0).abstract_lt(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::MIN_POSITIVE / 2.0).abstract_lt(&AbstractF32::Const(1.0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_lt(&AbstractF32::Const(1.0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_lt(&AbstractF32::Const(1.0)),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_lt_eq() {
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_lt_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(2.0).abstract_lt_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(-0.0).abstract_lt_eq(&AbstractF32::Const(0.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_lt_eq(&AbstractF32::Const(NAN_A)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_lt_eq(&AbstractF32::Top),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_lt_eq(&AbstractF32::Bottom),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_gt() {
+        assert_eq!(
+            AbstractF32::Const(2.0).abstract_gt(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_gt(&AbstractF32::Const(2.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(0.0).abstract_gt(&AbstractF32::Const(-0.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(NAN_A).abstract_gt(&AbstractF32::Const(1.0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_gt(&AbstractF32::Const(1.0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_gt(&AbstractF32::Const(1.0)),
+            AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_gt_eq() {
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_gt_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_gt_eq(&AbstractF32::Const(2.0)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::Const(0.0).abstract_gt_eq(&AbstractF32::Const(-0.0)),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::Const(f32::NEG_INFINITY).abstract_gt_eq(&AbstractF32::Const(1.0)),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_gt_eq(&AbstractF32::Top),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::Const(1.0).abstract_gt_eq(&AbstractF32::Bottom),
+            AbstractBool::Bottom
+        );
     }
 }
