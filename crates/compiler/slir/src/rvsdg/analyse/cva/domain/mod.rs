@@ -110,6 +110,58 @@ impl AbstractValue {
         }
     }
 
+    /// Returns this value as an [`AbstractBool`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is not a [`Bool`](Self::Bool) value.
+    pub fn expect_bool(&self) -> &AbstractBool {
+        let Self::Bool(value) = self else {
+            panic!("expected bool abstract value");
+        };
+
+        value
+    }
+
+    /// Returns this value as an [`AbstractF32`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is not an [`F32`](Self::F32) value.
+    pub fn expect_f32(&self) -> &AbstractF32 {
+        let Self::F32(value) = self else {
+            panic!("expected f32 abstract value");
+        };
+
+        value
+    }
+
+    /// Returns this value as an [`AbstractI32`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is not an [`I32`](Self::I32) value.
+    pub fn expect_i32(&self) -> &AbstractI32 {
+        let Self::I32(value) = self else {
+            panic!("expected i32 abstract value");
+        };
+
+        value
+    }
+
+    /// Returns this value as an [`AbstractU32`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is not a [`U32`](Self::U32) value.
+    pub fn expect_u32(&self) -> &AbstractU32 {
+        let Self::U32(value) = self else {
+            panic!("expected u32 abstract value");
+        };
+
+        value
+    }
+
     /// Returns whether the value is an unconstrained "top" value.
     ///
     /// If a value is unconstrained, then reasoning cannot use this fact to rule out any values
