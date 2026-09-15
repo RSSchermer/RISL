@@ -2,7 +2,7 @@ use core::ops::RangeInclusive;
 
 use smallvec::SmallVec;
 
-use super::{AbstractBool, AbstractI32, MAX_INTEGER_INTERVALS};
+use super::{AbstractBool, AbstractF32, AbstractI32, MAX_INTEGER_INTERVALS};
 
 const TOP_INTERVALS: &[RangeInclusive<u32>] = &[0..=u32::MAX];
 const U32_MODULUS: i128 = 1i128 << 32;
@@ -112,6 +112,30 @@ impl AbstractU32 {
         match self.0.as_slice() {
             [interval] if interval.start() == interval.end() => Some(*interval.start()),
             _ => None,
+        }
+    }
+
+    /// Returns the abstract floating-point value of this unsigned integer.
+    pub fn to_abstract_f32(&self) -> AbstractF32 {
+        if self.is_bottom() {
+            AbstractF32::Bottom
+        } else {
+            self.to_singleton()
+                .map(|value| AbstractF32::from_constant(value as f32))
+                .unwrap_or(AbstractF32::Top)
+        }
+    }
+
+    /// Returns the abstract boolean value of this integer.
+    pub fn to_abstract_bool(&self) -> AbstractBool {
+        if self.is_bottom() {
+            AbstractBool::Bottom
+        } else if self.to_singleton() == Some(0) {
+            AbstractBool::Const(false)
+        } else if self.contains(0) {
+            AbstractBool::Top
+        } else {
+            AbstractBool::Const(true)
         }
     }
 
@@ -582,6 +606,45 @@ mod tests {
         assert_eq!(AbstractU32::from_constant(4).to_singleton(), Some(4));
         assert_eq!(AbstractU32::from_intervals([4..=5]).to_singleton(), None);
         assert_eq!(AbstractU32::bottom().to_singleton(), None);
+    }
+
+    #[test]
+    fn to_abstract_f32() {
+        assert_eq!(
+            AbstractU32::from_constant(4).to_abstract_f32(),
+            AbstractF32::from_constant(4.0)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).to_abstract_f32(),
+            AbstractF32::from_constant(u32::MAX as f32)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([4..=5]).to_abstract_f32(),
+            AbstractF32::Top
+        );
+        assert_eq!(AbstractU32::top().to_abstract_f32(), AbstractF32::Top);
+        assert_eq!(AbstractU32::bottom().to_abstract_f32(), AbstractF32::Bottom);
+    }
+
+    #[test]
+    fn to_abstract_bool() {
+        assert_eq!(
+            AbstractU32::from_constant(0).to_abstract_bool(),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=4, 7..=9]).to_abstract_bool(),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([0..=4]).to_abstract_bool(),
+            AbstractBool::Top
+        );
+        assert_eq!(AbstractU32::top().to_abstract_bool(), AbstractBool::Top);
+        assert_eq!(
+            AbstractU32::bottom().to_abstract_bool(),
+            AbstractBool::Bottom
+        );
     }
 
     #[test]

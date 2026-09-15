@@ -1,3 +1,5 @@
+use super::{AbstractF32, AbstractI32, AbstractU32};
+
 /// A (possibly constrained) boolean value.
 ///
 /// See also [AbstractValue](super::AbstractValue).
@@ -22,6 +24,33 @@ impl AbstractBool {
     /// Returns a new abstract value constrained to exactly the given `value`.
     pub fn from_constant(value: bool) -> Self {
         Self::Const(value)
+    }
+
+    /// Returns the abstract signed integer value of this boolean.
+    pub fn to_abstract_i32(&self) -> AbstractI32 {
+        match self {
+            Self::Top => AbstractI32::from_intervals([0..=1]),
+            Self::Const(value) => AbstractI32::from_constant(i32::from(*value)),
+            Self::Bottom => AbstractI32::bottom(),
+        }
+    }
+
+    /// Returns the abstract unsigned integer value of this boolean.
+    pub fn to_abstract_u32(&self) -> AbstractU32 {
+        match self {
+            Self::Top => AbstractU32::from_intervals([0..=1]),
+            Self::Const(value) => AbstractU32::from_constant(u32::from(*value)),
+            Self::Bottom => AbstractU32::bottom(),
+        }
+    }
+
+    /// Returns the abstract floating-point value of this boolean.
+    pub fn to_abstract_f32(&self) -> AbstractF32 {
+        match self {
+            Self::Top => AbstractF32::Top,
+            Self::Const(value) => AbstractF32::from_constant(if *value { 1.0 } else { 0.0 }),
+            Self::Bottom => AbstractF32::Bottom,
+        }
     }
 
     /// Returns whether the value is an unconstrained "top" value.
@@ -145,6 +174,60 @@ impl AbstractBool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn to_abstract_i32() {
+        assert_eq!(
+            AbstractBool::Const(false).to_abstract_i32(),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractBool::Const(true).to_abstract_i32(),
+            AbstractI32::from_constant(1)
+        );
+        assert_eq!(
+            AbstractBool::Top.to_abstract_i32(),
+            AbstractI32::from_intervals([0..=1])
+        );
+        assert_eq!(
+            AbstractBool::Bottom.to_abstract_i32(),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn to_abstract_u32() {
+        assert_eq!(
+            AbstractBool::Const(false).to_abstract_u32(),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractBool::Const(true).to_abstract_u32(),
+            AbstractU32::from_constant(1)
+        );
+        assert_eq!(
+            AbstractBool::Top.to_abstract_u32(),
+            AbstractU32::from_intervals([0..=1])
+        );
+        assert_eq!(
+            AbstractBool::Bottom.to_abstract_u32(),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn to_abstract_f32() {
+        assert_eq!(
+            AbstractBool::Const(false).to_abstract_f32(),
+            AbstractF32::from_constant(0.0)
+        );
+        assert_eq!(
+            AbstractBool::Const(true).to_abstract_f32(),
+            AbstractF32::from_constant(1.0)
+        );
+        assert_eq!(AbstractBool::Top.to_abstract_f32(), AbstractF32::Top);
+        assert_eq!(AbstractBool::Bottom.to_abstract_f32(), AbstractF32::Bottom);
+    }
 
     #[test]
     fn is_top() {

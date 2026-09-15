@@ -1,6 +1,6 @@
 use core::hash::{Hash, Hasher};
 
-use super::AbstractBool;
+use super::{AbstractBool, AbstractI32, AbstractU32};
 
 // There are some discrepancies between floating point arithmetic in Rust and floating point
 // arithmetic in WGSL. To avoid such discrepancies, we use this helper function to conservatively
@@ -52,6 +52,33 @@ impl AbstractF32 {
     /// Returns a new abstract value constrained to exactly the given `value`'s bit pattern.
     pub fn from_constant(value: f32) -> Self {
         Self::Const(value)
+    }
+
+    /// Returns the abstract boolean value of this floating-point value.
+    pub fn to_abstract_bool(&self) -> AbstractBool {
+        match self {
+            Self::Const(value) if is_safe_f32(*value) => AbstractBool::Const(*value != 0.0),
+            Self::Bottom => AbstractBool::Bottom,
+            _ => AbstractBool::Top,
+        }
+    }
+
+    /// Returns the abstract signed integer value of this floating-point value.
+    pub fn to_abstract_i32(&self) -> AbstractI32 {
+        match self {
+            Self::Const(value) if is_safe_f32(*value) => AbstractI32::from_constant(*value as i32),
+            Self::Bottom => AbstractI32::bottom(),
+            _ => AbstractI32::top(),
+        }
+    }
+
+    /// Returns the abstract unsigned integer value of this floating-point value.
+    pub fn to_abstract_u32(&self) -> AbstractU32 {
+        match self {
+            Self::Const(value) if is_safe_f32(*value) => AbstractU32::from_constant(*value as u32),
+            Self::Bottom => AbstractU32::bottom(),
+            _ => AbstractU32::top(),
+        }
     }
 
     /// Returns whether the value is an unconstrained "top" value.
@@ -305,6 +332,80 @@ mod tests {
         ]);
 
         assert_eq!(values.len(), 4);
+    }
+
+    #[test]
+    fn to_abstract_bool() {
+        assert_eq!(
+            AbstractF32::from_constant(2.5).to_abstract_bool(),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(0.0).to_abstract_bool(),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(-0.0).to_abstract_bool(),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(f32::MIN_POSITIVE / 2.0).to_abstract_bool(),
+            AbstractBool::Top
+        );
+        assert_eq!(
+            AbstractF32::from_constant(NAN_A).to_abstract_bool(),
+            AbstractBool::Top
+        );
+        assert_eq!(AbstractF32::Top.to_abstract_bool(), AbstractBool::Top);
+        assert_eq!(AbstractF32::Bottom.to_abstract_bool(), AbstractBool::Bottom);
+    }
+
+    #[test]
+    fn to_abstract_i32() {
+        assert_eq!(
+            AbstractF32::from_constant(-2.5).to_abstract_i32(),
+            AbstractI32::from_constant(-2)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(f32::MAX).to_abstract_i32(),
+            AbstractI32::from_constant(i32::MAX)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(f32::MIN_POSITIVE / 2.0).to_abstract_i32(),
+            AbstractI32::top()
+        );
+        assert_eq!(
+            AbstractF32::from_constant(NAN_A).to_abstract_i32(),
+            AbstractI32::top()
+        );
+        assert_eq!(AbstractF32::Top.to_abstract_i32(), AbstractI32::top());
+        assert_eq!(AbstractF32::Bottom.to_abstract_i32(), AbstractI32::bottom());
+    }
+
+    #[test]
+    fn to_abstract_u32() {
+        assert_eq!(
+            AbstractF32::from_constant(2.5).to_abstract_u32(),
+            AbstractU32::from_constant(2)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(-1.0).to_abstract_u32(),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(f32::MAX).to_abstract_u32(),
+            AbstractU32::from_constant(u32::MAX)
+        );
+        assert_eq!(
+            AbstractF32::from_constant(f32::MIN_POSITIVE / 2.0).to_abstract_u32(),
+            AbstractU32::top()
+        );
+        assert_eq!(
+            AbstractF32::from_constant(NAN_A).to_abstract_u32(),
+            AbstractU32::top()
+        );
+        assert_eq!(AbstractF32::Top.to_abstract_u32(), AbstractU32::top());
+        assert_eq!(AbstractF32::Bottom.to_abstract_u32(), AbstractU32::bottom());
     }
 
     #[test]
