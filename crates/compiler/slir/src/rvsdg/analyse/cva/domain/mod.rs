@@ -163,6 +163,74 @@ impl AbstractValue {
         value
     }
 
+    /// Returns the abstract boolean value of this value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is a predicate or unsupported value.
+    pub fn to_abstract_bool(&self) -> AbstractBool {
+        match self {
+            Self::Bool(value) => value.clone(),
+            Self::F32(value) => value.to_abstract_bool(),
+            Self::I32(value) => value.to_abstract_bool(),
+            Self::U32(value) => value.to_abstract_bool(),
+            Self::Predicate(_) | Self::Unsupported(_) => {
+                panic!("abstract value cannot be converted to bool")
+            }
+        }
+    }
+
+    /// Returns the abstract signed integer value of this value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is a predicate or unsupported value.
+    pub fn to_abstract_i32(&self) -> AbstractI32 {
+        match self {
+            Self::Bool(value) => value.to_abstract_i32(),
+            Self::F32(value) => value.to_abstract_i32(),
+            Self::I32(value) => value.clone(),
+            Self::U32(value) => value.to_abstract_i32(),
+            Self::Predicate(_) | Self::Unsupported(_) => {
+                panic!("abstract value cannot be converted to i32")
+            }
+        }
+    }
+
+    /// Returns the abstract unsigned integer value of this value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is a predicate or unsupported value.
+    pub fn to_abstract_u32(&self) -> AbstractU32 {
+        match self {
+            Self::Bool(value) => value.to_abstract_u32(),
+            Self::F32(value) => value.to_abstract_u32(),
+            Self::I32(value) => value.to_abstract_u32(),
+            Self::U32(value) => value.clone(),
+            Self::Predicate(_) | Self::Unsupported(_) => {
+                panic!("abstract value cannot be converted to u32")
+            }
+        }
+    }
+
+    /// Returns the abstract floating-point value of this value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is a predicate or unsupported value.
+    pub fn to_abstract_f32(&self) -> AbstractF32 {
+        match self {
+            Self::Bool(value) => value.to_abstract_f32(),
+            Self::F32(value) => value.clone(),
+            Self::I32(value) => value.to_abstract_f32(),
+            Self::U32(value) => value.to_abstract_f32(),
+            Self::Predicate(_) | Self::Unsupported(_) => {
+                panic!("abstract value cannot be converted to f32")
+            }
+        }
+    }
+
     /// Returns the abstract result of applying `operator` to this value.
     ///
     /// # Panics
