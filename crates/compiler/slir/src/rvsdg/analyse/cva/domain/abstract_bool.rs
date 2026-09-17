@@ -168,7 +168,8 @@ impl AbstractBool {
                     *other
                 },
             ),
-            Self::Top | Self::Bottom => (*self, *other),
+            Self::Top => (*self, *other),
+            Self::Bottom => (Self::Bottom, Self::Bottom),
         };
 
         if refinements.0.is_bottom() || refinements.1.is_bottom() {
@@ -428,7 +429,15 @@ mod tests {
         );
         assert_eq!(
             AbstractBool::Top.abstract_and_inv(&AbstractBool::Top, &AbstractBool::Bottom),
-            (AbstractBool::Top, AbstractBool::Top)
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Bottom.abstract_and_inv(&AbstractBool::Top, &AbstractBool::Top),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_and_inv(&AbstractBool::Bottom, &AbstractBool::Top),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
         );
     }
 
