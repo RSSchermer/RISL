@@ -146,6 +146,38 @@ impl AbstractBool {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of logically AND-ing this
+    /// value with `other`.
+    ///
+    /// The constraints returned include the prior constraints on the operands, not just the
+    /// additional constraints implied by the result.
+    ///
+    /// Returns `("bottom", "bottom")` if the abstract inverse evaluation produced a contradiction.
+    pub fn abstract_and_inv(&self, other: &Self, res: &Self) -> (Self, Self) {
+        let refinements = match res {
+            Self::Const(true) => (self.refine(res), other.refine(res)),
+            Self::Const(false) => (
+                if other == &Self::Const(true) {
+                    self.refine(res)
+                } else {
+                    *self
+                },
+                if self == &Self::Const(true) {
+                    other.refine(res)
+                } else {
+                    *other
+                },
+            ),
+            Self::Top | Self::Bottom => (*self, *other),
+        };
+
+        if refinements.0.is_bottom() || refinements.1.is_bottom() {
+            (Self::Bottom, Self::Bottom)
+        } else {
+            refinements
+        }
+    }
+
     /// Returns the abstract result of logically OR-ing this value with `other`.
     pub fn abstract_or(&self, other: &Self) -> Self {
         match (self, other) {
@@ -360,6 +392,43 @@ mod tests {
         assert_eq!(
             AbstractBool::Bottom.abstract_and(&AbstractBool::Const(false)),
             AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_and_inv() {
+        assert_eq!(
+            AbstractBool::Top
+                .abstract_and_inv(&AbstractBool::Const(true), &AbstractBool::Const(true)),
+            (AbstractBool::Const(true), AbstractBool::Const(true))
+        );
+        assert_eq!(
+            AbstractBool::Const(false)
+                .abstract_and_inv(&AbstractBool::Top, &AbstractBool::Const(true)),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top
+                .abstract_and_inv(&AbstractBool::Const(false), &AbstractBool::Const(true)),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top
+                .abstract_and_inv(&AbstractBool::Const(true), &AbstractBool::Const(false)),
+            (AbstractBool::Const(false), AbstractBool::Const(true))
+        );
+        assert_eq!(
+            AbstractBool::Const(true)
+                .abstract_and_inv(&AbstractBool::Top, &AbstractBool::Const(false)),
+            (AbstractBool::Const(true), AbstractBool::Const(false))
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_and_inv(&AbstractBool::Top, &AbstractBool::Top),
+            (AbstractBool::Top, AbstractBool::Top)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_and_inv(&AbstractBool::Top, &AbstractBool::Bottom),
+            (AbstractBool::Top, AbstractBool::Top)
         );
     }
 
