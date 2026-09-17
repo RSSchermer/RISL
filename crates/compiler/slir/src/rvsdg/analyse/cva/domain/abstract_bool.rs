@@ -189,6 +189,21 @@ impl AbstractBool {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of logically OR-ing this
+    /// value with `other`.
+    ///
+    /// The constraints returned include the prior constraints on the operands, not just the
+    /// additional constraints implied by the result.
+    ///
+    /// Returns `("bottom", "bottom")` if the abstract inverse evaluation produced a contradiction.
+    pub fn abstract_or_inv(&self, other: &Self, res: &Self) -> (Self, Self) {
+        let (left, right) = self
+            .abstract_not()
+            .abstract_and_inv(&other.abstract_not(), &res.abstract_not());
+
+        (left.abstract_not(), right.abstract_not())
+    }
+
     /// Returns the abstract result of comparing this value equal to `other`.
     pub fn abstract_eq(&self, other: &Self) -> Self {
         match (self, other) {
@@ -198,9 +213,51 @@ impl AbstractBool {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of comparing this value
+    /// equal to `other`.
+    ///
+    /// The constraints returned include the prior constraints on the operands, not just the
+    /// additional constraints implied by the result.
+    ///
+    /// Returns `("bottom", "bottom")` if the abstract inverse evaluation produced a contradiction.
+    pub fn abstract_eq_inv(&self, other: &Self, res: &Self) -> (Self, Self) {
+        let refinements = match res {
+            Self::Const(equal) => {
+                let constrain = |value: &Self, other: &Self| match other {
+                    Self::Const(other) => {
+                        value.refine(&Self::Const(if *equal { *other } else { !other }))
+                    }
+                    Self::Top => *value,
+                    Self::Bottom => Self::Bottom,
+                };
+
+                (constrain(self, other), constrain(other, self))
+            }
+            Self::Top => (*self, *other),
+            Self::Bottom => (Self::Bottom, Self::Bottom),
+        };
+
+        if refinements.0.is_bottom() || refinements.1.is_bottom() {
+            (Self::Bottom, Self::Bottom)
+        } else {
+            refinements
+        }
+    }
+
     /// Returns the abstract result of comparing this value not equal to `other`.
     pub fn abstract_not_eq(&self, other: &Self) -> Self {
         self.abstract_eq(other).abstract_not()
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of comparing this value
+    /// not equal to `other`.
+    ///
+    /// The constraints returned include the prior constraints on the operands, not just the
+    /// additional constraints implied by the result.
+    ///
+    /// Returns `("bottom", "bottom")` if the abstract inverse evaluation produced a contradiction.
+    pub fn abstract_not_eq_inv(&self, other: &Self, res: &Self) -> (Self, Self) {
+        self.abstract_eq_inv(other, &res.abstract_not())
     }
 }
 
@@ -482,6 +539,41 @@ mod tests {
     }
 
     #[test]
+    fn abstract_or_inv() {
+        assert_eq!(
+            AbstractBool::Top
+                .abstract_or_inv(&AbstractBool::Const(false), &AbstractBool::Const(true)),
+            (AbstractBool::Const(true), AbstractBool::Const(false))
+        );
+        assert_eq!(
+            AbstractBool::Const(false)
+                .abstract_or_inv(&AbstractBool::Top, &AbstractBool::Const(true)),
+            (AbstractBool::Const(false), AbstractBool::Const(true))
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_or_inv(&AbstractBool::Top, &AbstractBool::Const(false)),
+            (AbstractBool::Const(false), AbstractBool::Const(false))
+        );
+        assert_eq!(
+            AbstractBool::Const(true)
+                .abstract_or_inv(&AbstractBool::Top, &AbstractBool::Const(false)),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_or_inv(&AbstractBool::Top, &AbstractBool::Const(true)),
+            (AbstractBool::Top, AbstractBool::Top)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_or_inv(&AbstractBool::Top, &AbstractBool::Bottom),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Bottom.abstract_or_inv(&AbstractBool::Top, &AbstractBool::Top),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+    }
+
+    #[test]
     fn abstract_eq() {
         assert_eq!(
             AbstractBool::Const(true).abstract_eq(&AbstractBool::Const(true)),
@@ -510,6 +602,37 @@ mod tests {
     }
 
     #[test]
+    fn abstract_eq_inv() {
+        assert_eq!(
+            AbstractBool::Top
+                .abstract_eq_inv(&AbstractBool::Const(true), &AbstractBool::Const(true)),
+            (AbstractBool::Const(true), AbstractBool::Const(true))
+        );
+        assert_eq!(
+            AbstractBool::Const(false)
+                .abstract_eq_inv(&AbstractBool::Top, &AbstractBool::Const(false)),
+            (AbstractBool::Const(false), AbstractBool::Const(true))
+        );
+        assert_eq!(
+            AbstractBool::Const(false)
+                .abstract_eq_inv(&AbstractBool::Const(true), &AbstractBool::Const(true)),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_eq_inv(&AbstractBool::Top, &AbstractBool::Const(false)),
+            (AbstractBool::Top, AbstractBool::Top)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_eq_inv(&AbstractBool::Top, &AbstractBool::Bottom),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_eq_inv(&AbstractBool::Bottom, &AbstractBool::Top),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+    }
+
+    #[test]
     fn abstract_not_eq() {
         assert_eq!(
             AbstractBool::Const(true).abstract_not_eq(&AbstractBool::Const(true)),
@@ -534,6 +657,37 @@ mod tests {
         assert_eq!(
             AbstractBool::Bottom.abstract_not_eq(&AbstractBool::Const(true)),
             AbstractBool::Bottom
+        );
+    }
+
+    #[test]
+    fn abstract_not_eq_inv() {
+        assert_eq!(
+            AbstractBool::Top
+                .abstract_not_eq_inv(&AbstractBool::Const(true), &AbstractBool::Const(true)),
+            (AbstractBool::Const(false), AbstractBool::Const(true))
+        );
+        assert_eq!(
+            AbstractBool::Const(false)
+                .abstract_not_eq_inv(&AbstractBool::Top, &AbstractBool::Const(false)),
+            (AbstractBool::Const(false), AbstractBool::Const(false))
+        );
+        assert_eq!(
+            AbstractBool::Const(false)
+                .abstract_not_eq_inv(&AbstractBool::Const(true), &AbstractBool::Const(false)),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_not_eq_inv(&AbstractBool::Top, &AbstractBool::Const(true)),
+            (AbstractBool::Top, AbstractBool::Top)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_not_eq_inv(&AbstractBool::Top, &AbstractBool::Bottom),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
+        );
+        assert_eq!(
+            AbstractBool::Bottom.abstract_not_eq_inv(&AbstractBool::Top, &AbstractBool::Top),
+            (AbstractBool::Bottom, AbstractBool::Bottom)
         );
     }
 }
