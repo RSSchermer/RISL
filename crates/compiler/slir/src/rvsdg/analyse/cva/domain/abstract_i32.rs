@@ -69,7 +69,9 @@ impl AbstractI32 {
 
                 if start <= previous.end().saturating_add(1) {
                     let previous_start = *previous.start();
+
                     *previous = previous_start..=(*previous.end()).max(end);
+
                     continue;
                 }
             }
@@ -84,6 +86,7 @@ impl AbstractI32 {
             Self::top()
         } else {
             intervals.shrink_to_fit();
+
             Self(intervals)
         }
     }
@@ -725,14 +728,14 @@ impl AbstractI32 {
     fn abstract_order_inv(&self, other: &Self, res: &AbstractBool, strict: bool) -> (Self, Self) {
         let refinements = match res {
             AbstractBool::Const(result) if !self.is_bottom() && !other.is_bottom() => {
-                let self_min = i64::from(*self.0.first().unwrap().start());
-                let self_max = i64::from(*self.0.last().unwrap().end());
-                let other_min = i64::from(*other.0.first().unwrap().start());
-                let other_max = i64::from(*other.0.last().unwrap().end());
+                let self_min = *self.0.first().unwrap().start() as i64;
+                let self_max = *self.0.last().unwrap().end() as i64;
+                let other_min = *other.0.first().unwrap().start() as i64;
+                let other_max = *other.0.last().unwrap().end() as i64;
 
                 let ordered_interval = |start: i64, end: i64| {
-                    let start = start.max(i64::from(i32::MIN));
-                    let end = end.min(i64::from(i32::MAX));
+                    let start = start.max(i32::MIN as i64);
+                    let end = end.min(i32::MAX as i64);
 
                     if start > end {
                         Self::bottom()
@@ -742,18 +745,18 @@ impl AbstractI32 {
                 };
 
                 if *result {
-                    let delta = i64::from(strict);
+                    let delta = strict as i64;
 
                     (
-                        self.refine(&ordered_interval(i64::from(i32::MIN), other_max - delta)),
-                        other.refine(&ordered_interval(self_min + delta, i64::from(i32::MAX))),
+                        self.refine(&ordered_interval(i32::MIN as i64, other_max - delta)),
+                        other.refine(&ordered_interval(self_min + delta, i32::MAX as i64)),
                     )
                 } else {
-                    let delta = i64::from(!strict);
+                    let delta = (!strict) as i64;
 
                     (
-                        self.refine(&ordered_interval(other_min + delta, i64::from(i32::MAX))),
-                        other.refine(&ordered_interval(i64::from(i32::MIN), self_max - delta)),
+                        self.refine(&ordered_interval(other_min + delta, i32::MAX as i64)),
+                        other.refine(&ordered_interval(i32::MIN as i64, self_max - delta)),
                     )
                 }
             }
