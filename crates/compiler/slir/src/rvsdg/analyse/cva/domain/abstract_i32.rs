@@ -421,6 +421,15 @@ impl AbstractI32 {
         }))
     }
 
+    /// Returns the operand constraints implied by `res` being the result of multiplying this value
+    /// by `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_mul_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (self.clone(), other.clone())
+    }
+
     /// Returns the abstract result of dividing this value by `other`.
     pub fn abstract_div(&self, other: &Self) -> Self {
         if self.is_bottom() || other.is_bottom() {
@@ -440,6 +449,15 @@ impl AbstractI32 {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of dividing this value by
+    /// `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_div_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (self.clone(), other.clone())
+    }
+
     /// Returns the abstract result of taking the remainder of this value divided by `other`.
     pub fn abstract_mod(&self, other: &Self) -> Self {
         if self.is_bottom() || other.is_bottom() {
@@ -455,6 +473,15 @@ impl AbstractI32 {
         } else {
             Self::top()
         }
+    }
+
+    /// Returns the operand constraints implied by `res` being the remainder of dividing this value
+    /// by `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_mod_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (self.clone(), other.clone())
     }
 
     /// Returns the abstract result of taking the bitwise AND of this value and `other`.
@@ -474,6 +501,15 @@ impl AbstractI32 {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of taking the bitwise AND
+    /// of this value and `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_bit_and_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (self.clone(), other.clone())
+    }
+
     /// Returns the abstract result of taking the bitwise OR of this value and `other`.
     pub fn abstract_bit_or(&self, other: &Self) -> Self {
         if self.is_bottom() || other.is_bottom() {
@@ -491,6 +527,15 @@ impl AbstractI32 {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of taking the bitwise OR
+    /// of this value and `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_bit_or_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (self.clone(), other.clone())
+    }
+
     /// Returns the abstract result of taking the bitwise XOR of this value and `other`.
     pub fn abstract_bit_xor(&self, other: &Self) -> Self {
         if self.is_bottom() || other.is_bottom() {
@@ -504,6 +549,15 @@ impl AbstractI32 {
         } else {
             Self::top()
         }
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of taking the bitwise XOR
+    /// of this value and `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_bit_xor_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (self.clone(), other.clone())
     }
 
     /// Returns the abstract result of shifting this value left by the unsigned `other` modulo the
@@ -533,6 +587,15 @@ impl AbstractI32 {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of shifting this value
+    /// left by the unsigned `other` modulo the bit-width.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_shl_inv(&self, other: &AbstractU32, _res: &Self) -> (Self, AbstractU32) {
+        (self.clone(), other.clone())
+    }
+
     /// Returns the abstract result of shifting this value right by the unsigned `other` modulo the
     /// bit-width.
     pub fn abstract_shr(&self, other: &AbstractU32) -> Self {
@@ -558,6 +621,15 @@ impl AbstractI32 {
         } else {
             Self::top()
         }
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of shifting this value
+    /// right by the unsigned `other` modulo the bit-width.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_shr_inv(&self, other: &AbstractU32, _res: &Self) -> (Self, AbstractU32) {
+        (self.clone(), other.clone())
     }
 
     /// Returns the abstract result of comparing this value equal to `other`.

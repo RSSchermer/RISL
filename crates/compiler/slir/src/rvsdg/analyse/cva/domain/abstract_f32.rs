@@ -242,14 +242,41 @@ impl AbstractF32 {
         abstract_binary_operation(self, other, |left, right| Some(left + right))
     }
 
+    /// Returns the operand constraints implied by `res` being the result of adding this value and
+    /// `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_add_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (*self, *other)
+    }
+
     /// Returns the abstract result of subtracting `other` from this value.
     pub fn abstract_sub(&self, other: &Self) -> Self {
         abstract_binary_operation(self, other, |left, right| Some(left - right))
     }
 
+    /// Returns the operand constraints implied by `res` being the result of subtracting `other`
+    /// from this value.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_sub_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (*self, *other)
+    }
+
     /// Returns the abstract result of multiplying this value by `other`.
     pub fn abstract_mul(&self, other: &Self) -> Self {
         abstract_binary_operation(self, other, |left, right| Some(left * right))
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of multiplying this value
+    /// by `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_mul_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (*self, *other)
     }
 
     /// Returns the abstract result of dividing this value by `other`.
@@ -259,11 +286,29 @@ impl AbstractF32 {
         })
     }
 
+    /// Returns the operand constraints implied by `res` being the result of dividing this value by
+    /// `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_div_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (*self, *other)
+    }
+
     /// Returns the abstract result of taking the remainder of this value divided by `other`.
     pub fn abstract_mod(&self, other: &Self) -> Self {
         abstract_binary_operation(self, other, |left, right| {
             (right != 0.0).then(|| left % right)
         })
+    }
+
+    /// Returns the operand constraints implied by `res` being the remainder of dividing this value
+    /// by `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_mod_inv(&self, other: &Self, _res: &Self) -> (Self, Self) {
+        (*self, *other)
     }
 
     /// Returns the abstract result of comparing this value equal to `other`.
@@ -331,9 +376,27 @@ impl AbstractF32 {
         abstract_comparison(self, other, |left, right| left < right)
     }
 
+    /// Returns the operand constraints implied by `res` being the result of comparing this value
+    /// less than `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_lt_inv(&self, other: &Self, _res: &AbstractBool) -> (Self, Self) {
+        (*self, *other)
+    }
+
     /// Returns the abstract result of comparing this value less than or equal to `other`.
     pub fn abstract_lt_eq(&self, other: &Self) -> AbstractBool {
         abstract_comparison(self, other, |left, right| left <= right)
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of comparing this value
+    /// less than or equal to `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_lt_eq_inv(&self, other: &Self, _res: &AbstractBool) -> (Self, Self) {
+        (*self, *other)
     }
 
     /// Returns the abstract result of comparing this value greater than `other`.
@@ -341,9 +404,27 @@ impl AbstractF32 {
         abstract_comparison(self, other, |left, right| left > right)
     }
 
+    /// Returns the operand constraints implied by `res` being the result of comparing this value
+    /// greater than `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_gt_inv(&self, other: &Self, _res: &AbstractBool) -> (Self, Self) {
+        (*self, *other)
+    }
+
     /// Returns the abstract result of comparing this value greater than or equal to `other`.
     pub fn abstract_gt_eq(&self, other: &Self) -> AbstractBool {
         abstract_comparison(self, other, |left, right| left >= right)
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of comparing this value
+    /// greater than or equal to `other`.
+    ///
+    /// Currently, this is a "placeholder" implementation that does not infer any additional
+    /// constraints on the operands; the implementation may be "upgraded" later.
+    pub fn abstract_gt_eq_inv(&self, other: &Self, _res: &AbstractBool) -> (Self, Self) {
+        (*self, *other)
     }
 }
 
@@ -853,8 +934,7 @@ mod tests {
             (AbstractF32::Const(1.0), AbstractF32::Const(1.0))
         );
         assert_eq!(
-            AbstractF32::Const(1.0)
-                .abstract_eq_inv(&AbstractF32::Top, &AbstractBool::Const(false)),
+            AbstractF32::Const(1.0).abstract_eq_inv(&AbstractF32::Top, &AbstractBool::Const(false)),
             (AbstractF32::Const(1.0), AbstractF32::Top)
         );
         assert_eq!(
@@ -894,7 +974,8 @@ mod tests {
             (AbstractF32::Bottom, AbstractF32::Bottom)
         );
         assert_eq!(
-            AbstractF32::Zero.abstract_eq_inv(&AbstractF32::Const(0.0), &AbstractBool::Const(false)),
+            AbstractF32::Zero
+                .abstract_eq_inv(&AbstractF32::Const(0.0), &AbstractBool::Const(false)),
             (AbstractF32::Bottom, AbstractF32::Bottom)
         );
         assert_eq!(
