@@ -136,6 +136,15 @@ impl AbstractBool {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of logically negating
+    /// this value.
+    ///
+    /// The constraints returned include the prior constraints on the operand, not just the
+    /// additional constraints implied by the result.
+    pub fn abstract_not_inv(&self, res: &Self) -> Self {
+        self.refine(&res.abstract_not())
+    }
+
     /// Returns the abstract result of logically AND-ing this value with `other`.
     pub fn abstract_and(&self, other: &Self) -> Self {
         match (self, other) {
@@ -411,6 +420,34 @@ mod tests {
         );
         assert_eq!(AbstractBool::Top.abstract_not(), AbstractBool::Top);
         assert_eq!(AbstractBool::Bottom.abstract_not(), AbstractBool::Bottom);
+    }
+
+    #[test]
+    fn abstract_not_inv() {
+        assert_eq!(
+            AbstractBool::Top.abstract_not_inv(&AbstractBool::Const(true)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractBool::Const(false).abstract_not_inv(&AbstractBool::Const(true)),
+            AbstractBool::Const(false)
+        );
+        assert_eq!(
+            AbstractBool::Const(true).abstract_not_inv(&AbstractBool::Const(true)),
+            AbstractBool::Bottom
+        );
+        assert_eq!(
+            AbstractBool::Const(true).abstract_not_inv(&AbstractBool::Top),
+            AbstractBool::Const(true)
+        );
+        assert_eq!(
+            AbstractBool::Top.abstract_not_inv(&AbstractBool::Bottom),
+            AbstractBool::Bottom
+        );
+        assert_eq!(
+            AbstractBool::Bottom.abstract_not_inv(&AbstractBool::Top),
+            AbstractBool::Bottom
+        );
     }
 
     #[test]

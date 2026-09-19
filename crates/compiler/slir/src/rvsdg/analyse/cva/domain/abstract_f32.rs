@@ -237,6 +237,15 @@ impl AbstractF32 {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of arithmetically
+    /// negating this value.
+    ///
+    /// The constraints returned include the prior constraints on the operand, not just the
+    /// additional constraints implied by the result.
+    pub fn abstract_neg_inv(&self, res: &Self) -> Self {
+        self.refine(&res.abstract_neg())
+    }
+
     /// Returns the abstract result of adding this value and `other`.
     pub fn abstract_add(&self, other: &Self) -> Self {
         abstract_binary_operation(self, other, |left, right| Some(left + right))
@@ -719,6 +728,38 @@ mod tests {
         );
         assert_eq!(AbstractF32::Top.abstract_neg(), AbstractF32::Top);
         assert_eq!(AbstractF32::Bottom.abstract_neg(), AbstractF32::Bottom);
+    }
+
+    #[test]
+    fn abstract_neg_inv() {
+        assert_eq!(
+            AbstractF32::Top.abstract_neg_inv(&AbstractF32::Const(2.0)),
+            AbstractF32::Const(-2.0)
+        );
+        assert_eq!(
+            AbstractF32::Zero.abstract_neg_inv(&AbstractF32::Const(0.0)),
+            AbstractF32::Const(-0.0)
+        );
+        assert_eq!(
+            AbstractF32::Const(2.0).abstract_neg_inv(&AbstractF32::Const(2.0)),
+            AbstractF32::Bottom
+        );
+        assert_eq!(
+            AbstractF32::Const(2.0).abstract_neg_inv(&AbstractF32::Top),
+            AbstractF32::Const(2.0)
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_neg_inv(&AbstractF32::Const(f32::INFINITY)),
+            AbstractF32::Top
+        );
+        assert_eq!(
+            AbstractF32::Top.abstract_neg_inv(&AbstractF32::Bottom),
+            AbstractF32::Bottom
+        );
+        assert_eq!(
+            AbstractF32::Bottom.abstract_neg_inv(&AbstractF32::Top),
+            AbstractF32::Bottom
+        );
     }
 
     #[test]

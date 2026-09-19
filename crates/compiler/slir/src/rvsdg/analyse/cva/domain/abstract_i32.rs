@@ -313,6 +313,15 @@ impl AbstractI32 {
         }))
     }
 
+    /// Returns the operand constraints implied by `res` being the result of arithmetically
+    /// negating this value.
+    ///
+    /// The constraints returned include the prior constraints on the operand, not just the
+    /// additional constraints implied by the result.
+    pub fn abstract_neg_inv(&self, res: &Self) -> Self {
+        self.refine(&res.abstract_neg())
+    }
+
     /// Returns the abstract result of adding `other` to this value.
     pub fn abstract_add(&self, other: &Self) -> Self {
         Self::from_intervals(self.0.iter().flat_map(|left| {
@@ -1037,6 +1046,41 @@ mod tests {
         );
         assert_eq!(AbstractI32::top().abstract_neg(), AbstractI32::top());
         assert_eq!(AbstractI32::bottom().abstract_neg(), AbstractI32::bottom());
+    }
+
+    #[test]
+    fn abstract_neg_inv() {
+        assert_eq!(
+            AbstractI32::top().abstract_neg_inv(&AbstractI32::from_intervals([3..=5])),
+            AbstractI32::from_intervals([-5..=-3])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([-5..=2])
+                .abstract_neg_inv(&AbstractI32::from_intervals([3..=5])),
+            AbstractI32::from_intervals([-5..=-3])
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN)
+                .abstract_neg_inv(&AbstractI32::from_constant(i32::MIN)),
+            AbstractI32::from_constant(i32::MIN)
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([1..=3])
+                .abstract_neg_inv(&AbstractI32::from_intervals([1..=3])),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::from_constant(1).abstract_neg_inv(&AbstractI32::top()),
+            AbstractI32::from_constant(1)
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_neg_inv(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_neg_inv(&AbstractI32::top()),
+            AbstractI32::bottom()
+        );
     }
 
     #[test]
