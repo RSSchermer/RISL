@@ -247,6 +247,23 @@ impl AbstractValue {
         }
     }
 
+    /// Returns the operand constraints implied by `res` being the result of applying `operator` to
+    /// this value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value and result types do not support `operator`.
+    pub fn abstract_unary_op_inv(&self, operator: UnaryOperator, res: &Self) -> Self {
+        use UnaryOperator::*;
+
+        match (self, operator, res) {
+            (Self::Bool(value), Not, Self::Bool(res)) => value.abstract_not_inv(res).into(),
+            (Self::F32(value), Neg, Self::F32(res)) => value.abstract_neg_inv(res).into(),
+            (Self::I32(value), Neg, Self::I32(res)) => value.abstract_neg_inv(res).into(),
+            _ => panic!("operator {operator} not supported by value and result kinds"),
+        }
+    }
+
     /// Returns the abstract result of applying `operator` to this value and `other`.
     ///
     /// # Panics
@@ -308,6 +325,170 @@ impl AbstractValue {
             (Self::U32(left), LtEq, Self::U32(right)) => left.abstract_lt_eq(right).into(),
 
             _ => panic!("operator {operator} not supported by value kinds"),
+        }
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of applying `operator` to
+    /// this value and `other`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operand and result types do not support `operator`.
+    pub fn abstract_binary_op_inv(
+        &self,
+        operator: BinaryOperator,
+        other: &Self,
+        res: &Self,
+    ) -> (Self, Self) {
+        use BinaryOperator::*;
+
+        match (self, operator, other, res) {
+            (Self::Bool(left), And, Self::Bool(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_and_inv(right, res))
+            }
+            (Self::Bool(left), Or, Self::Bool(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_or_inv(right, res))
+            }
+            (Self::Bool(left), Eq, Self::Bool(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_eq_inv(right, res))
+            }
+            (Self::Bool(left), NotEq, Self::Bool(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_not_eq_inv(right, res))
+            }
+
+            (Self::F32(left), Add, Self::F32(right), Self::F32(res)) => {
+                into_abstract_value_pair(left.abstract_add_inv(right, res))
+            }
+            (Self::F32(left), Sub, Self::F32(right), Self::F32(res)) => {
+                into_abstract_value_pair(left.abstract_sub_inv(right, res))
+            }
+            (Self::F32(left), Mul, Self::F32(right), Self::F32(res)) => {
+                into_abstract_value_pair(left.abstract_mul_inv(right, res))
+            }
+            (Self::F32(left), Div, Self::F32(right), Self::F32(res)) => {
+                into_abstract_value_pair(left.abstract_div_inv(right, res))
+            }
+            (Self::F32(left), Mod, Self::F32(right), Self::F32(res)) => {
+                into_abstract_value_pair(left.abstract_mod_inv(right, res))
+            }
+            (Self::F32(left), Eq, Self::F32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_eq_inv(right, res))
+            }
+            (Self::F32(left), NotEq, Self::F32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_not_eq_inv(right, res))
+            }
+            (Self::F32(left), Gt, Self::F32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_gt_inv(right, res))
+            }
+            (Self::F32(left), GtEq, Self::F32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_gt_eq_inv(right, res))
+            }
+            (Self::F32(left), Lt, Self::F32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_lt_inv(right, res))
+            }
+            (Self::F32(left), LtEq, Self::F32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_lt_eq_inv(right, res))
+            }
+
+            (Self::I32(left), Add, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_add_inv(right, res))
+            }
+            (Self::I32(left), Sub, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_sub_inv(right, res))
+            }
+            (Self::I32(left), Mul, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_mul_inv(right, res))
+            }
+            (Self::I32(left), Div, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_div_inv(right, res))
+            }
+            (Self::I32(left), Mod, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_mod_inv(right, res))
+            }
+            (Self::I32(left), BitOr, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_bit_or_inv(right, res))
+            }
+            (Self::I32(left), BitAnd, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_bit_and_inv(right, res))
+            }
+            (Self::I32(left), BitXor, Self::I32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_bit_xor_inv(right, res))
+            }
+            (Self::I32(left), Shl, Self::U32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_shl_inv(right, res))
+            }
+            (Self::I32(left), Shr, Self::U32(right), Self::I32(res)) => {
+                into_abstract_value_pair(left.abstract_shr_inv(right, res))
+            }
+            (Self::I32(left), Eq, Self::I32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_eq_inv(right, res))
+            }
+            (Self::I32(left), NotEq, Self::I32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_not_eq_inv(right, res))
+            }
+            (Self::I32(left), Gt, Self::I32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_gt_inv(right, res))
+            }
+            (Self::I32(left), GtEq, Self::I32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_gt_eq_inv(right, res))
+            }
+            (Self::I32(left), Lt, Self::I32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_lt_inv(right, res))
+            }
+            (Self::I32(left), LtEq, Self::I32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_lt_eq_inv(right, res))
+            }
+
+            (Self::U32(left), Add, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_add_inv(right, res))
+            }
+            (Self::U32(left), Sub, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_sub_inv(right, res))
+            }
+            (Self::U32(left), Mul, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_mul_inv(right, res))
+            }
+            (Self::U32(left), Div, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_div_inv(right, res))
+            }
+            (Self::U32(left), Mod, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_mod_inv(right, res))
+            }
+            (Self::U32(left), BitOr, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_bit_or_inv(right, res))
+            }
+            (Self::U32(left), BitAnd, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_bit_and_inv(right, res))
+            }
+            (Self::U32(left), BitXor, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_bit_xor_inv(right, res))
+            }
+            (Self::U32(left), Shl, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_shl_inv(right, res))
+            }
+            (Self::U32(left), Shr, Self::U32(right), Self::U32(res)) => {
+                into_abstract_value_pair(left.abstract_shr_inv(right, res))
+            }
+            (Self::U32(left), Eq, Self::U32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_eq_inv(right, res))
+            }
+            (Self::U32(left), NotEq, Self::U32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_not_eq_inv(right, res))
+            }
+            (Self::U32(left), Gt, Self::U32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_gt_inv(right, res))
+            }
+            (Self::U32(left), GtEq, Self::U32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_gt_eq_inv(right, res))
+            }
+            (Self::U32(left), Lt, Self::U32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_lt_inv(right, res))
+            }
+            (Self::U32(left), LtEq, Self::U32(right), Self::Bool(res)) => {
+                into_abstract_value_pair(left.abstract_lt_eq_inv(right, res))
+            }
+
+            _ => panic!("operator {operator} not supported by operand and result kinds"),
         }
     }
 
@@ -479,6 +660,14 @@ impl AbstractValue {
             _ => None,
         }
     }
+}
+
+fn into_abstract_value_pair<L, R>((left, right): (L, R)) -> (AbstractValue, AbstractValue)
+where
+    L: Into<AbstractValue>,
+    R: Into<AbstractValue>,
+{
+    (left.into(), right.into())
 }
 
 macro_rules! impl_from_abstract_value {
