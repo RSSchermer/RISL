@@ -11,7 +11,7 @@ use rustc_public::abi::{
 };
 use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::target::MachineSize;
-use rustc_public::ty::{Align, Span, VariantIdx};
+use rustc_public::ty::{Align, IntTy, RigidTy, Span, TyKind, VariantIdx};
 use rustc_public_bridge::IndexedVal;
 use slir::cfg::BlockPosition;
 use smallvec::{SmallVec, smallvec};
@@ -343,38 +343,74 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         else_llbb: Self::BasicBlock,
         cases: impl IntoIterator<Item = (u128, Self::BasicBlock)>,
     ) {
+        let abi::ValueAbi::Scalar(scalar) = layout.layout.abi else {
+            bug!("expected scalar layout for switch discriminant");
+        };
+
+        let Primitive::Int { mut length, signed } = *scalar.primitive() else {
+            bug!("expected integer primitive for switch discriminant");
+        };
+
+        // We allow isize and usize integer values, but currently always use a 32-bit actual size
+        // on the GPU. This does not need to match the CPU isize/usize actual size, which may be
+        // 16-bit, 32-bit or 64-bit. If the CPU size is different, then we'll adjust the case
+        // encodings.
+        let is_pointer_size = if let TyKind::RigidTy(ty) = layout.ty.kind() {
+            matches!(ty, RigidTy::Int(IntTy::Isize))
+        } else {
+            false
+        };
+
         let mut predicate_cases = vec![];
         let mut branches: SmallVec<[_; 2]> = smallvec![];
 
         // Note: this loop has to run before we borrow the `cfg` below, as the `cases` iterator will
         // actually call [Builder::append_block], which will also want to borrow the `cfg`, leading
         // to an "already borrowed" error.
-        for (case, branch) in cases {
+        for (mut case, branch) in cases {
+            if is_pointer_size {
+                // Adjust the case value if the pointer-size is not 32 bits.
+                if signed {
+                    case = match length {
+                        IntegerLength::I16 => case as u16 as i16 as i32 as u32 as u128,
+                        IntegerLength::I32 => case,
+                        IntegerLength::I64 => {
+                            let case = case as u64 as i64;
+                            let case = i32::try_from(case).expect(
+                                "earlier checks should not allow static isize values to overflow \
+                                i32",
+                            );
+
+                            case as u32 as u128
+                        }
+                        _ => unreachable!("not a valid pointer size"),
+                    };
+                } else {
+                    case = u32::try_from(case).expect(
+                        "earlier checks should not allow static usize values to overflow u32",
+                    ) as u128;
+                }
+            }
+
             predicate_cases.push(case);
             branches.push(branch);
         }
 
-        // TODO: in our current examples the else block is always an "unreachable" block, which the
-        // RVSDG construction algorithm doesn't like. Figure our if we can just always omit the else
-        // block or if we need to handle unreachable blocks.
         branches.push(else_llbb);
 
-        let abi::ValueAbi::Scalar(scalar) = layout.layout.abi else {
-            bug!("expected scalar layout for switch discriminant");
-        };
+        if is_pointer_size {
+            length = IntegerLength::I32;
+        }
 
-        let encoding = match scalar.primitive() {
-            Primitive::Int { length, signed } => slir::ty::Int {
-                size: match length {
-                    IntegerLength::I8 => slir::ty::IntSize::I8,
-                    IntegerLength::I16 => slir::ty::IntSize::I16,
-                    IntegerLength::I32 => slir::ty::IntSize::I32,
-                    IntegerLength::I64 => slir::ty::IntSize::I64,
-                    IntegerLength::I128 => slir::ty::IntSize::I128,
-                },
-                signed: *signed,
+        let encoding = slir::ty::Int {
+            size: match length {
+                IntegerLength::I8 => slir::ty::IntSize::I8,
+                IntegerLength::I16 => slir::ty::IntSize::I16,
+                IntegerLength::I32 => slir::ty::IntSize::I32,
+                IntegerLength::I64 => slir::ty::IntSize::I64,
+                IntegerLength::I128 => slir::ty::IntSize::I128,
             },
-            _ => bug!("expected integer primitive for switch discriminant"),
+            signed,
         };
 
         let mut cfg = self.cfg.borrow_mut();
