@@ -59,10 +59,10 @@
 //! [4]: crate::cfg::Branch::selector
 //! [5]: crate::cfg::Branch::targets
 
-use crate::Function;
 use crate::cfg::analyze::predecessors::predecessors;
 use crate::cfg::{BranchSelector, Cfg, Terminator};
 use crate::ty::Int;
+use crate::{BranchCase, Function};
 
 pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
     loop {
@@ -135,7 +135,9 @@ pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
                                 // The unreachable block is not the last target, convert to a Case
                                 // selector.
 
-                                let mut cases: Vec<u128> = (0..targets.len() as u128 - 1).collect();
+                                let mut cases: Vec<BranchCase> = (0..targets.len() as u32 - 1)
+                                    .map(BranchCase::from)
+                                    .collect();
                                 cases.remove(target_index);
 
                                 cfg.set_terminator(
@@ -298,7 +300,12 @@ mod tests {
 
         cfg.set_terminator(
             bb_entry,
-            Terminator::branch_case(Int::U32, arg0, [0, 1], [bb0, bb1, bb_unreachable]),
+            Terminator::branch_case(
+                Int::U32,
+                arg0,
+                [0u32, 1].map(BranchCase::from),
+                [bb0, bb1, bb_unreachable],
+            ),
         );
         cfg.set_terminator(bb0, Terminator::return_void());
         cfg.set_terminator(bb1, Terminator::return_void());
@@ -311,7 +318,7 @@ mod tests {
         let branch = cfg[bb_entry].terminator().expect_branch();
 
         if let BranchSelector::Case { cases, .. } = branch.selector() {
-            assert_eq!(cases.as_slice(), &[0u128]);
+            assert_eq!(cases.as_slice(), &[BranchCase::from(0u32)]);
             assert_eq!(branch.targets(), &[bb0, bb1]);
         } else {
             panic!("expected case selector");
@@ -353,7 +360,12 @@ mod tests {
 
         cfg.set_terminator(
             bb_entry,
-            Terminator::branch_case(Int::U32, arg0, [0, 1, 2], [bb0, bb_unreachable, bb2, bb3]),
+            Terminator::branch_case(
+                Int::U32,
+                arg0,
+                [0u32, 1, 2].map(BranchCase::from),
+                [bb0, bb_unreachable, bb2, bb3],
+            ),
         );
         cfg.set_terminator(bb0, Terminator::return_void());
         cfg.set_terminator(bb_unreachable, Terminator::Unreachable);
@@ -367,7 +379,10 @@ mod tests {
         let branch = cfg[bb_entry].terminator().expect_branch();
 
         if let BranchSelector::Case { cases, .. } = branch.selector() {
-            assert_eq!(cases.as_slice(), &[0u128, 2]);
+            assert_eq!(
+                cases.as_slice(),
+                &[BranchCase::from(0u32), BranchCase::from(2u32)]
+            );
             assert_eq!(branch.targets(), &[bb0, bb2, bb3]);
         } else {
             panic!("expected case selector");
@@ -473,7 +488,10 @@ mod tests {
         let branch = cfg[bb_entry].terminator().expect_branch();
 
         if let BranchSelector::Case { cases, .. } = branch.selector() {
-            assert_eq!(cases.as_slice(), &[0u128, 2]);
+            assert_eq!(
+                cases.as_slice(),
+                &[BranchCase::from(0u32), BranchCase::from(2u32)]
+            );
             assert_eq!(branch.targets(), &[bb0, bb2, bb3]);
         } else {
             panic!("expected case selector");

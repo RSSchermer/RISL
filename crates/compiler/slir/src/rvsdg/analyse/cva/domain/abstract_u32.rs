@@ -3,6 +3,7 @@ use core::ops::RangeInclusive;
 use smallvec::SmallVec;
 
 use super::{AbstractBool, AbstractF32, AbstractI32, MAX_INTEGER_INTERVALS};
+use crate::BranchCase;
 
 const TOP_INTERVALS: &[RangeInclusive<u32>] = &[0..=u32::MAX];
 const U32_MODULUS: i128 = 1i128 << 32;
@@ -255,7 +256,7 @@ impl AbstractU32 {
     ///
     /// Encodings outside the 32-bit domain are ignored. If exact exclusion would require more than
     /// [`MAX_INTEGER_INTERVALS`] intervals, `self` is retained.
-    pub fn exclude_cases(&self, cases: &[u128]) -> Self {
+    pub fn exclude_cases(&self, cases: &[BranchCase]) -> Self {
         let mut cases: Vec<_> = cases
             .iter()
             .filter_map(|&value| u32::try_from(value).ok())
@@ -642,7 +643,7 @@ impl AbstractU32 {
                 let exclude_singleton = |value: &Self, other: &Self| {
                     other.to_singleton().map_or_else(
                         || value.clone(),
-                        |other| value.exclude_cases(&[other as u128]),
+                        |other| value.exclude_cases(&[BranchCase::from(other)]),
                     )
                 };
 
@@ -994,17 +995,20 @@ mod tests {
         let value = AbstractU32::from_intervals([0..=10]);
 
         assert_eq!(
-            value.exclude_cases(&[0, 2, 10]),
+            value.exclude_cases(&[0u32, 2, 10].map(BranchCase::from)),
             AbstractU32::from_intervals([1..=1, 3..=9])
         );
         assert_eq!(
-            AbstractU32::from_constant(4).exclude_cases(&[4]),
+            AbstractU32::from_constant(4).exclude_cases(&[BranchCase::from(4u32)]),
             AbstractU32::bottom()
         );
 
         let wide_value = AbstractU32::from_intervals([0..=10]);
 
-        assert_eq!(wide_value.exclude_cases(&[1, 3, 5, 7]), wide_value);
+        assert_eq!(
+            wide_value.exclude_cases(&[1u32, 3, 5, 7].map(BranchCase::from)),
+            wide_value
+        );
     }
 
     #[test]

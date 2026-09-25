@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::{ValueInput, ValueOutput};
     use crate::ty::{Int, TY_DUMMY, TY_PREDICATE, TY_U32};
-    use crate::{FnSig, Function, Module, Symbol};
+    use crate::{BranchCase, FnSig, Function, Module, Symbol};
 
     #[test]
     fn retained_branches_do_not_include_default() {
@@ -102,7 +102,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, selector_value, 0),
             Int::U32,
-            [0, 1, 2],
+            [0u32, 1, 2].map(BranchCase::from),
         );
         let switch = rvsdg.add_switch(
             body,
@@ -135,7 +135,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[selector].expect_op_case_to_branch_selector().cases(),
-            &[0]
+            &[BranchCase::from(0u32)]
         );
     }
 
@@ -165,7 +165,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, selector_value, 0),
             Int::U32,
-            [0, 1, 2],
+            [0u32, 1, 2].map(BranchCase::from),
         );
         let switch = rvsdg.add_switch(
             body,
@@ -197,7 +197,7 @@ mod tests {
 
         assert_eq!(
             rvsdg[selector].expect_op_case_to_branch_selector().cases(),
-            &[1, 2]
+            &[BranchCase::from(1u32), BranchCase::from(2u32)]
         );
     }
 }

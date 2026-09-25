@@ -937,7 +937,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::ValueOutput;
     use crate::ty::{Int, TY_DUMMY, TY_PREDICATE, TypeKind};
-    use crate::{FnSig, Function, Module, Symbol};
+    use crate::{BranchCase, FnSig, Function, Module, Symbol};
 
     #[test]
     fn test_self_recurrence_through_switch() {
@@ -992,7 +992,7 @@ mod tests {
             loop_region,
             ValueInput::output(TY_U32, case_node, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let switch_node = rvsdg.add_switch(
             loop_region,
@@ -1729,7 +1729,7 @@ mod tests {
             loop_region,
             ValueInput::output(TY_U32, case_node, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let switch_node = rvsdg.add_switch(
             loop_region,

@@ -1,3 +1,4 @@
+use crate::BranchCase;
 use crate::rvsdg::{Node, NodeKind, Region, Rvsdg, SimpleNode};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -39,10 +40,10 @@ impl ScalarConstant {
         }
     }
 
-    pub fn integer_encoding(self) -> Option<u128> {
+    pub fn case_encoding(self) -> Option<BranchCase> {
         match self {
-            Self::U32(value) => Some(value as u128),
-            Self::I32(value) => Some(value as u32 as u128),
+            Self::U32(value) => Some(BranchCase::from(value)),
+            Self::I32(value) => Some(BranchCase::from(value)),
             _ => None,
         }
     }

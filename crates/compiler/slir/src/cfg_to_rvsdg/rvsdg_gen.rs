@@ -21,7 +21,7 @@ use crate::cfg_to_rvsdg::control_tree::{
 use crate::intrinsic::Intrinsic;
 use crate::rvsdg::{Node, Region, Rvsdg, StateOrigin, ValueInput, ValueOrigin, ValueOutput};
 use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type};
-use crate::{Function, Module, rvsdg};
+use crate::{BranchCase, Function, Module, rvsdg};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum InputState {
@@ -196,7 +196,7 @@ impl<'a> RegionBuilder<'a> {
                 self.region,
                 self.input_state_tracker[*value],
                 Int::U32,
-                0..(data.branches.len() as u128 - 1),
+                (0..data.branches.len() as u32 - 1).map(BranchCase::from),
             ),
             BranchSelector::Single => unreachable!(
                 "a basic-block with a single branch terminator should not lead into a branching \
@@ -848,7 +848,7 @@ mod tests {
             region,
             ValueInput::argument(TY_U32, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let switch_node = expected.add_switch(
             region,

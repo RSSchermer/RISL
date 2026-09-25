@@ -112,7 +112,7 @@ pub fn Switch(statement: slir::scf::Statement) -> impl IntoView {
 
                     stmt.cases().iter().map(|case| {
                         view! {
-                            "case "{case.case()}": {"<br/>
+                            "case "{case.case().to_string()}": {"<br/>
                                 <Block block=case.block()/>
                             "}"<br/>
                         }

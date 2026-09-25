@@ -237,7 +237,7 @@ mod tests {
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueInput, ValueOutput};
     use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TY_U32};
-    use crate::{FnSig, Function, Symbol};
+    use crate::{BranchCase, FnSig, Function, Symbol};
 
     #[test]
     fn test_conditional_ub_elimination_bool() {
@@ -351,7 +351,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, val, 0),
             Int::U32,
-            vec![2, 0, 1],
+            [2u32, 0, 1].map(BranchCase::from),
         );
 
         let switch = rvsdg.add_switch(
@@ -444,7 +444,7 @@ mod tests {
             panic!("expected branch selector to be an output")
         };
         let cases = rvsdg[selector].expect_op_case_to_branch_selector().cases();
-        assert_eq!(cases, &[2]);
+        assert_eq!(cases, &[BranchCase::from(2u32)]);
     }
 
     #[test]

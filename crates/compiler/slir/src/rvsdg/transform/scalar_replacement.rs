@@ -193,7 +193,7 @@ use crate::rvsdg::{
     ValueOutput, ValueUser, visit,
 };
 use crate::ty::{Int, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
-use crate::{AllocId, Constant, ConstantKind, Module};
+use crate::{AllocId, BranchCase, Constant, ConstantKind, Module};
 
 enum SwitchOutputSplitKind {
     Struct,
@@ -742,7 +742,9 @@ impl Replacer<'_, '_, '_> {
                         origin: selector,
                     },
                     Int::U32,
-                    0..(split_input.len() as u128 - 1),
+                    (0..split_input.len() - 1).map(|i| {
+                        BranchCase::from(u32::try_from(i).expect("element index must fit a u32"))
+                    }),
                 );
                 let mut switch_inputs = Vec::with_capacity(split_input.len() + 1);
 
@@ -831,7 +833,9 @@ impl Replacer<'_, '_, '_> {
                         origin: selector,
                     },
                     Int::U32,
-                    0..(split_input.len() as u128 - 1),
+                    (0..split_input.len() - 1).map(|i| {
+                        BranchCase::from(u32::try_from(i).expect("element index must fit a u32"))
+                    }),
                 );
                 let mut switch_inputs = Vec::with_capacity(split_input.len() + 1);
 
@@ -2230,7 +2234,7 @@ mod tests {
             to_predicate_data.value_input().origin,
             ValueOrigin::Argument(0)
         );
-        assert_eq!(to_predicate_data.cases(), &[0]);
+        assert_eq!(to_predicate_data.cases(), &[BranchCase::from(0u32)]);
 
         assert_eq!(switch.value_inputs()[1].ty, element_ptr_ty);
 

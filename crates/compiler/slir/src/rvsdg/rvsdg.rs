@@ -16,8 +16,8 @@ use crate::intrinsic::Intrinsic;
 use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_PREDICATE, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::util::thin_set::ThinSet;
 use crate::{
-    BinaryOperator, Constant, Function, Module, StorageBinding, UnaryOperator, UniformBinding,
-    WorkgroupBinding, intrinsic, thin_set, ty,
+    BinaryOperator, BranchCase, Constant, Function, Module, StorageBinding, UnaryOperator,
+    UniformBinding, WorkgroupBinding, intrinsic, thin_set, ty,
 };
 
 /// Common interface that all nodes implement to describe how they are connected to other elements
@@ -1694,7 +1694,7 @@ impl OpCaseToBranchSelector {
         self.intrinsic.encoding
     }
 
-    pub fn cases(&self) -> &[u128] {
+    pub fn cases(&self) -> &[BranchCase] {
         &self.intrinsic.cases
     }
 
@@ -1716,7 +1716,7 @@ impl OpBranchSelectorToCase {
         self.intrinsic.encoding
     }
 
-    pub fn cases(&self) -> &[u128] {
+    pub fn cases(&self) -> &[BranchCase] {
         &self.intrinsic.cases
     }
 
@@ -3633,7 +3633,7 @@ impl Rvsdg {
         region: Region,
         input: ValueInput,
         encoding: Int,
-        cases: impl IntoIterator<Item = u128>,
+        cases: impl IntoIterator<Item = BranchCase>,
     ) -> Node {
         self.add_intrinsic_op(
             region,
@@ -3668,7 +3668,7 @@ impl Rvsdg {
         region: Region,
         input: ValueInput,
         encoding: Int,
-        cases: impl IntoIterator<Item = u128>,
+        cases: impl IntoIterator<Item = BranchCase>,
     ) -> Node {
         self.add_intrinsic_op(
             region,

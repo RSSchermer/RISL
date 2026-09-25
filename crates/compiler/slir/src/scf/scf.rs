@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 use crate::intrinsic::Intrinsic;
 use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{
-    BinaryOperator, Constant, ConstantRegistry, Function, Module, StorageBinding,
+    BinaryOperator, BranchCase, Constant, ConstantRegistry, Function, Module, StorageBinding,
     StorageBindingRegistry, UnaryOperator, UniformBinding, UniformBindingRegistry,
     WorkgroupBinding, WorkgroupBindingRegistry, intrinsic, ty,
 };
@@ -886,12 +886,12 @@ impl If {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SwitchCase {
-    case: u128,
+    case: BranchCase,
     block: Block,
 }
 
 impl SwitchCase {
-    pub fn case(&self) -> u128 {
+    pub fn case(&self) -> BranchCase {
         self.case
     }
 
@@ -2204,7 +2204,7 @@ impl Scf {
         }
     }
 
-    pub fn add_switch_case(&mut self, switch_statement: Statement, case: u128) -> Block {
+    pub fn add_switch_case(&mut self, switch_statement: Statement, case: BranchCase) -> Block {
         let stmt = self.statements[switch_statement].kind.expect_switch_mut();
 
         if stmt.cases.iter().any(|c| c.case == case) {
@@ -2232,7 +2232,7 @@ impl Scf {
         case_block
     }
 
-    pub fn remove_switch_case(&mut self, switch_statement: Statement, case: u128) -> bool {
+    pub fn remove_switch_case(&mut self, switch_statement: Statement, case: BranchCase) -> bool {
         let stmt = self.statements[switch_statement].kind.expect_switch_mut();
 
         if let Some(index) = stmt.cases.iter().position(|c| c.case == case) {

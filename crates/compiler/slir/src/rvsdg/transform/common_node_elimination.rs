@@ -6,7 +6,7 @@ use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, visit,
 };
 use crate::ty::{Int, Matrix, Type, Vector};
-use crate::{BinaryOperator, UnaryOperator};
+use crate::{BinaryOperator, BranchCase, UnaryOperator};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum SimpleNodeMetadata {
@@ -63,9 +63,9 @@ enum SimpleNodeMetadata {
     OpToDegrees,
     OpVector(Vector),
     OpMatrix(Matrix),
-    OpCaseToBranchSelector(Int, Vec<u128>),
+    OpCaseToBranchSelector(Int, Vec<BranchCase>),
     OpBoolToBranchSelector,
-    OpBranchSelectorToCase(Int, Vec<u128>),
+    OpBranchSelectorToCase(Int, Vec<BranchCase>),
     OpConvertToU32,
     OpConvertToI32,
     OpConvertToF32,

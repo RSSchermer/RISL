@@ -47,7 +47,7 @@ use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::rvsdg::transform::region_replication::inline_switch_branch;
 use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
-use crate::{Function, Module};
+use crate::{BranchCase, Function, Module};
 
 type ValueKey = (Region, ValueOrigin);
 type FeasibleBranches = SmallVec<[usize; 4]>;
@@ -66,7 +66,7 @@ enum ValueConstraint {
     Const(ScalarConstant),
 
     /// The value is known not to be in the given set of values.
-    NotIn(SmallVec<[u128; 4]>),
+    NotIn(SmallVec<[BranchCase; 4]>),
 
     /// The value would reflect an impossibility.
     ///
@@ -98,7 +98,7 @@ impl ValueConstraint {
             }
             (Const(value), NotIn(values)) | (NotIn(values), Const(value)) => {
                 if value
-                    .integer_encoding()
+                    .case_encoding()
                     .is_some_and(|value| values.contains(&value))
                 {
                     Impossible
@@ -382,7 +382,7 @@ enum BranchSelectorInfo<'a> {
     Bool(ValueOrigin),
     Case {
         source: ValueOrigin,
-        cases: &'a [u128],
+        cases: &'a [BranchCase],
         signed: bool,
     },
 }
@@ -447,9 +447,13 @@ fn branch_selector_constraint(
         } => {
             let fact = if let Some(&case) = cases.get(branch) {
                 let constant = if signed {
-                    ScalarConstant::I32(case as u32 as i32)
+                    ScalarConstant::I32(
+                        i32::try_from(case).expect("signed selector case must fit an i32"),
+                    )
                 } else {
-                    ScalarConstant::U32(case as u32)
+                    ScalarConstant::U32(
+                        u32::try_from(case).expect("unsigned selector case must fit a u32"),
+                    )
                 };
 
                 ValueConstraint::Const(constant)
@@ -949,7 +953,7 @@ impl CorrelatedSwitchSimplifier {
             BranchSelectorInfo::Case { source, cases, .. } => {
                 match self.eval(rvsdg, outer_region, source) {
                     ValueConstraint::Const(constant) => {
-                        if let Some(value) = constant.integer_encoding() {
+                        if let Some(value) = constant.case_encoding() {
                             let selected = cases
                                 .iter()
                                 .position(|case| *case == value)
@@ -1161,7 +1165,7 @@ mod tests {
             body,
             ValueInput::argument(TY_U32, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let outer_switch = rvsdg.add_switch(
             body,
@@ -1190,7 +1194,7 @@ mod tests {
             outer_branch_1,
             ValueInput::argument(TY_U32, 0),
             Int::U32,
-            [0, 1, 2],
+            [0u32, 1, 2].map(BranchCase::from),
         );
         let inner_switch = rvsdg.add_switch(
             outer_branch_1,
@@ -1285,7 +1289,7 @@ mod tests {
             rvsdg[new_selector]
                 .expect_op_case_to_branch_selector()
                 .cases(),
-            &[1, 2]
+            &[BranchCase::from(1u32), BranchCase::from(2u32)]
         );
     }
 
@@ -1368,7 +1372,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, upstream_switch, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let outer_switch = rvsdg.add_switch(
             body,
@@ -1386,7 +1390,7 @@ mod tests {
             outer_branch_0,
             ValueInput::argument(TY_U32, 0),
             Int::U32,
-            [10],
+            [BranchCase::from(10u32)],
         );
         let inner_switch = rvsdg.add_switch(
             outer_branch_0,
@@ -1578,7 +1582,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, upstream_switch, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let outer_switch = rvsdg.add_switch(
             body,
@@ -1700,7 +1704,7 @@ mod tests {
             body,
             ValueInput::argument(TY_U32, 0),
             Int::U32,
-            [0, 1],
+            [0u32, 1].map(BranchCase::from),
         );
         let producer_switch = rvsdg.add_switch(
             body,
@@ -1776,7 +1780,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, producer_switch, 1),
             Int::U32,
-            [1],
+            [BranchCase::from(1u32)],
         );
         let outer_switch = rvsdg.add_switch(
             body,
@@ -1805,7 +1809,7 @@ mod tests {
             outer_default_branch,
             ValueInput::argument(TY_U32, 0),
             Int::U32,
-            [2],
+            [BranchCase::from(2u32)],
         );
         let inner_switch = rvsdg.add_switch(
             outer_default_branch,
@@ -1936,7 +1940,7 @@ mod tests {
             body,
             ValueInput::output(TY_U32, producer_switch, 0),
             Int::U32,
-            [1],
+            [BranchCase::from(1u32)],
         );
         let consumer_switch = rvsdg.add_switch(
             body,

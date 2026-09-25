@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::BranchCase;
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{Int, TY_PREDICATE, Type, TypeRegistry};
 
@@ -12,7 +13,7 @@ use crate::ty::{Int, TY_PREDICATE, Type, TypeRegistry};
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpCaseToBranchSelector {
     pub encoding: Int,
-    pub cases: Vec<u128>,
+    pub cases: Vec<BranchCase>,
 }
 
 impl Intrinsic for OpCaseToBranchSelector {

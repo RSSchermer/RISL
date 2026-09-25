@@ -54,8 +54,14 @@ fn try_switchify_pred_to_case(rvsdg: &mut Rvsdg, node: Node) {
         let branch_region = rvsdg.add_switch_branch(switch_node);
 
         let const_node = match encoding.backend_ty() {
-            ty::TY_U32 => rvsdg.add_const_u32(branch_region, case_value as u32),
-            ty::TY_I32 => rvsdg.add_const_i32(branch_region, case_value as i32),
+            ty::TY_U32 => rvsdg.add_const_u32(
+                branch_region,
+                u32::try_from(case_value).expect("unsigned branch case must fit a u32"),
+            ),
+            ty::TY_I32 => rvsdg.add_const_i32(
+                branch_region,
+                i32::try_from(case_value).expect("signed branch case must fit an i32"),
+            ),
             _ => panic!("invalid backend ty"),
         };
 
@@ -125,8 +131,8 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{ValueInput, ValueOrigin};
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_U32};
-    use crate::{FnSig, Symbol};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_I32, TY_PREDICATE, TY_U32};
+    use crate::{BranchCase, FnSig, Symbol};
 
     #[test]
     fn test_switchify_pred_to_case() {
@@ -154,7 +160,7 @@ mod tests {
         let bool_pred_node =
             rvsdg.add_op_bool_to_branch_selector(region, ValueInput::output(TY_BOOL, bool_node, 0));
 
-        let cases = [10u128, 20, 30];
+        let cases = [10u32, 20, 30].map(BranchCase::from);
         let pred_to_case_node = rvsdg.add_op_branch_selector_to_case(
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
@@ -201,7 +207,7 @@ mod tests {
 
             let const_data = rvsdg[const_node].expect_const_u32();
 
-            assert_eq!(const_data.value() as u128, expected_case);
+            assert_eq!(BranchCase::from(const_data.value()), expected_case);
         }
 
         assert!(

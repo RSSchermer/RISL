@@ -3,6 +3,7 @@ use core::ops::RangeInclusive;
 use smallvec::SmallVec;
 
 use super::{AbstractBool, AbstractF32, AbstractU32, MAX_INTEGER_INTERVALS};
+use crate::BranchCase;
 
 const TOP_INTERVALS: &[RangeInclusive<i32>] = &[i32::MIN..=i32::MAX];
 const I32_MODULUS: i64 = 1i64 << 32;
@@ -262,11 +263,10 @@ impl AbstractI32 {
     ///
     /// Encodings outside the 32-bit domain are ignored. If exact exclusion would require more than
     /// [`MAX_INTEGER_INTERVALS`] intervals, `self` is retained.
-    pub fn exclude_cases(&self, cases: &[u128]) -> Self {
+    pub fn exclude_cases(&self, cases: &[BranchCase]) -> Self {
         let mut cases: Vec<_> = cases
             .iter()
-            .filter_map(|&value| u32::try_from(value).ok())
-            .map(|value| value as i32)
+            .filter_map(|&value| i32::try_from(value).ok())
             .collect();
         cases.sort_unstable();
         cases.dedup();
@@ -668,7 +668,7 @@ impl AbstractI32 {
                 let exclude_singleton = |value: &Self, other: &Self| {
                     other.to_singleton().map_or_else(
                         || value.clone(),
-                        |other| value.exclude_cases(&[other as u32 as u128]),
+                        |other| value.exclude_cases(&[BranchCase::from(other)]),
                     )
                 };
 
@@ -1020,16 +1020,16 @@ mod tests {
         let value = AbstractI32::from_intervals([-3..=3]);
 
         assert_eq!(
-            value.exclude_cases(&[u128::from(u32::MAX), 0]),
+            value.exclude_cases(&[BranchCase::from(-1i32), BranchCase::from(0i32)]),
             AbstractI32::from_intervals([-3..=-2, 1..=3])
         );
         assert_eq!(
-            AbstractI32::from_constant(-1).exclude_cases(&[u128::from(u32::MAX)]),
+            AbstractI32::from_constant(-1).exclude_cases(&[BranchCase::from(-1i32)]),
             AbstractI32::bottom()
         );
 
         let wide_value = AbstractI32::from_intervals([-10..=10]);
-        let cases = [-7i32, -3, 1, 5].map(|value| u128::from(value as u32));
+        let cases = [-7i32, -3, 1, 5].map(BranchCase::from);
 
         assert_eq!(wide_value.exclude_cases(&cases), wide_value);
     }

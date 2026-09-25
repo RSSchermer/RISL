@@ -18,12 +18,12 @@ use std::mem;
 
 use rustc_hash::FxHashMap;
 
-use crate::Module;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, visit,
 };
 use crate::ty::{Int, TY_BOOL, TY_U32};
+use crate::{BranchCase, Module};
 
 #[derive(Clone, Debug)]
 enum ResolvedValue {
@@ -32,7 +32,7 @@ enum ResolvedValue {
     Case {
         encoding: Int,
         value: ValueInput,
-        cases: Vec<u128>,
+        cases: Vec<BranchCase>,
     },
     Constant(u32),
     Index(ValueInput),
@@ -142,9 +142,9 @@ impl ResolvedValue {
     }
 }
 
-fn is_identity_mapping(cases: &[u128]) -> bool {
+fn is_identity_mapping(cases: &[BranchCase]) -> bool {
     for (i, &case) in cases.iter().enumerate() {
-        if case != i as u128 {
+        if case != BranchCase::from(i as u128) {
             return false;
         }
     }
@@ -548,7 +548,8 @@ impl BranchSelectorNormalizer {
 
         if needs_normalization {
             let resolved = self.resolve_value(rvsdg, region, origin);
-            let branch_count = rvsdg[switch_node].expect_switch().branches().len() as u32;
+            let branch_count = u32::try_from(rvsdg[switch_node].expect_switch().branches().len())
+                .expect("switch branch count must fit a u32");
 
             let normalization_node = match resolved {
                 ResolvedValue::Bool(value) => rvsdg.add_op_bool_to_branch_selector(region, value),
@@ -566,7 +567,7 @@ impl BranchSelectorNormalizer {
                         )
                     } else {
                         let value = rvsdg.add_const_u32(region, n);
-                        let cases: Vec<_> = (0..branch_count - 1).map(|i| i as u128).collect();
+                        let cases: Vec<_> = (0..branch_count - 1).map(BranchCase::from).collect();
 
                         rvsdg.add_op_case_to_branch_selector(
                             region,
@@ -577,7 +578,7 @@ impl BranchSelectorNormalizer {
                     }
                 }
                 ResolvedValue::Index(value) => {
-                    let cases: Vec<_> = (0..branch_count - 1).map(|i| i as u128).collect();
+                    let cases: Vec<_> = (0..branch_count - 1).map(BranchCase::from).collect();
 
                     rvsdg.add_op_case_to_branch_selector(region, value, Int::U32, cases)
                 }
@@ -1278,7 +1279,7 @@ mod tests {
             b1,
             ValueInput::output(TY_U32, b1_val, 0),
             Int::U32,
-            vec![0],
+            vec![BranchCase::from(0u32)],
         );
         rvsdg.reconnect_region_result(
             b1,
@@ -1313,7 +1314,7 @@ mod tests {
         // Folded value should be Index
         assert!(rvsdg[producer].is_op_case_to_branch_selector());
         let cases = rvsdg[producer].expect_op_case_to_branch_selector().cases();
-        assert_eq!(cases, &[0]);
+        assert_eq!(cases, &[BranchCase::from(0u32)]);
         let input = rvsdg[producer].value_inputs()[0];
         assert_eq!(input.ty, TY_U32);
         let ValueOrigin::Output {
@@ -1424,7 +1425,7 @@ mod tests {
             b1,
             ValueInput::output(TY_U32, b1_val, 0),
             Int::U32,
-            vec![0, 1], // Identity mapping for 3 branches
+            vec![BranchCase::from(0u32), BranchCase::from(1u32)], // Identity mapping for 3 branches
         );
         rvsdg.reconnect_region_result(
             b1,
@@ -1456,7 +1457,7 @@ mod tests {
         // Folded value should be Index
         assert!(rvsdg[producer].is_op_case_to_branch_selector());
         let cases = rvsdg[producer].expect_op_case_to_branch_selector().cases();
-        assert_eq!(cases, &[0, 1]);
+        assert_eq!(cases, &[BranchCase::from(0u32), BranchCase::from(1u32)]);
         let input = rvsdg[producer].value_inputs()[0];
         assert_eq!(input.ty, TY_U32);
         let ValueOrigin::Output {

@@ -1,7 +1,7 @@
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Rvsdg, SimpleNode, ValueOrigin, visit};
 use crate::ty::Int;
-use crate::{Function, Module, ty};
+use crate::{BranchCase, Function, Module, ty};
 
 struct NodeCollector<'a> {
     candidates: &'a mut Vec<Node>,
@@ -51,8 +51,8 @@ fn try_extract_pred_to_case(rvsdg: &mut Rvsdg, switch_node: Node) {
             } = rvsdg[*branch].value_results()[output].origin
             {
                 match rvsdg[producer].kind() {
-                    Simple(ConstU32(n)) => cases.push(n.value() as u128),
-                    Simple(ConstI32(n)) => cases.push(n.value() as u128),
+                    Simple(ConstU32(n)) => cases.push(BranchCase::from(n.value())),
+                    Simple(ConstI32(n)) => cases.push(BranchCase::from(n.value())),
                     _ => {}
                 }
             }

@@ -5,7 +5,7 @@ use crate::cfg::{
     Statement, StatementData, Terminator, Value,
 };
 use crate::ty::Type;
-use crate::{Constant, Function, StorageBinding, UniformBinding, WorkgroupBinding};
+use crate::{BranchCase, Constant, Function, StorageBinding, UniformBinding, WorkgroupBinding};
 
 pub type Result = std::io::Result<()>;
 
@@ -1051,7 +1051,7 @@ fn write_branch_selector_u32<W: Write>(w: &mut W, val: LocalBinding, branch: &Br
 fn write_branch_selector_case<W: Write>(
     w: &mut W,
     value: LocalBinding,
-    cases: &[u128],
+    cases: &[BranchCase],
     branch: &Branch,
 ) -> Result {
     write!(w, "case ")?;

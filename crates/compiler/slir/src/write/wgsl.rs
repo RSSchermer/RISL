@@ -749,9 +749,9 @@ impl WgslModuleWriter {
             self.write_newline();
             self.w.push_str("case ");
             if switch_stmt.encoding().signed {
-                self.write_i32(case.case() as i32);
+                self.write_i32(i32::try_from(case.case()).expect("invalid i32 switch case"));
             } else {
-                self.write_u32(case.case() as u32);
+                self.write_u32(u32::try_from(case.case()).expect("invalid u32 switch case"));
             }
             self.w.push_str(":");
             self.write_optional_space();

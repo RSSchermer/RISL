@@ -103,9 +103,9 @@ fn normalize_terminator(cfg: &mut Cfg, reentry_edge: Edge) {
             let case = cases[0];
 
             let case_val = if encoding.signed {
-                crate::cfg::InlineConst::I32(case as i32)
+                crate::cfg::InlineConst::I32(i32::try_from(case).expect("invalid i32 branch case"))
             } else {
-                crate::cfg::InlineConst::U32(case as u32)
+                crate::cfg::InlineConst::U32(u32::try_from(case).expect("invalid u32 branch case"))
             };
 
             let (_, condition) = cfg.add_stmt_op_binary(
@@ -305,8 +305,8 @@ fn restructure_loop_tail(
 mod tests {
     use super::*;
     use crate::cfg::{Cfg, Terminator};
-    use crate::ty::{Int, TY_DUMMY};
-    use crate::{FnArg, FnSig, Function, Module, Symbol};
+    use crate::ty::{Int, TY_DUMMY, TY_I32};
+    use crate::{BranchCase, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
     fn test_loop_restructuring() {
@@ -636,7 +636,12 @@ mod tests {
         cfg.set_terminator(entry, Terminator::branch_single(tail));
         cfg.set_terminator(
             tail,
-            Terminator::branch_case(Int::U32, value, vec![42], vec![entry, exit]),
+            Terminator::branch_case(
+                Int::U32,
+                value,
+                vec![BranchCase::from(42u32)],
+                vec![entry, exit],
+            ),
         );
 
         let reentry_edge = Edge {
@@ -714,7 +719,12 @@ mod tests {
         // Entry is at index 1, so needs_reversal will be true.
         cfg.set_terminator(
             tail,
-            Terminator::branch_case(Int::U32, value, vec![42], vec![exit, entry]),
+            Terminator::branch_case(
+                Int::U32,
+                value,
+                vec![BranchCase::from(42u32)],
+                vec![exit, entry],
+            ),
         );
 
         let reentry_edge = Edge {

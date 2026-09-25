@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::BranchCase;
 use crate::intrinsic::{Intrinsic, expect_one_arg};
 use crate::ty::{Int, TY_PREDICATE, Type, TypeRegistry};
 
-/// Converts a branch selector predicate into a `u32` value selected from a list of cases.
+/// Converts a branch selector predicate into an integer value selected from a list of cases.
 ///
 /// The case selected is the case at the branch-index position in the [cases] list.
 ///
@@ -33,7 +34,7 @@ use crate::ty::{Int, TY_PREDICATE, Type, TypeRegistry};
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpBranchSelectorToCase {
     pub encoding: Int,
-    pub cases: Vec<u128>,
+    pub cases: Vec<BranchCase>,
 }
 
 impl Intrinsic for OpBranchSelectorToCase {

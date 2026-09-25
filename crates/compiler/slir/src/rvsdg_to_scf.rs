@@ -8,7 +8,7 @@ use crate::rvsdg::analyse::region_stratification::RegionStratifier;
 use crate::rvsdg::{Connectivity, NodeKind, Rvsdg, SimpleNode, ValueOrigin};
 use crate::scf::{BlockPosition, LocalBinding, LoopControl, Scf};
 use crate::ty::Int;
-use crate::{Function, Module, rvsdg, scf};
+use crate::{BranchCase, Function, Module, rvsdg, scf};
 
 #[derive(Clone, Debug)]
 struct ValueMapping {
@@ -177,7 +177,7 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
         switch_node: rvsdg::Node,
         on: scf::LocalBinding,
         encoding: Int,
-        cases: Option<&[u128]>,
+        cases: Option<&[BranchCase]>,
     ) {
         let data = self.rvsdg[switch_node].expect_switch();
 
@@ -210,7 +210,9 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
             let branch_block = if is_last {
                 default_block
             } else {
-                let case = cases.map(|cases| cases[i]).unwrap_or(i as u128);
+                let case = cases
+                    .map(|cases| cases[i])
+                    .unwrap_or_else(|| BranchCase::from(i as u32));
 
                 self.scf.add_switch_case(switch_stmt, case)
             };

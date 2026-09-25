@@ -917,7 +917,7 @@ mod tests {
         Enum, EnumTagEncoding, EnumVariant, Int, IntSize, Struct, StructField, TY_DUMMY,
         TY_PREDICATE, TY_PTR_U32, TY_U32,
     };
-    use crate::{FnArg, FnSig, Function, Module, Symbol, thin_set};
+    use crate::{BranchCase, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
     fn test_enum_replacement() {
@@ -1053,7 +1053,7 @@ mod tests {
             region,
             ValueInput::output(TY_U32, get_discr_node, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let switch_1_node = rvsdg.add_switch(
             region,

@@ -134,6 +134,7 @@ use std::ops::Range;
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::BranchCase;
 use crate::rvsdg::transform::loop_slice_offset_normalization::normalize_loop_slice_offsets;
 use crate::rvsdg::transform::pointer_reconstruction::{
     Access, BranchingNode, LeafNode, PointerReconstructionContext, PointerReconstructionError,
@@ -733,8 +734,9 @@ impl NormalizerInternal {
         // Create a branch-selector based on the number of shapes, each assigned a consecutive
         // integer as its index. Note that a case-based branch-selector always has a default
         // branch, so we'll need one fewer case than the number of shapes.
-        let max_shape_index = shapes.len() as u128 - 1;
-        let cases = 0..max_shape_index;
+        let max_shape_index = shapes.len() - 1;
+        let cases = (0..max_shape_index)
+            .map(|i| BranchCase::from(u32::try_from(i).expect("shape index must fit a u32")));
         let shape_index_origin = loop_value_origin(info.shape_index_loop_value);
         let branch_selector = rvsdg.add_op_case_to_branch_selector(
             region,
@@ -1224,7 +1226,7 @@ mod tests {
             loop_region,
             ValueInput::output(TY_U32, case, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let switch_node = rvsdg.add_switch(
             loop_region,
@@ -1329,7 +1331,10 @@ mod tests {
         let inner_shape_branch_selector_data =
             rvsdg[inner_shape_branch_selector].expect_op_case_to_branch_selector();
 
-        assert_eq!(inner_shape_branch_selector_data.cases(), [0, 1]);
+        assert_eq!(
+            inner_shape_branch_selector_data.cases(),
+            [BranchCase::from(0u32), BranchCase::from(1u32)]
+        );
 
         assert_eq!(
             inner_selector_data.value_inputs()[1],
@@ -1395,7 +1400,10 @@ mod tests {
         let outer_shape_branch_selector_data =
             rvsdg[outer_shape_branch_selector].expect_op_case_to_branch_selector();
 
-        assert_eq!(outer_shape_branch_selector_data.cases(), [0, 1]);
+        assert_eq!(
+            outer_shape_branch_selector_data.cases(),
+            [BranchCase::from(0u32), BranchCase::from(1u32)]
+        );
 
         assert_eq!(
             outer_selector_data.value_inputs()[1],
@@ -1962,7 +1970,7 @@ mod tests {
             loop_region,
             ValueInput::output(TY_U32, case, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let fallback = rvsdg.add_const_fallback(loop_region, TY_PTR_U32);
 
@@ -2120,7 +2128,7 @@ mod tests {
             loop_inner_region,
             ValueInput::output(TY_U32, loop_inner_case, 0),
             Int::U32,
-            [0],
+            [BranchCase::from(0u32)],
         );
         let loop_inner_switch = rvsdg.add_switch(
             loop_inner_region,

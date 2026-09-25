@@ -12,8 +12,8 @@ use thin_vec::{ThinVec, thin_vec};
 use crate::intrinsic::Intrinsic;
 use crate::ty::{Int, TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeKind, TypeRegistry};
 use crate::{
-    BinaryOperator, Constant, Function, Module, StorageBinding, UnaryOperator, UniformBinding,
-    WorkgroupBinding, intrinsic,
+    BinaryOperator, BranchCase, Constant, Function, Module, StorageBinding, UnaryOperator,
+    UniformBinding, WorkgroupBinding, intrinsic,
 };
 
 slotmap::new_key_type! {
@@ -702,7 +702,7 @@ impl OpCaseToBranchSelector {
         self.intrinsic.encoding
     }
 
-    pub fn cases(&self) -> &[u128] {
+    pub fn cases(&self) -> &[BranchCase] {
         &self.intrinsic.cases
     }
 
@@ -876,7 +876,7 @@ pub enum BranchSelector {
     Case {
         encoding: Int,
         value: LocalBinding,
-        cases: Vec<u128>,
+        cases: Vec<BranchCase>,
     },
 
     /// Selects the branch corresponding to the value.
@@ -927,7 +927,7 @@ impl Branch {
     pub fn case(
         encoding: Int,
         value: LocalBinding,
-        cases: impl IntoIterator<Item = u128>,
+        cases: impl IntoIterator<Item = BranchCase>,
         targets: impl IntoIterator<Item = BasicBlock>,
     ) -> Self {
         Branch {
@@ -979,7 +979,7 @@ impl Terminator {
     pub fn branch_case(
         encoding: Int,
         value: LocalBinding,
-        cases: impl IntoIterator<Item = u128>,
+        cases: impl IntoIterator<Item = BranchCase>,
         targets: impl IntoIterator<Item = BasicBlock>,
     ) -> Self {
         Terminator::Branch(Branch::case(encoding, value, cases, targets))

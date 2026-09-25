@@ -644,6 +644,10 @@ impl<'a> Renderer<'a> {
             "] OpCaseToBranchSelector{{encoding: {:?}, cases: {:?}}}",
             n.encoding(),
             n.cases()
+                .iter()
+                .copied()
+                .map(u128::from)
+                .collect::<Vec<_>>()
         )?;
         self.write_node_io_signature(writer, node)
     }
@@ -661,6 +665,10 @@ impl<'a> Renderer<'a> {
             "] OpBranchSelectorToCase{{encoding: {:?}, cases: {:?}}}",
             n.encoding(),
             n.cases()
+                .iter()
+                .copied()
+                .map(u128::from)
+                .collect::<Vec<_>>()
         )?;
         self.write_node_io_signature(writer, node)
     }

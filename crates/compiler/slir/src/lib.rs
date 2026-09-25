@@ -11,8 +11,11 @@ pub mod smi;
 pub mod ty;
 pub mod write;
 
+mod branch_case;
 mod core;
 mod serde;
 mod util;
+
+pub use branch_case::BranchCase;
 
 pub use self::core::*;

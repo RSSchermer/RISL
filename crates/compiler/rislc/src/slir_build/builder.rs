@@ -367,28 +367,26 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         // Note: this loop has to run before we borrow the `cfg` below, as the `cases` iterator will
         // actually call [Builder::append_block], which will also want to borrow the `cfg`, leading
         // to an "already borrowed" error.
-        for (mut case, branch) in cases {
+        for (case, branch) in cases {
+            let mut case = slir::BranchCase::from(case);
+
             if is_pointer_size {
                 // Adjust the case value if the pointer-size is not 32 bits.
                 if signed {
-                    case = match length {
-                        IntegerLength::I16 => case as u16 as i16 as i32 as u32 as u128,
-                        IntegerLength::I32 => case,
-                        IntegerLength::I64 => {
-                            let case = case as u64 as i64;
-                            let case = i32::try_from(case).expect(
-                                "earlier checks should not allow static isize values to overflow \
-                                i32",
-                            );
-
-                            case as u32 as u128
-                        }
+                    let source_size = match length {
+                        IntegerLength::I16 => slir::ty::IntSize::I16,
+                        IntegerLength::I32 => slir::ty::IntSize::I32,
+                        IntegerLength::I64 => slir::ty::IntSize::I64,
                         _ => unreachable!("not a valid pointer size"),
                     };
+
+                    case = case.try_cast_i32(source_size).expect(
+                        "earlier checks should not allow static isize values to overflow i32",
+                    );
                 } else {
-                    case = u32::try_from(case).expect(
+                    case = case.try_cast_u32().expect(
                         "earlier checks should not allow static usize values to overflow u32",
-                    ) as u128;
+                    );
                 }
             }
 

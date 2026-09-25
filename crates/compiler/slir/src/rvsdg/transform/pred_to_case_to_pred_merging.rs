@@ -3,7 +3,7 @@ use rustc_hash::FxHashSet;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, ValueUser, visit};
-use crate::{Function, Module};
+use crate::{BranchCase, Function, Module};
 
 struct NodeCollector<'a> {
     candidates: &'a mut Vec<Node>,
@@ -40,7 +40,11 @@ impl CasesMatcher {
         }
     }
 
-    fn match_cases(&mut self, pred_to_case: &[u128], case_to_pred: &[u128]) -> CasesMatch<'_> {
+    fn match_cases(
+        &mut self,
+        pred_to_case: &[BranchCase],
+        case_to_pred: &[BranchCase],
+    ) -> CasesMatch<'_> {
         self.permutation.clear();
 
         for i in 0..pred_to_case.len() {
@@ -241,48 +245,48 @@ mod tests {
     fn test_case_match() {
         let mut matcher = CasesMatcher::new();
 
-        let cases_0 = [1u128, 2, 3];
-        let cases_1 = [1u128, 2, 3];
+        let cases_0 = [1u32, 2, 3].map(BranchCase::from);
+        let cases_1 = [1u32, 2, 3].map(BranchCase::from);
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1, 2])
         );
 
-        let cases_0 = [1u128, 2, 3];
-        let cases_1 = [3u128, 1, 2];
+        let cases_0 = [1u32, 2, 3].map(BranchCase::from);
+        let cases_1 = [3u32, 1, 2].map(BranchCase::from);
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[1, 2, 0])
         );
 
-        let cases_0 = [1u128, 2, 3];
-        let cases_1 = [1u128, 2, 4];
+        let cases_0 = [1u32, 2, 3].map(BranchCase::from);
+        let cases_1 = [1u32, 2, 4].map(BranchCase::from);
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1, 3])
         );
 
-        let cases_0 = [1u128, 2, 3];
-        let cases_1 = [1u128, 2];
+        let cases_0 = [1u32, 2, 3].map(BranchCase::from);
+        let cases_1 = [1u32, 2].map(BranchCase::from);
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1, 2])
         );
 
-        let cases_0 = [1u128, 2];
-        let cases_1 = [1u128, 2, 3];
+        let cases_0 = [1u32, 2].map(BranchCase::from);
+        let cases_1 = [1u32, 2, 3].map(BranchCase::from);
 
         assert_eq!(
             matcher.match_cases(&cases_0, &cases_1),
             CasesMatch::Permutation(&[0, 1])
         );
 
-        let cases_0 = [1u128, 2, 1];
-        let cases_1 = [1u128, 2, 3];
+        let cases_0 = [1u32, 2, 1].map(BranchCase::from);
+        let cases_1 = [1u32, 2, 3].map(BranchCase::from);
 
         assert_eq!(matcher.match_cases(&cases_0, &cases_1), CasesMatch::NoMatch);
     }
@@ -316,13 +320,13 @@ mod tests {
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
             Int::U32,
-            [0, 1],
+            [0u32, 1].map(BranchCase::from),
         );
         let case_to_pred_node = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, pred_to_case_node, 0),
             Int::U32,
-            [0, 1],
+            [0u32, 1].map(BranchCase::from),
         );
         let switch_node = rvsdg.add_switch(
             region,
@@ -418,13 +422,13 @@ mod tests {
             region,
             ValueInput::output(TY_PREDICATE, bool_pred_node, 0),
             Int::U32,
-            [0, 1],
+            [0u32, 1].map(BranchCase::from),
         );
         let case_to_pred_node = rvsdg.add_op_case_to_branch_selector(
             region,
             ValueInput::output(TY_U32, pred_to_case_node, 0),
             Int::U32,
-            [1, 0],
+            [1u32, 0].map(BranchCase::from),
         );
         let switch_node = rvsdg.add_switch(
             region,
