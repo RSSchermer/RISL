@@ -76,7 +76,7 @@ fn check_add_or_sub_op(
 ) -> Result<Type, String> {
     match &*ty.kind(lhs) {
         TypeKind::Scalar(kind) if kind.is_numeric() => match &*ty.kind(rhs) {
-            TypeKind::Scalar(kind) if kind == kind => Ok(lhs),
+            TypeKind::Scalar(_) if lhs == rhs => Ok(lhs),
             TypeKind::Vector(v) if &v.scalar == kind => Ok(rhs),
             TypeKind::Matrix(m) if &m.scalar == kind => Ok(rhs),
             _ => Err(format!(
@@ -130,7 +130,7 @@ fn check_add_or_sub_op(
 fn check_mul_op(ty: &TypeRegistry, lhs: Type, rhs: Type) -> Result<Type, String> {
     match &*ty.kind(lhs) {
         TypeKind::Scalar(kind) if kind.is_numeric() => match &*ty.kind(rhs) {
-            TypeKind::Scalar(kind) if kind == kind => Ok(lhs),
+            TypeKind::Scalar(_) if lhs == rhs => Ok(lhs),
             TypeKind::Vector(v) if &v.scalar == kind => Ok(rhs),
             TypeKind::Matrix(m) if &m.scalar == kind => Ok(rhs),
             _ => Err(format!(
@@ -205,7 +205,7 @@ fn check_div_or_mod_op(
 ) -> Result<Type, String> {
     match &*ty.kind(lhs) {
         TypeKind::Scalar(kind) if kind.is_numeric() => match &*ty.kind(rhs) {
-            TypeKind::Scalar(kind) if kind == kind => Ok(lhs),
+            TypeKind::Scalar(_) if lhs == rhs => Ok(lhs),
             TypeKind::Vector(v) if &v.scalar == kind => Ok(rhs),
             TypeKind::Matrix(m) if &m.scalar == kind => Ok(rhs),
             _ => Err(format!(
@@ -357,5 +357,328 @@ fn check_bit_op(
             lhs.to_string(ty),
             rhs.to_string(ty)
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ty::{
+        TY_F32, TY_I32, TY_MAT2X2, TY_PREDICATE, TY_VEC2_F32, TY_VEC2_I32, TY_VEC2_U32,
+    };
+
+    #[test]
+    fn arithmetic_accepts_matching_numeric_scalars() {
+        let ty = TypeRegistry::default();
+
+        let add = OpBinary {
+            operator: BinaryOperator::Add,
+        };
+
+        assert_eq!(add.process_args(&ty, [TY_I32, TY_I32]), Ok(Some(TY_I32)));
+        assert_eq!(add.process_args(&ty, [TY_U32, TY_U32]), Ok(Some(TY_U32)));
+        assert_eq!(add.process_args(&ty, [TY_F32, TY_F32]), Ok(Some(TY_F32)));
+
+        let sub = OpBinary {
+            operator: BinaryOperator::Sub,
+        };
+
+        assert_eq!(sub.process_args(&ty, [TY_I32, TY_I32]), Ok(Some(TY_I32)));
+        assert_eq!(sub.process_args(&ty, [TY_U32, TY_U32]), Ok(Some(TY_U32)));
+        assert_eq!(sub.process_args(&ty, [TY_F32, TY_F32]), Ok(Some(TY_F32)));
+
+        let mul = OpBinary {
+            operator: BinaryOperator::Mul,
+        };
+
+        assert_eq!(mul.process_args(&ty, [TY_I32, TY_I32]), Ok(Some(TY_I32)));
+        assert_eq!(mul.process_args(&ty, [TY_U32, TY_U32]), Ok(Some(TY_U32)));
+        assert_eq!(mul.process_args(&ty, [TY_F32, TY_F32]), Ok(Some(TY_F32)));
+
+        let div = OpBinary {
+            operator: BinaryOperator::Div,
+        };
+
+        assert_eq!(div.process_args(&ty, [TY_I32, TY_I32]), Ok(Some(TY_I32)));
+        assert_eq!(div.process_args(&ty, [TY_U32, TY_U32]), Ok(Some(TY_U32)));
+        assert_eq!(div.process_args(&ty, [TY_F32, TY_F32]), Ok(Some(TY_F32)));
+
+        let rem = OpBinary {
+            operator: BinaryOperator::Mod,
+        };
+
+        assert_eq!(rem.process_args(&ty, [TY_I32, TY_I32]), Ok(Some(TY_I32)));
+        assert_eq!(rem.process_args(&ty, [TY_U32, TY_U32]), Ok(Some(TY_U32)));
+        assert_eq!(rem.process_args(&ty, [TY_F32, TY_F32]), Ok(Some(TY_F32)));
+    }
+
+    #[test]
+    fn arithmetic_preserves_matching_scalar_broadcasts() {
+        let ty = TypeRegistry::default();
+
+        let add = OpBinary {
+            operator: BinaryOperator::Add,
+        };
+
+        assert_eq!(
+            add.process_args(&ty, [TY_I32, TY_VEC2_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            add.process_args(&ty, [TY_VEC2_I32, TY_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            add.process_args(&ty, [TY_U32, TY_VEC2_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            add.process_args(&ty, [TY_VEC2_U32, TY_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            add.process_args(&ty, [TY_F32, TY_VEC2_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            add.process_args(&ty, [TY_VEC2_F32, TY_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            add.process_args(&ty, [TY_F32, TY_MAT2X2]),
+            Ok(Some(TY_MAT2X2))
+        );
+
+        let sub = OpBinary {
+            operator: BinaryOperator::Sub,
+        };
+
+        assert_eq!(
+            sub.process_args(&ty, [TY_I32, TY_VEC2_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            sub.process_args(&ty, [TY_VEC2_I32, TY_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            sub.process_args(&ty, [TY_U32, TY_VEC2_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            sub.process_args(&ty, [TY_VEC2_U32, TY_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            sub.process_args(&ty, [TY_F32, TY_VEC2_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            sub.process_args(&ty, [TY_VEC2_F32, TY_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            sub.process_args(&ty, [TY_F32, TY_MAT2X2]),
+            Ok(Some(TY_MAT2X2))
+        );
+
+        let mul = OpBinary {
+            operator: BinaryOperator::Mul,
+        };
+
+        assert_eq!(
+            mul.process_args(&ty, [TY_I32, TY_VEC2_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            mul.process_args(&ty, [TY_VEC2_I32, TY_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            mul.process_args(&ty, [TY_U32, TY_VEC2_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            mul.process_args(&ty, [TY_VEC2_U32, TY_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            mul.process_args(&ty, [TY_F32, TY_VEC2_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            mul.process_args(&ty, [TY_VEC2_F32, TY_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            mul.process_args(&ty, [TY_F32, TY_MAT2X2]),
+            Ok(Some(TY_MAT2X2))
+        );
+
+        let div = OpBinary {
+            operator: BinaryOperator::Div,
+        };
+
+        assert_eq!(
+            div.process_args(&ty, [TY_I32, TY_VEC2_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            div.process_args(&ty, [TY_VEC2_I32, TY_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            div.process_args(&ty, [TY_U32, TY_VEC2_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            div.process_args(&ty, [TY_VEC2_U32, TY_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            div.process_args(&ty, [TY_F32, TY_VEC2_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            div.process_args(&ty, [TY_VEC2_F32, TY_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            div.process_args(&ty, [TY_F32, TY_MAT2X2]),
+            Ok(Some(TY_MAT2X2))
+        );
+
+        let rem = OpBinary {
+            operator: BinaryOperator::Mod,
+        };
+
+        assert_eq!(
+            rem.process_args(&ty, [TY_I32, TY_VEC2_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            rem.process_args(&ty, [TY_VEC2_I32, TY_I32]),
+            Ok(Some(TY_VEC2_I32))
+        );
+        assert_eq!(
+            rem.process_args(&ty, [TY_U32, TY_VEC2_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            rem.process_args(&ty, [TY_VEC2_U32, TY_U32]),
+            Ok(Some(TY_VEC2_U32))
+        );
+        assert_eq!(
+            rem.process_args(&ty, [TY_F32, TY_VEC2_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            rem.process_args(&ty, [TY_VEC2_F32, TY_F32]),
+            Ok(Some(TY_VEC2_F32))
+        );
+        assert_eq!(
+            rem.process_args(&ty, [TY_F32, TY_MAT2X2]),
+            Ok(Some(TY_MAT2X2))
+        );
+    }
+
+    #[test]
+    fn arithmetic_rejects_mismatched_scalar_types() {
+        let ty = TypeRegistry::default();
+
+        let add = OpBinary {
+            operator: BinaryOperator::Add,
+        };
+
+        assert!(add.process_args(&ty, [TY_I32, TY_U32]).is_err());
+        assert!(add.process_args(&ty, [TY_I32, TY_F32]).is_err());
+        assert!(add.process_args(&ty, [TY_I32, TY_BOOL]).is_err());
+        assert!(add.process_args(&ty, [TY_I32, TY_PREDICATE]).is_err());
+
+        assert!(add.process_args(&ty, [TY_U32, TY_I32]).is_err());
+        assert!(add.process_args(&ty, [TY_U32, TY_F32]).is_err());
+        assert!(add.process_args(&ty, [TY_U32, TY_BOOL]).is_err());
+        assert!(add.process_args(&ty, [TY_U32, TY_PREDICATE]).is_err());
+
+        assert!(add.process_args(&ty, [TY_F32, TY_I32]).is_err());
+        assert!(add.process_args(&ty, [TY_F32, TY_U32]).is_err());
+        assert!(add.process_args(&ty, [TY_F32, TY_BOOL]).is_err());
+        assert!(add.process_args(&ty, [TY_F32, TY_PREDICATE]).is_err());
+
+        let sub = OpBinary {
+            operator: BinaryOperator::Sub,
+        };
+
+        assert!(sub.process_args(&ty, [TY_I32, TY_U32]).is_err());
+        assert!(sub.process_args(&ty, [TY_I32, TY_F32]).is_err());
+        assert!(sub.process_args(&ty, [TY_I32, TY_BOOL]).is_err());
+        assert!(sub.process_args(&ty, [TY_I32, TY_PREDICATE]).is_err());
+
+        assert!(sub.process_args(&ty, [TY_U32, TY_I32]).is_err());
+        assert!(sub.process_args(&ty, [TY_U32, TY_F32]).is_err());
+        assert!(sub.process_args(&ty, [TY_U32, TY_BOOL]).is_err());
+        assert!(sub.process_args(&ty, [TY_U32, TY_PREDICATE]).is_err());
+
+        assert!(sub.process_args(&ty, [TY_F32, TY_I32]).is_err());
+        assert!(sub.process_args(&ty, [TY_F32, TY_U32]).is_err());
+        assert!(sub.process_args(&ty, [TY_F32, TY_BOOL]).is_err());
+        assert!(sub.process_args(&ty, [TY_F32, TY_PREDICATE]).is_err());
+
+        let mul = OpBinary {
+            operator: BinaryOperator::Mul,
+        };
+
+        assert!(mul.process_args(&ty, [TY_I32, TY_U32]).is_err());
+        assert!(mul.process_args(&ty, [TY_I32, TY_F32]).is_err());
+        assert!(mul.process_args(&ty, [TY_I32, TY_BOOL]).is_err());
+        assert!(mul.process_args(&ty, [TY_I32, TY_PREDICATE]).is_err());
+
+        assert!(mul.process_args(&ty, [TY_U32, TY_I32]).is_err());
+        assert!(mul.process_args(&ty, [TY_U32, TY_F32]).is_err());
+        assert!(mul.process_args(&ty, [TY_U32, TY_BOOL]).is_err());
+        assert!(mul.process_args(&ty, [TY_U32, TY_PREDICATE]).is_err());
+
+        assert!(mul.process_args(&ty, [TY_F32, TY_I32]).is_err());
+        assert!(mul.process_args(&ty, [TY_F32, TY_U32]).is_err());
+        assert!(mul.process_args(&ty, [TY_F32, TY_BOOL]).is_err());
+        assert!(mul.process_args(&ty, [TY_F32, TY_PREDICATE]).is_err());
+
+        let div = OpBinary {
+            operator: BinaryOperator::Div,
+        };
+
+        assert!(div.process_args(&ty, [TY_I32, TY_U32]).is_err());
+        assert!(div.process_args(&ty, [TY_I32, TY_F32]).is_err());
+        assert!(div.process_args(&ty, [TY_I32, TY_BOOL]).is_err());
+        assert!(div.process_args(&ty, [TY_I32, TY_PREDICATE]).is_err());
+
+        assert!(div.process_args(&ty, [TY_U32, TY_I32]).is_err());
+        assert!(div.process_args(&ty, [TY_U32, TY_F32]).is_err());
+        assert!(div.process_args(&ty, [TY_U32, TY_BOOL]).is_err());
+        assert!(div.process_args(&ty, [TY_U32, TY_PREDICATE]).is_err());
+
+        assert!(div.process_args(&ty, [TY_F32, TY_I32]).is_err());
+        assert!(div.process_args(&ty, [TY_F32, TY_U32]).is_err());
+        assert!(div.process_args(&ty, [TY_F32, TY_BOOL]).is_err());
+        assert!(div.process_args(&ty, [TY_F32, TY_PREDICATE]).is_err());
+
+        let rem = OpBinary {
+            operator: BinaryOperator::Mod,
+        };
+
+        assert!(rem.process_args(&ty, [TY_I32, TY_U32]).is_err());
+        assert!(rem.process_args(&ty, [TY_I32, TY_F32]).is_err());
+        assert!(rem.process_args(&ty, [TY_I32, TY_BOOL]).is_err());
+        assert!(rem.process_args(&ty, [TY_I32, TY_PREDICATE]).is_err());
+
+        assert!(rem.process_args(&ty, [TY_U32, TY_I32]).is_err());
+        assert!(rem.process_args(&ty, [TY_U32, TY_F32]).is_err());
+        assert!(rem.process_args(&ty, [TY_U32, TY_BOOL]).is_err());
+        assert!(rem.process_args(&ty, [TY_U32, TY_PREDICATE]).is_err());
+
+        assert!(rem.process_args(&ty, [TY_F32, TY_I32]).is_err());
+        assert!(rem.process_args(&ty, [TY_F32, TY_U32]).is_err());
+        assert!(rem.process_args(&ty, [TY_F32, TY_BOOL]).is_err());
+        assert!(rem.process_args(&ty, [TY_F32, TY_PREDICATE]).is_err());
     }
 }
