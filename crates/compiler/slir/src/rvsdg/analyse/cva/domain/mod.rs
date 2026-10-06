@@ -222,7 +222,7 @@ impl AbstractValue {
     pub fn to_abstract_f32(&self) -> AbstractF32 {
         match self {
             Self::Bool(value) => value.to_abstract_f32(),
-            Self::F32(value) => value.clone(),
+            Self::F32(value) => value.to_abstract_f32(),
             Self::I32(value) => value.to_abstract_f32(),
             Self::U32(value) => value.to_abstract_f32(),
             Self::Predicate(_) | Self::Unsupported(_) => {

@@ -91,6 +91,14 @@ impl AbstractF32 {
         Self::Const(value)
     }
 
+    /// Returns this value under the safety guards used for floating-point conversions.
+    pub fn to_abstract_f32(&self) -> Self {
+        match self {
+            Self::Const(value) if !is_safe_f32(*value) => Self::Top,
+            _ => *self,
+        }
+    }
+
     /// Returns the abstract boolean value of this floating-point value.
     pub fn to_abstract_bool(&self) -> AbstractBool {
         match self {
