@@ -30,7 +30,7 @@
 //! branch where the branch-result is a "bottom" value, the upstream switch node must not have been
 //! able to select that branch; under the assumptions we've made for the control-flow context, the
 //! upstream switch node could only "feasibly" have selected branches that do not lead to
-//! contradictions. The [correlated_switch_simplification] transform leverages implications like
+//! contradictions. The [contextual_value_optimization] transform leverages implications like
 //! these to simplify the control-flow.
 //!
 //! Contextual value analysis is session-based. Such sessions are represented by instances of the
@@ -63,7 +63,7 @@
 //!
 //! [OpBoolToBranchSelector]: crate::rvsdg::OpBoolToBranchSelector
 //! [OpBinary]: crate::rvsdg::OpBinary
-//! [correlated_switch_simplification]: crate::rvsdg::transform::correlated_switch_simplification
+//! [contextual_value_optimization]: crate::rvsdg::transform::contextual_node_reduction
 
 mod context;
 pub mod domain;
@@ -310,6 +310,18 @@ impl<'a> ContextualValueAnalysis<'a> {
         self.apply_branch_assumption(context, switch, branch)
     }
 
+    /// Enters a contained region, establishing its enclosing branch assumptions and loop scope.
+    ///
+    /// Conflicting branch scopes are contradictory; regions outside the context's loop/function
+    /// scope are unknown. Loop entry does not specialize changing arguments to their initial values.
+    pub(crate) fn context_for_region(
+        &mut self,
+        parent_context: ContextId,
+        region: Region,
+    ) -> AssumptionResult {
+        self.refine_context(parent_context, region)
+    }
+
     fn refine_context(&mut self, mut context: ContextId, mut region: Region) -> AssumptionResult {
         self.validate_context_id(context);
 
@@ -453,7 +465,7 @@ impl<'a> ContextualValueAnalysis<'a> {
 mod tests {
     use std::iter;
 
-    use super::domain::{AbstractPredicate, AbstractU32};
+    use super::domain::AbstractU32;
     use super::{AbstractValue, AssumptionResult, ContextualValueAnalysis, ValueKey};
     use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
     use crate::rvsdg::{Rvsdg, ValueInput, ValueOrigin, ValueOutput};
@@ -1715,6 +1727,240 @@ mod tests {
         assert_eq!(
             analysis.assume_branch(outer_switch_branch_branch_1, inner_switch, 0),
             AssumptionResult::Contradictory
+        );
+    }
+
+    #[test]
+    fn unsupported_operations_remain_unconstrained() {
+        use crate::ty::TY_VEC2_U32;
+
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_VEC2_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut graph = Rvsdg::new(module.ty.clone());
+        let (_, body) = graph.register_function(&module, function, iter::empty());
+
+        let sum = graph.add_op_binary(
+            body,
+            BinaryOperator::Add,
+            ValueInput::argument(TY_VEC2_U32, 0),
+            ValueInput::argument(TY_VEC2_U32, 0),
+        );
+
+        let mut analysis = ContextualValueAnalysis::new(&graph, function);
+        let root_context = analysis.root_context();
+
+        assert_eq!(
+            analysis.evaluate_value(
+                ValueKey::new(
+                    body,
+                    ValueOrigin::Output {
+                        producer: sum,
+                        output: 0
+                    }
+                ),
+                root_context
+            ),
+            AbstractValue::Unsupported(TY_VEC2_U32)
+        );
+    }
+
+    #[test]
+    fn region_entry_establishes_loop_scope_without_initial_iteration_facts() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut graph = Rvsdg::new(module.ty.clone());
+        let (_, body) = graph.register_function(&module, function, iter::empty());
+
+        let initial = graph.add_const_u32(body, 7);
+        let invariant = graph.add_const_u32(body, 2);
+        let (_, loop_body) = graph.add_loop(
+            body,
+            vec![
+                ValueInput::output(TY_U32, initial, 0),
+                ValueInput::output(TY_U32, invariant, 0),
+            ],
+            None,
+        );
+
+        let again = graph.add_const_bool(loop_body, true);
+        let next = graph.add_op_binary(
+            loop_body,
+            BinaryOperator::Add,
+            ValueInput::argument(TY_U32, 0),
+            ValueInput::argument(TY_U32, 1),
+        );
+
+        graph.reconnect_region_result(
+            loop_body,
+            0,
+            ValueOrigin::Output {
+                producer: again,
+                output: 0,
+            },
+        );
+        graph.reconnect_region_result(
+            loop_body,
+            1,
+            ValueOrigin::Output {
+                producer: next,
+                output: 0,
+            },
+        );
+        graph.reconnect_region_result(loop_body, 2, ValueOrigin::Argument(1));
+
+        let (_, sibling_body) = graph.add_loop(body, Vec::new(), None);
+        let stop = graph.add_const_bool(sibling_body, false);
+
+        graph.reconnect_region_result(
+            sibling_body,
+            0,
+            ValueOrigin::Output {
+                producer: stop,
+                output: 0,
+            },
+        );
+
+        let mut analysis = ContextualValueAnalysis::new(&graph, function);
+        let root_context = analysis.root_context();
+
+        let loop_context = analysis
+            .context_for_region(root_context, loop_body)
+            .expect_context();
+
+        assert!(
+            analysis
+                .evaluate_value(
+                    ValueKey::new(loop_body, ValueOrigin::Argument(0)),
+                    loop_context
+                )
+                .is_top()
+        );
+        assert_eq!(
+            analysis
+                .evaluate_value(
+                    ValueKey::new(loop_body, ValueOrigin::Argument(1)),
+                    loop_context
+                )
+                .to_scalar_constant(),
+            Some(ScalarConstant::U32(2))
+        );
+        assert!(
+            analysis
+                .evaluate_value(
+                    ValueKey::new(
+                        loop_body,
+                        ValueOrigin::Output {
+                            producer: next,
+                            output: 0
+                        }
+                    ),
+                    loop_context
+                )
+                .is_top()
+        );
+        assert_eq!(
+            analysis.context_for_region(root_context, loop_body),
+            AssumptionResult::Context(loop_context)
+        );
+        assert_eq!(
+            analysis.context_for_region(loop_context, sibling_body),
+            AssumptionResult::Unknown
+        );
+        assert_eq!(
+            analysis.context_for_region(loop_context, body),
+            AssumptionResult::Unknown
+        );
+    }
+
+    #[test]
+    fn region_entry_rejects_conflicting_branch_scope() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut graph = Rvsdg::new(module.ty.clone());
+        let (_, body) = graph.register_function(&module, function, iter::empty());
+
+        let selector = graph.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
+        let switch = graph.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            Vec::new(),
+            None,
+        );
+        let branch_0 = graph.add_switch_branch(switch);
+        let branch_1 = graph.add_switch_branch(switch);
+
+        let mut analysis = ContextualValueAnalysis::new(&graph, function);
+        let root_context = analysis.root_context();
+
+        let branch_0_context = analysis
+            .context_for_region(root_context, branch_0)
+            .expect_context();
+
+        assert_eq!(
+            analysis
+                .evaluate_value(
+                    ValueKey::new(body, ValueOrigin::Argument(0)),
+                    branch_0_context
+                )
+                .to_scalar_constant(),
+            Some(ScalarConstant::Bool(true))
+        );
+        assert_eq!(
+            analysis.context_for_region(branch_0_context, branch_1),
+            AssumptionResult::Contradictory
+        );
+        assert!(
+            analysis
+                .evaluate_value(ValueKey::new(body, ValueOrigin::Argument(0)), root_context)
+                .is_top()
         );
     }
 

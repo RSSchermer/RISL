@@ -47,6 +47,10 @@ impl<'a> Engine<'a> {
     ) -> AbstractValue {
         let ty = key.ty(self.rvsdg);
 
+        if let value @ AbstractValue::Unsupported(_) = AbstractValue::top(ty) {
+            return value;
+        }
+
         // If the value does not occur within a region that is part of the currently assumed
         // control-flow, then the value never exists and is contradictory; we'll signal this with a
         // "bottom" value.

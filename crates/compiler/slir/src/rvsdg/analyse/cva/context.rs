@@ -433,6 +433,7 @@ fn collect_simple_output_implications(
             let rhs_input = ValueKey::for_node_input(engine.rvsdg, producer, 1);
             let lhs = engine.evaluate_value(lhs_input, env, cache);
             let rhs = engine.evaluate_value(rhs_input, env, cache);
+
             let (refined_lhs, refined_rhs) =
                 lhs.abstract_binary_op_inv(op, &rhs, &output_constraints);
 

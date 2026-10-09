@@ -1,7 +1,8 @@
 use rustc_hash::FxHashSet;
 
+use crate::rvsdg::analyse::cva::routing::{ValueKey, route};
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
-use crate::rvsdg::{Connectivity, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
+use crate::rvsdg::{NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ResolvedValue {
@@ -34,62 +35,24 @@ impl ValueResolver {
                 panic!("RVSDG should not contain cycles");
             }
 
-            match origin {
-                ValueOrigin::Output { producer, output } => {
-                    if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
-                        return ResolvedValue::Constant(constant);
-                    }
-
-                    if output == 0 {
-                        match rvsdg[producer].kind() {
-                            NodeKind::Simple(SimpleNode::ConstFallback(_)) => {
-                                return ResolvedValue::Fallback;
-                            }
-
-                            // If we encounter a value-proxy node, we trace through it to the
-                            // proxied value.
-                            NodeKind::Simple(SimpleNode::ValueProxy(proxy)) => {
-                                region = rvsdg[producer].region();
-                                origin = proxy.value_inputs()[0].origin;
-
-                                continue;
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // Value is not a scalar constant or fallback, so resolve it as "opaque".
-                    return ResolvedValue::Opaque { region, origin };
+            if let ValueOrigin::Output { producer, output } = origin {
+                if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
+                    return ResolvedValue::Constant(constant);
                 }
-                ValueOrigin::Argument(argument) if region != rvsdg.global_region() => {
-                    let owner = rvsdg[region].owner();
-                    let outer_region = rvsdg[owner].region();
-
-                    match rvsdg[owner].kind() {
-                        NodeKind::Switch(switch) => {
-                            origin = switch.value_inputs()[argument as usize + 1].origin;
-                            region = outer_region;
-                        }
-                        NodeKind::Loop(loop_node) => {
-                            let loop_region = loop_node.loop_region();
-                            let result = argument as usize + 1;
-
-                            if rvsdg[loop_region].value_results()[result].origin
-                                != ValueOrigin::Argument(argument)
-                            {
-                                // Loop value is not loop-invariant, so conservatively resolve it as
-                                // "opaque".
-                                return ResolvedValue::Opaque { region, origin };
-                            }
-
-                            origin = loop_node.value_inputs()[argument as usize].origin;
-                            region = outer_region;
-                        }
-                        NodeKind::Function(_) => return ResolvedValue::Opaque { region, origin },
-                        _ => panic!("node kind cannot own a region"),
-                    }
+                if output == 0
+                    && matches!(
+                        rvsdg[producer].kind(),
+                        NodeKind::Simple(SimpleNode::ConstFallback(_))
+                    )
+                {
+                    return ResolvedValue::Fallback;
                 }
-                _ => return ResolvedValue::Opaque { region, origin },
+            }
+            if let Some(key) = route(rvsdg, ValueKey::new(region, origin)) {
+                region = key.region;
+                origin = key.origin;
+            } else {
+                return ResolvedValue::Opaque { region, origin };
             }
         }
     }
