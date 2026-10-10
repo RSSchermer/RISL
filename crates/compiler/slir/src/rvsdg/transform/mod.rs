@@ -3,7 +3,6 @@ pub mod common_node_elimination;
 pub mod common_value_elimination;
 pub mod conditional_ub_elimination;
 pub mod const_dependency_inlining;
-pub mod const_switch_inlining;
 pub mod const_switch_output_extraction;
 pub mod contextual_node_reduction;
 pub mod dead_loop_value_normalization;
@@ -31,7 +30,6 @@ pub mod redundant_state_link_elimination;
 pub mod region_replication;
 pub mod scalar_replacement;
 pub mod store_coalescing;
-pub mod switch_arg_reduction;
 mod switch_branch_pruning;
 pub mod switch_fallback_unification;
 pub mod switch_merging;
@@ -40,7 +38,6 @@ pub mod variable_pointer_emulation;
 
 use crate::rvsdg::Rvsdg;
 use crate::rvsdg::transform::common_value_elimination::CommonValueEliminator;
-use crate::rvsdg::transform::const_switch_inlining::ConstSwitchInliner;
 use crate::rvsdg::transform::const_switch_output_extraction::ConstSwitchOutputExtractor;
 use crate::rvsdg::transform::contextual_node_reduction::ContextualNodeReducer;
 use crate::rvsdg::transform::dead_loop_value_normalization::DeadLoopValueNormalizer;
@@ -65,8 +62,6 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     const_dependency_inlining::transform_entry_points(module, rvsdg);
     contextual_node_reduction::transform_entry_points(module, rvsdg);
     invalid_ptr_replacement::transform_entry_points(module, rvsdg);
-    switch_arg_reduction::transform_entry_points(module, rvsdg);
-    const_switch_inlining::transform_entry_points(module, rvsdg);
     switch_merging::transform_entry_points(module, rvsdg);
     branch_selector_normalization::transform_entry_points(module, rvsdg);
     conditional_ub_elimination::transform_entry_points(module, rvsdg);
@@ -92,7 +87,6 @@ fn optimize_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
 
 struct LoopingOptimizer {
     contextual_value_optimizer: ContextualNodeReducer,
-    const_switch_inliner: ConstSwitchInliner,
     switch_merger: SwitchMerger,
     common_value_eliminator: CommonValueEliminator,
     switch_fallback_unifier: SwitchFallbackUnifier,
@@ -107,7 +101,6 @@ impl LoopingOptimizer {
     fn new() -> Self {
         Self {
             contextual_value_optimizer: ContextualNodeReducer::new(),
-            const_switch_inliner: ConstSwitchInliner::new(),
             switch_merger: SwitchMerger::new(),
             common_value_eliminator: CommonValueEliminator::new(),
             switch_fallback_unifier: SwitchFallbackUnifier::new(),
@@ -133,9 +126,6 @@ impl LoopingOptimizer {
             do_iteration |= self
                 .contextual_value_optimizer
                 .optimize_function(module, rvsdg, function);
-            do_iteration |= self
-                .const_switch_inliner
-                .inline_in_fn(module, rvsdg, function);
             do_iteration |= self.switch_merger.merge_in_fn(module, rvsdg, function);
             do_iteration |= self
                 .switch_fallback_unifier

@@ -34,12 +34,20 @@
 //! For the time being, the rules for numerical values only affect `u32` and `i32` values; `f32` are
 //! currently excluded.
 //!
+//! Switch branch arguments that [cva] evaluates to singleton scalar constants are "materialized"
+//! as branch-local constants. All users of the argument are reconnected to the output of the new
+//! constant. Unused arguments and arguments whose switch entry input already connects directly to a
+//! scalar constant are left unchanged.
+//!
 //! We also use [cva] to evaluate a switch node's branch-selector input. If [cva] finds that the
 //! possible set of values for switch node's branch-selector input does not cover all branch indices
 //! for the switch node, then the "infeasible" branches are simplified away. If there are still two
 //! or more "feasible" branches, then the infeasible branches are "pruned" (see
 //! [switch_branch_pruning]). If there is only a single feasible branch, then this one branch is
 //! "inlined" (see [inline_switch_branch]) into the switch node's outer region.
+//!
+//! All jobs are collected using one immutable [cva] session. Scalar reductions are applied first,
+//! followed by branch-argument materialization using current wiring, then switch reductions.
 //!
 //! [cva]: crate::rvsdg::analyse::cva
 //! [OpBinary]: crate::rvsdg::OpBinary
@@ -108,6 +116,12 @@ struct ReduceSwitchJob {
     retained_branches: Vec<usize>,
 }
 
+struct ReduceSwitchArgumentJob {
+    region: Region,
+    argument: u32,
+    constant: ScalarConstant,
+}
+
 /// Uses [cva] to simplify away simple nodes and switch branches.
 ///
 /// See the [module-level documentation](crate::rvsdg::transform::contextual_node_reduction) for
@@ -115,6 +129,7 @@ struct ReduceSwitchJob {
 #[derive(Default)]
 pub struct ContextualNodeReducer {
     reduce_to_value_jobs: Vec<ReduceToValueJob>,
+    reduce_switch_argument_jobs: Vec<ReduceSwitchArgumentJob>,
     reduce_switch_jobs: Vec<ReduceSwitchJob>,
 }
 
@@ -134,13 +149,18 @@ impl ContextualNodeReducer {
         let mut changed = false;
 
         changed |= self.apply_reduce_to_value_jobs(rvsdg);
+        changed |= self.apply_reduce_switch_argument_jobs(rvsdg);
         changed |= self.apply_reduce_switch_jobs(module, rvsdg);
 
         changed
     }
 
     fn collect_jobs(&mut self, rvsdg: &Rvsdg, function: Function) {
-        debug_assert!(self.reduce_to_value_jobs.is_empty() && self.reduce_switch_jobs.is_empty());
+        debug_assert!(
+            self.reduce_to_value_jobs.is_empty()
+                && self.reduce_switch_argument_jobs.is_empty()
+                && self.reduce_switch_jobs.is_empty()
+        );
 
         let fn_node = rvsdg
             .get_function_node(function)
@@ -162,6 +182,30 @@ impl ContextualNodeReducer {
             );
 
             plan.apply_reduction(rvsdg);
+        }
+
+        changed
+    }
+
+    fn apply_reduce_switch_argument_jobs(&mut self, rvsdg: &mut Rvsdg) -> bool {
+        let mut changed = false;
+
+        while let Some(job) = self.reduce_switch_argument_jobs.pop() {
+            if !switch_argument_needs_constant(rvsdg, job.region, job.argument) {
+                continue;
+            }
+
+            let producer = job.constant.add_to_region(rvsdg, job.region);
+
+            rvsdg.reconnect_value_users(
+                job.region,
+                ValueOrigin::Argument(job.argument),
+                ValueOrigin::Output {
+                    producer,
+                    output: 0,
+                },
+            );
+            changed = true;
         }
 
         changed
@@ -193,6 +237,28 @@ impl ContextualNodeReducer {
         region: Region,
         context: ContextId,
     ) {
+        if rvsdg[rvsdg[region].owner()].is_switch() {
+            for argument in 0..rvsdg[region].value_arguments().len() as u32 {
+                if !switch_argument_needs_constant(rvsdg, region, argument) {
+                    continue;
+                }
+
+                let value = analysis.evaluate_value(
+                    ValueKey::new(region, ValueOrigin::Argument(argument)),
+                    context,
+                );
+
+                if let Some(constant) = value.to_scalar_constant() {
+                    self.reduce_switch_argument_jobs
+                        .push(ReduceSwitchArgumentJob {
+                            region,
+                            argument,
+                            constant,
+                        });
+                }
+            }
+        }
+
         let mut selector_proofs = FxHashMap::default();
         let mut stratifier = RegionStratifier::new();
 
@@ -243,8 +309,9 @@ impl ContextualNodeReducer {
                     }
 
                     if !retained.is_empty()
-                        && retained.len() < switch.branches().len()
-                        && (retained.len() == 1 || has_case_selector(rvsdg, node))
+                        && (retained.len() == 1
+                            || (retained.len() < switch.branches().len()
+                                && has_case_selector(rvsdg, node)))
                     {
                         self.reduce_switch_jobs.push(ReduceSwitchJob {
                             target: node,
@@ -283,6 +350,24 @@ pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
     }
 
     changed
+}
+
+fn switch_argument_needs_constant(rvsdg: &Rvsdg, region: Region, argument: u32) -> bool {
+    if rvsdg[region].value_arguments()[argument as usize]
+        .users
+        .is_empty()
+    {
+        return false;
+    }
+
+    let switch = rvsdg[rvsdg[region].owner()].expect_switch();
+
+    match switch.entry_inputs()[argument as usize].origin {
+        ValueOrigin::Output { producer, output } => {
+            ScalarConstant::from_node(rvsdg, producer, output).is_none()
+        }
+        ValueOrigin::Argument(_) => true,
+    }
 }
 
 fn has_case_selector(rvsdg: &Rvsdg, switch: Node) -> bool {
@@ -435,9 +520,10 @@ mod tests {
     use super::ContextualNodeReducer;
     use crate::rvsdg::{
         Connectivity, Rvsdg, StateOrigin, StateUser, ValueInput, ValueOrigin, ValueOutput,
+        ValueUser,
     };
     use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_F32, TY_I32, TY_PREDICATE, TY_PTR_U32, TY_U32};
-    use crate::{BinaryOperator, BranchCase, FnArg, FnSig, Function, Module, Symbol};
+    use crate::{BinaryOperator, BranchCase, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
     fn reduce_simple_op_chain_to_constant_value() {
@@ -665,6 +751,221 @@ mod tests {
             panic!("expected a node output");
         };
         assert_eq!(rvsdg[producer].expect_const_u32().value(), 0);
+    }
+
+    #[test]
+    fn materializes_constant_switch_argument_and_reconnects_all_users() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, body) = rvsdg.register_function(&module, function, []);
+        let ptr = rvsdg.add_op_alloca(body, TY_U32);
+        let selector = rvsdg.add_op_case_to_branch_selector(
+            body,
+            ValueInput::argument(TY_U32, 0),
+            Int::U32,
+            [BranchCase::from(7u32)],
+        );
+        let switch = rvsdg.add_switch(
+            body,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector, 0),
+                ValueInput::argument(TY_U32, 0),
+                ValueInput::output(TY_PTR_U32, ptr, 0),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            Some(StateOrigin::Argument),
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch);
+        let first_store = rvsdg.add_op_store(
+            branch_0,
+            ValueInput::argument(TY_PTR_U32, 1),
+            ValueInput::argument(TY_U32, 0),
+            StateOrigin::Argument,
+        );
+        let second_store = rvsdg.add_op_store(
+            branch_0,
+            ValueInput::argument(TY_PTR_U32, 1),
+            ValueInput::argument(TY_U32, 0),
+            StateOrigin::Node(first_store),
+        );
+        rvsdg.reconnect_region_result(branch_0, 0, ValueOrigin::Argument(0));
+
+        let branch_1 = rvsdg.add_switch_branch(switch);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueOrigin::Argument(0));
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_U32, switch, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        let new_val = rvsdg[branch_0].value_results()[0];
+        let ValueOrigin::Output {
+            producer: materialized_const,
+            output: 0,
+        } = new_val.origin
+        else {
+            panic!("expected a node output");
+        };
+        assert_eq!(rvsdg[materialized_const].expect_const_u32().value(), 7);
+
+        assert_eq!(rvsdg[first_store].value_inputs()[1], new_val);
+        assert_eq!(rvsdg[second_store].value_inputs()[1], new_val);
+
+        assert_eq!(
+            rvsdg[materialized_const].value_outputs()[0].users,
+            thin_set![
+                ValueUser::Result(0),
+                ValueUser::Input {
+                    consumer: first_store,
+                    input: 1
+                },
+                ValueUser::Input {
+                    consumer: second_store,
+                    input: 1
+                }
+            ]
+        );
+        assert!(rvsdg[branch_0].value_arguments()[0].users.is_empty());
+
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
+    }
+
+    #[test]
+    fn skips_switch_arg_reduction_when_argument_is_unused() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, body) = rvsdg.register_function(&module, function, []);
+        let selector = rvsdg.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
+        let switch = rvsdg.add_switch(
+            body,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector, 0),
+                ValueInput::output(TY_PREDICATE, selector, 0),
+            ],
+            vec![],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch);
+        let branch_1 = rvsdg.add_switch_branch(switch);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
+    }
+
+    #[test]
+    fn skips_switch_argument_reduction_when_input_folds_to_constant() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, body) = rvsdg.register_function(&module, function, []);
+        let one = rvsdg.add_const_u32(body, 1);
+        let sum = rvsdg.add_op_binary(
+            body,
+            BinaryOperator::Add,
+            ValueInput::output(TY_U32, one, 0),
+            ValueInput::output(TY_U32, one, 0),
+        );
+        let selector = rvsdg.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
+        let switch = rvsdg.add_switch(
+            body,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector, 0),
+                ValueInput::output(TY_U32, sum, 0),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueOrigin::Argument(0));
+
+        let branch_1 = rvsdg.add_switch_branch(switch);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueOrigin::Argument(0));
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_U32, switch, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        assert!(!rvsdg.is_live_node(sum));
+
+        assert!(rvsdg[branch_0].nodes().is_empty());
+        assert!(rvsdg[branch_1].nodes().is_empty());
+
+        assert_eq!(
+            rvsdg[branch_0].value_results()[0],
+            ValueInput::argument(TY_U32, 0)
+        );
+        assert_eq!(
+            rvsdg[branch_1].value_results()[0],
+            ValueInput::argument(TY_U32, 0)
+        );
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[switch].value_inputs()[1].origin
+        else {
+            panic!("expected a node output");
+        };
+        assert_eq!(rvsdg[producer].expect_const_u32().value(), 2);
+
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
     }
 
     #[test]
@@ -920,6 +1221,54 @@ mod tests {
                 .cases(),
             &[BranchCase::from(1u32)]
         );
+    }
+
+    #[test]
+    fn inline_single_branch_switch() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
+        let selector = rvsdg.add_const_predicate(body, 0);
+        let switch = rvsdg.add_switch(
+            body,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector, 0),
+                ValueInput::argument(TY_U32, 0),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let branch = rvsdg.add_switch_branch(switch);
+        rvsdg.reconnect_region_result(branch, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_U32, switch, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+        assert!(!rvsdg.is_live_node(switch));
+        assert_eq!(
+            rvsdg[body].value_results()[0],
+            ValueInput::argument(TY_U32, 0)
+        );
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
     }
 
     #[test]
