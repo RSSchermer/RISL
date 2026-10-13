@@ -65,6 +65,7 @@
 //! [OpBinary]: crate::rvsdg::OpBinary
 //! [contextual_value_optimization]: crate::rvsdg::transform::contextual_node_reduction
 
+pub mod conditional_scalar_relation;
 mod context;
 pub mod domain;
 mod engine;
@@ -74,6 +75,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustc_hash::FxHashMap;
 
+pub use self::conditional_scalar_relation::{BooleanRelation, query_boolean_relation};
 use self::context::{ConstraintFrame, Context, Environment, constraint_frame_for_assumed_branch};
 pub use self::domain::AbstractValue;
 use self::engine::Engine;

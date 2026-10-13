@@ -1,5 +1,7 @@
 //! Uses [cva] to simplify away simple nodes and switch branches.
 //!
+//! # Simple Nodes
+//!
 //! Currently, attempts to simplify the following simple node kinds: [OpBinary], [OpUnary],
 //! [OpConvertToU32], [OpConvertToI32], [OpConvertToF32], [OpConvertToBool],
 //! [OpCaseToBranchSelector], and [OpBoolToBranchSelector]. If [cva] finds that the output of one
@@ -34,10 +36,25 @@
 //! For the time being, the rules for numerical values only affect `u32` and `i32` values; `f32` are
 //! currently excluded.
 //!
+//! If the simple scalar rules described above do not apply, and the node's output value is a
+//! boolean, we attempt "conditional-scalar reduction". This looks for switch nodes in the node's
+//! upstream value-flow. If the switch node's branch-selector is produced by an
+//! [OpBoolToBranchSelector] node, then we use [cva] to evaluate the node's output value under both
+//! branch assumptions to establish a potential relation between the node's output value and the
+//! upstream switch node's branch-selector condition value. If we find that the node's output value
+//! is always equal to the upstream condition value, then we remove the node and reconnect all users
+//! to the upstream condition value. If we find that the node's output value is always the
+//! complement of the upstream condition value, then we add an [OpUnary] "not" node to inverse
+//! the upstream condition value and reconnect all users to the output of the "not" node.
+//!
+//! # Switch Branch Arguments
+//!
 //! Switch branch arguments that [cva] evaluates to singleton scalar constants are "materialized"
 //! as branch-local constants. All users of the argument are reconnected to the output of the new
 //! constant. Unused arguments and arguments whose switch entry input already connects directly to a
 //! scalar constant are left unchanged.
+//!
+//! # Switch Nodes
 //!
 //! We also use [cva] to evaluate a switch node's branch-selector input. If [cva] finds that the
 //! possible set of values for switch node's branch-selector input does not cover all branch indices
@@ -45,9 +62,6 @@
 //! or more "feasible" branches, then the infeasible branches are "pruned" (see
 //! [switch_branch_pruning]). If there is only a single feasible branch, then this one branch is
 //! "inlined" (see [inline_switch_branch]) into the switch node's outer region.
-//!
-//! All jobs are collected using one immutable [cva] session. Scalar reductions are applied first,
-//! followed by branch-argument materialization using current wiring, then switch reductions.
 //!
 //! [cva]: crate::rvsdg::analyse::cva
 //! [OpBinary]: crate::rvsdg::OpBinary
@@ -59,11 +73,14 @@
 //! [OpCaseToBranchSelector]: crate::rvsdg::OpCaseToBranchSelector
 //! [OpBoolToBranchSelector]: crate::rvsdg::OpBoolToBranchSelector
 //! [switch_branch_pruning]: crate::rvsdg::transform::switch_branch_pruning
+use std::collections::VecDeque;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 
 use crate::rvsdg::analyse::cva::{
-    AbstractValue, AssumptionResult, ContextId, ContextualValueAnalysis, ValueKey,
+    AbstractValue, AssumptionResult, BooleanRelation, ContextId, ContextualValueAnalysis, ValueKey,
+    query_boolean_relation,
 };
 use crate::rvsdg::analyse::region_stratification::RegionStratifier;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
@@ -72,12 +89,14 @@ use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin,
 };
-use crate::{BinaryOperator, Function, Module};
+use crate::ty::TY_BOOL;
+use crate::{BinaryOperator, Function, Module, UnaryOperator};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ReplacementValue {
     Constant(ScalarConstant),
     Variable(ValueInput),
+    Complement(ValueInput),
 }
 
 impl From<ScalarConstant> for ReplacementValue {
@@ -100,6 +119,14 @@ impl ReduceToValueJob {
                 producer: constant.add_to_region(rvsdg, region),
                 output: 0,
             },
+            ReplacementValue::Complement(input) => {
+                let producer = rvsdg.add_op_unary(region, UnaryOperator::Not, input);
+
+                ValueOrigin::Output {
+                    producer,
+                    output: 0,
+                }
+            }
         };
         let original_origin = ValueOrigin::Output {
             producer: self.target,
@@ -410,9 +437,6 @@ fn try_reduce_to_value(
     node: Node,
     context: ContextId,
 ) -> Option<ReduceToValueJob> {
-    use NodeKind::*;
-    use SimpleNode::*;
-
     let data = &rvsdg[node];
 
     if !is_candidate(rvsdg, node) {
@@ -429,41 +453,185 @@ fn try_reduce_to_value(
     );
     let value = analysis.evaluate_value(key, context);
 
-    let replacement = if let Some(constant) = value.to_scalar_constant() {
-        constant.into()
-    } else {
-        if value.is_bottom() {
-            return None;
+    if let Some(constant) = value.to_scalar_constant() {
+        return Some(ReduceToValueJob {
+            target: node,
+            replacement: constant.into(),
+        });
+    }
+
+    if value.is_bottom() {
+        return None;
+    }
+
+    if let Some(replacement) = try_reduce_simple_scalar(rvsdg, analysis, node, context) {
+        return Some(ReduceToValueJob {
+            target: node,
+            replacement,
+        });
+    }
+
+    if data.value_outputs().len() == 1 && data.value_outputs()[0].ty == TY_BOOL {
+        if let Some(job) = try_reduce_conditional_scalar(rvsdg, analysis, node, context) {
+            return Some(job);
         }
+    }
 
-        match data.kind() {
-            Simple(OpBinary(op)) => {
-                let lhs = resolve_value(rvsdg, analysis, node, 0, context)?;
-                let rhs = resolve_value(rvsdg, analysis, node, 1, context)?;
+    None
+}
 
-                try_reduce_binary(op.operator(), lhs, rhs)
+fn try_reduce_simple_scalar(
+    rvsdg: &Rvsdg,
+    analysis: &mut ContextualValueAnalysis,
+    node: Node,
+    context: ContextId,
+) -> Option<ReplacementValue> {
+    use NodeKind::*;
+    use SimpleNode::*;
+
+    let data = &rvsdg[node];
+
+    match data.kind() {
+        Simple(OpBinary(op)) => {
+            let lhs = resolve_value(rvsdg, analysis, node, 0, context)?;
+            let rhs = resolve_value(rvsdg, analysis, node, 1, context)?;
+
+            try_reduce_binary(op.operator(), lhs, rhs)
+        }
+        Simple(OpConvertToU32(_))
+        | Simple(OpConvertToI32(_))
+        | Simple(OpConvertToF32(_))
+        | Simple(OpConvertToBool(_)) => {
+            let value = resolve_value(rvsdg, analysis, node, 0, context)?;
+
+            match value {
+                ReplacementValue::Variable(input) if input.ty == data.value_outputs()[0].ty => {
+                    Some(value)
+                }
+                _ => None,
             }
-            Simple(OpConvertToU32(_))
-            | Simple(OpConvertToI32(_))
-            | Simple(OpConvertToF32(_))
-            | Simple(OpConvertToBool(_)) => {
-                let value = resolve_value(rvsdg, analysis, node, 0, context)?;
+        }
+        _ => None,
+    }
+}
 
-                match value {
-                    ReplacementValue::Variable(input) if input.ty == data.value_outputs()[0].ty => {
-                        Some(value)
+fn is_conditional_scalar_dependency(rvsdg: &Rvsdg, node: Node) -> bool {
+    use NodeKind::*;
+    use SimpleNode::*;
+
+    matches!(
+        rvsdg[node].kind(),
+        Simple(
+            OpBinary(_)
+                | OpUnary(_)
+                | OpConvertToU32(_)
+                | OpConvertToI32(_)
+                | OpConvertToF32(_)
+                | OpConvertToBool(_)
+                | ValueProxy(_)
+        )
+    )
+}
+
+fn find_conditional_scalar_producers(
+    rvsdg: &Rvsdg,
+    node: Node,
+) -> SmallVec<[(Node, ValueInput); 4]> {
+    let region = rvsdg[node].region();
+
+    let mut visited = FxHashSet::default();
+    let mut producers = SmallVec::new();
+    let mut queue = VecDeque::new();
+
+    // Bound admitted scalar nodes, but finish scanning every node already queued.
+    visited.insert(node);
+    queue.push_back(node);
+
+    while let Some(curr) = queue.pop_front() {
+        for input in rvsdg[curr].value_inputs() {
+            if let ValueOrigin::Output { producer, .. } = input.origin {
+                if rvsdg[producer].region() != region {
+                    continue;
+                }
+
+                if rvsdg[producer].is_switch() {
+                    let switch_data = rvsdg[producer].expect_switch();
+
+                    if switch_data.branches().len() != 2
+                        || producers.iter().any(|&(p, _)| p == producer)
+                    {
+                        continue;
                     }
-                    _ => None,
+
+                    let ValueOrigin::Output {
+                        producer: selector_producer,
+                        output: 0,
+                    } = switch_data.branch_selector().origin
+                    else {
+                        continue;
+                    };
+
+                    if !matches!(
+                        rvsdg[selector_producer].kind(),
+                        NodeKind::Simple(SimpleNode::OpBoolToBranchSelector(_))
+                    ) {
+                        continue;
+                    }
+
+                    let condition = rvsdg[selector_producer].value_inputs()[0];
+
+                    debug_assert_eq!(rvsdg[selector_producer].region(), region);
+                    debug_assert_eq!(condition.ty, TY_BOOL);
+
+                    producers.push((producer, condition));
+
+                    if producers.len() == 4 {
+                        return producers;
+                    }
+                } else if is_conditional_scalar_dependency(rvsdg, producer)
+                    && visited.len() < 256
+                    && visited.insert(producer)
+                {
+                    queue.push_back(producer);
                 }
             }
-            _ => None,
-        }?
-    };
+        }
+    }
 
-    Some(ReduceToValueJob {
-        target: node,
-        replacement,
-    })
+    producers
+}
+
+fn try_reduce_conditional_scalar(
+    rvsdg: &Rvsdg,
+    analysis: &mut ContextualValueAnalysis,
+    node: Node,
+    context: ContextId,
+) -> Option<ReduceToValueJob> {
+    let region = rvsdg[node].region();
+    let v_key = ValueKey::new(
+        region,
+        ValueOrigin::Output {
+            producer: node,
+            output: 0,
+        },
+    );
+
+    for (switch, condition) in find_conditional_scalar_producers(rvsdg, node) {
+        if let Some(relation) = query_boolean_relation(analysis, v_key, switch, context) {
+            let replacement = match relation {
+                BooleanRelation::Constant(b) => ReplacementValue::Constant(ScalarConstant::Bool(b)),
+                BooleanRelation::Input => ReplacementValue::Variable(condition),
+                BooleanRelation::Complement => ReplacementValue::Complement(condition),
+            };
+
+            return Some(ReduceToValueJob {
+                target: node,
+                replacement,
+            });
+        }
+    }
+
+    None
 }
 
 fn resolve_value(
@@ -523,7 +691,9 @@ mod tests {
         ValueUser,
     };
     use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_F32, TY_I32, TY_PREDICATE, TY_PTR_U32, TY_U32};
-    use crate::{BinaryOperator, BranchCase, FnArg, FnSig, Function, Module, Symbol, thin_set};
+    use crate::{
+        BinaryOperator, BranchCase, FnArg, FnSig, Function, Module, Symbol, UnaryOperator, thin_set,
+    };
 
     #[test]
     fn reduce_simple_op_chain_to_constant_value() {
@@ -2052,6 +2222,446 @@ mod tests {
         rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_U32, loop_node, 0).origin);
 
         let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
+    }
+
+    #[test]
+    fn applies_simple_conditional_scalar_reduction() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_BOOL),
+            },
+        );
+
+        let (_, body) = rvsdg.register_function(&module, function, []);
+
+        let condition = ValueInput::argument(TY_BOOL, 0);
+        let selector = rvsdg.add_op_bool_to_branch_selector(body, condition);
+        let switch = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch);
+        let value_0 = rvsdg.add_const_u32(branch_0, 1);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueInput::output(TY_U32, value_0, 0).origin);
+
+        let branch_1 = rvsdg.add_switch_branch(switch);
+        let value_1 = rvsdg.add_const_u32(branch_1, 0);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueInput::output(TY_U32, value_1, 0).origin);
+
+        let one = rvsdg.add_const_u32(body, 1);
+
+        let target = rvsdg.add_op_binary(
+            body,
+            BinaryOperator::Eq,
+            ValueInput::output(TY_U32, switch, 0),
+            ValueInput::output(TY_U32, one, 0),
+        );
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_BOOL, target, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        assert!(!rvsdg.is_live_node(target));
+
+        assert_eq!(rvsdg[body].value_results()[0], condition);
+        assert!(rvsdg[switch].value_outputs()[0].users.is_empty());
+    }
+
+    #[test]
+    fn applies_simple_conditional_scalar_reduction_to_complement() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_BOOL),
+            },
+        );
+
+        let (_, body) = rvsdg.register_function(&module, function, []);
+
+        let condition = ValueInput::argument(TY_BOOL, 0);
+        let selector = rvsdg.add_op_bool_to_branch_selector(body, condition);
+        let switch = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch);
+        let value_0 = rvsdg.add_const_u32(branch_0, 0);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueInput::output(TY_U32, value_0, 0).origin);
+
+        let branch_1 = rvsdg.add_switch_branch(switch);
+        let value_1 = rvsdg.add_const_u32(branch_1, 1);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueInput::output(TY_U32, value_1, 0).origin);
+
+        let one = rvsdg.add_const_u32(body, 1);
+
+        let target = rvsdg.add_op_binary(
+            body,
+            BinaryOperator::Eq,
+            ValueInput::output(TY_U32, switch, 0),
+            ValueInput::output(TY_U32, one, 0),
+        );
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_BOOL, target, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        assert!(!rvsdg.is_live_node(target));
+
+        let ValueOrigin::Output {
+            producer: complement,
+            output: 0,
+        } = rvsdg[body].value_results()[0].origin
+        else {
+            panic!("expected a complement");
+        };
+
+        assert_eq!(rvsdg[complement].region(), body);
+        assert_eq!(
+            rvsdg[complement].expect_op_unary().operator(),
+            UnaryOperator::Not
+        );
+        assert_eq!(rvsdg[complement].value_inputs(), &[condition]);
+        assert_eq!(
+            rvsdg[complement].value_outputs()[0].users,
+            thin_set![ValueUser::Result(0)]
+        );
+        assert!(rvsdg[switch].value_outputs()[0].users.is_empty());
+    }
+
+    #[test]
+    fn simple_scalar_reduction_takes_precedence_over_conditional_scalar_reduction() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_BOOL),
+            },
+        );
+
+        let (_, body) = rvsdg.register_function(&module, function, []);
+
+        let selector = rvsdg.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
+        let switch = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_BOOL)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch);
+        let value_0 = rvsdg.add_const_bool(branch_0, false);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueInput::output(TY_BOOL, value_0, 0).origin);
+
+        let branch_1 = rvsdg.add_switch_branch(switch);
+        let value_1 = rvsdg.add_const_bool(branch_1, true);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueInput::output(TY_BOOL, value_1, 0).origin);
+
+        let const_false = rvsdg.add_const_bool(body, false);
+        let target = rvsdg.add_op_binary(
+            body,
+            BinaryOperator::Or,
+            ValueInput::output(TY_BOOL, switch, 0),
+            ValueInput::output(TY_BOOL, const_false, 0),
+        );
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_BOOL, target, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        assert!(!rvsdg.is_live_node(target));
+
+        assert_eq!(
+            rvsdg[body].value_results()[0],
+            ValueInput::output(TY_BOOL, switch, 0)
+        );
+
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
+    }
+
+    #[test]
+    fn conditional_scalar_reduction_tries_multiple_producer_switch_nodes() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_BOOL,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_BOOL,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_BOOL),
+            },
+        );
+
+        let (_, body) = rvsdg.register_function(&module, function, []);
+
+        let switch_0_selector =
+            rvsdg.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
+        let switch_0 = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, switch_0_selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let switch_0_branch_0 = rvsdg.add_switch_branch(switch_0);
+        let switch_0_tag_0 = rvsdg.add_const_u32(switch_0_branch_0, 1);
+        rvsdg.reconnect_region_result(
+            switch_0_branch_0,
+            0,
+            ValueInput::output(TY_U32, switch_0_tag_0, 0).origin,
+        );
+
+        let switch_0_branch_1 = rvsdg.add_switch_branch(switch_0);
+        let switch_0_tag_1 = rvsdg.add_const_u32(switch_0_branch_1, 2);
+        rvsdg.reconnect_region_result(
+            switch_0_branch_1,
+            0,
+            ValueInput::output(TY_U32, switch_0_tag_1, 0).origin,
+        );
+
+        let switch_1_condition = ValueInput::argument(TY_BOOL, 1);
+        let switch_1_selector = rvsdg.add_op_bool_to_branch_selector(body, switch_1_condition);
+        let switch_1 = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, switch_1_selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let switch_1_branch_0 = rvsdg.add_switch_branch(switch_1);
+        let switch_1_tag_0 = rvsdg.add_const_u32(switch_1_branch_0, 3);
+        rvsdg.reconnect_region_result(
+            switch_1_branch_0,
+            0,
+            ValueInput::output(TY_U32, switch_1_tag_0, 0).origin,
+        );
+
+        let switch_1_branch_1 = rvsdg.add_switch_branch(switch_1);
+        let switch_1_tag_1 = rvsdg.add_const_u32(switch_1_branch_1, 0);
+        rvsdg.reconnect_region_result(
+            switch_1_branch_1,
+            0,
+            ValueInput::output(TY_U32, switch_1_tag_1, 0).origin,
+        );
+
+        let target = rvsdg.add_op_binary(
+            body,
+            BinaryOperator::Lt,
+            ValueInput::output(TY_U32, switch_0, 0),
+            ValueInput::output(TY_U32, switch_1, 0),
+        );
+
+        let user = rvsdg.add_value_proxy(body, ValueInput::output(TY_BOOL, target, 0));
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_BOOL, target, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        assert!(!rvsdg.is_live_node(target));
+
+        assert_eq!(rvsdg[body].value_results()[0], switch_1_condition);
+        assert_eq!(rvsdg[user].value_inputs()[0], switch_1_condition);
+
+        assert_eq!(
+            rvsdg[body].value_arguments()[1].users,
+            thin_set![
+                ValueUser::Input {
+                    consumer: switch_1_selector,
+                    input: 0
+                },
+                ValueUser::Input {
+                    consumer: user,
+                    input: 0
+                },
+                ValueUser::Result(0)
+            ]
+        );
+
+        assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
+    }
+
+    #[test]
+    fn applies_multiple_dependent_conditional_scalar_reductions_in_single_pass() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_BOOL),
+            },
+        );
+
+        let (_, body) = rvsdg.register_function(&module, function, []);
+
+        let condition = ValueInput::argument(TY_BOOL, 0);
+        let selector = rvsdg.add_op_bool_to_branch_selector(body, condition);
+        let producer = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(producer);
+        let value_0 = rvsdg.add_const_u32(branch_0, 1);
+        rvsdg.reconnect_region_result(branch_0, 0, ValueInput::output(TY_U32, value_0, 0).origin);
+
+        let branch_1 = rvsdg.add_switch_branch(producer);
+        let value_1 = rvsdg.add_const_u32(branch_1, 0);
+        rvsdg.reconnect_region_result(branch_1, 0, ValueInput::output(TY_U32, value_1, 0).origin);
+
+        let one = rvsdg.add_const_u32(body, 1);
+
+        let eq_one = rvsdg.add_op_binary(
+            body,
+            BinaryOperator::Eq,
+            ValueInput::output(TY_U32, producer, 0),
+            ValueInput::output(TY_U32, one, 0),
+        );
+        let invert = rvsdg.add_op_unary(
+            body,
+            UnaryOperator::Not,
+            ValueInput::output(TY_BOOL, eq_one, 0),
+        );
+
+        let eq_one_user = rvsdg.add_value_proxy(body, ValueInput::output(TY_BOOL, eq_one, 0));
+        let invert_user = rvsdg.add_value_proxy(body, ValueInput::output(TY_BOOL, invert, 0));
+
+        rvsdg.reconnect_region_result(body, 0, ValueInput::output(TY_BOOL, invert, 0).origin);
+
+        let mut optimizer = ContextualNodeReducer::new();
+
+        assert!(optimizer.optimize_function(&mut module, &mut rvsdg, function));
+
+        assert!(!rvsdg.is_live_node(eq_one));
+        assert!(!rvsdg.is_live_node(invert));
+
+        assert_eq!(rvsdg[eq_one_user].value_inputs()[0], condition);
+
+        let replacement = rvsdg[body].value_results()[0];
+        let ValueOrigin::Output {
+            producer: fresh_invert,
+            output: 0,
+        } = replacement.origin
+        else {
+            panic!("expected a fresh complement");
+        };
+
+        assert_eq!(rvsdg[fresh_invert].region(), body);
+        assert_eq!(
+            rvsdg[fresh_invert].expect_op_unary().operator(),
+            UnaryOperator::Not
+        );
+        assert_eq!(rvsdg[fresh_invert].value_inputs(), &[condition]);
+        assert_eq!(rvsdg[invert_user].value_inputs()[0], replacement);
+        assert_eq!(
+            rvsdg[fresh_invert].value_outputs()[0].users,
+            thin_set![
+                ValueUser::Input {
+                    consumer: invert_user,
+                    input: 0
+                },
+                ValueUser::Result(0)
+            ]
+        );
+
+        assert_eq!(
+            rvsdg[body].value_arguments()[0].users,
+            thin_set![
+                ValueUser::Input {
+                    consumer: selector,
+                    input: 0
+                },
+                ValueUser::Input {
+                    consumer: eq_one_user,
+                    input: 0
+                },
+                ValueUser::Input {
+                    consumer: fresh_invert,
+                    input: 0
+                }
+            ]
+        );
 
         assert!(!optimizer.optimize_function(&mut module, &mut rvsdg, function));
     }
