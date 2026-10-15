@@ -4,9 +4,10 @@
 //! See [query_boolean_relation] for details.
 
 use crate::rvsdg::Node;
+use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::cva::domain::AbstractBool;
 use crate::rvsdg::analyse::cva::{
-    AbstractValue, AssumptionResult, ContextId, ContextualValueAnalysis, ValueKey,
+    AbstractValue, AssumptionResult, ContextId, ContextualValueAnalysis,
 };
 
 /// The relation between a boolean scalar value and the boolean input controlling a 2-branch switch.

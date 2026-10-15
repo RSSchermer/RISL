@@ -26,7 +26,7 @@
 
 use crate::Module;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
-use crate::rvsdg::analyse::value_resolution::{ResolvedValue, ValueResolver};
+use crate::rvsdg::analyse::value_resolution::{ResolvedValue, resolve_value};
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, ValueOrigin, visit};
 
@@ -133,48 +133,36 @@ struct ClassifiedResult {
     is_fallback: bool,
 }
 
-struct ResultClassifier {
-    resolver: ValueResolver,
-}
+fn classify(rvsdg: &Rvsdg, branch: Region, origin: ValueOrigin) -> ClassifiedResult {
+    let resolved = resolve_value(rvsdg, branch, origin);
 
-impl ResultClassifier {
-    fn new() -> Self {
-        Self {
-            resolver: ValueResolver::new(),
-        }
-    }
-
-    fn classify(&mut self, rvsdg: &Rvsdg, branch: Region, origin: ValueOrigin) -> ClassifiedResult {
-        let resolved = self.resolver.resolve(rvsdg, branch, origin);
-
-        match (origin, resolved) {
-            (_, ResolvedValue::Fallback) => ClassifiedResult {
-                unifiable: Unifiable::Unknown,
-                is_fallback: true,
+    match (origin, resolved) {
+        (_, ResolvedValue::Fallback) => ClassifiedResult {
+            unifiable: Unifiable::Unknown,
+            is_fallback: true,
+        },
+        (ValueOrigin::Argument(index), ResolvedValue::Constant(constant)) => ClassifiedResult {
+            unifiable: Unifiable::Argument {
+                index,
+                resolved_constant: Some(constant),
             },
-            (ValueOrigin::Argument(index), ResolvedValue::Constant(constant)) => ClassifiedResult {
-                unifiable: Unifiable::Argument {
-                    index,
-                    resolved_constant: Some(constant),
-                },
-                is_fallback: false,
+            is_fallback: false,
+        },
+        (ValueOrigin::Argument(index), ResolvedValue::Opaque { .. }) => ClassifiedResult {
+            unifiable: Unifiable::Argument {
+                index,
+                resolved_constant: None,
             },
-            (ValueOrigin::Argument(index), ResolvedValue::Opaque { .. }) => ClassifiedResult {
-                unifiable: Unifiable::Argument {
-                    index,
-                    resolved_constant: None,
-                },
-                is_fallback: false,
-            },
-            (_, ResolvedValue::Constant(constant)) => ClassifiedResult {
-                unifiable: Unifiable::Constant(constant),
-                is_fallback: false,
-            },
-            (_, ResolvedValue::Opaque { .. }) => ClassifiedResult {
-                unifiable: Unifiable::Impossible,
-                is_fallback: false,
-            },
-        }
+            is_fallback: false,
+        },
+        (_, ResolvedValue::Constant(constant)) => ClassifiedResult {
+            unifiable: Unifiable::Constant(constant),
+            is_fallback: false,
+        },
+        (_, ResolvedValue::Opaque { .. }) => ClassifiedResult {
+            unifiable: Unifiable::Impossible,
+            is_fallback: false,
+        },
     }
 }
 
@@ -193,7 +181,6 @@ impl RegionNodesVisitor for SwitchNodeCollector<'_> {
 }
 
 pub struct SwitchFallbackUnifier {
-    result_classifier: ResultClassifier,
     switch_node_queue: Vec<Node>,
     switch_branches: Vec<Region>,
 
@@ -204,7 +191,6 @@ pub struct SwitchFallbackUnifier {
 impl SwitchFallbackUnifier {
     pub fn new() -> Self {
         Self {
-            result_classifier: ResultClassifier::new(),
             switch_node_queue: Vec::new(),
             switch_branches: Vec::new(),
             fallback_branches: Vec::new(),
@@ -245,7 +231,7 @@ impl SwitchFallbackUnifier {
 
             for &branch in &self.switch_branches {
                 let origin = rvsdg[branch].value_results()[output].origin;
-                let result = self.result_classifier.classify(rvsdg, branch, origin);
+                let result = classify(rvsdg, branch, origin);
 
                 if result.is_fallback {
                     self.fallback_branches.push(branch);

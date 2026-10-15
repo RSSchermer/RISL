@@ -69,7 +69,6 @@ pub mod conditional_scalar_relation;
 mod context;
 pub mod domain;
 mod engine;
-pub(crate) mod routing;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -79,12 +78,25 @@ pub use self::conditional_scalar_relation::{BooleanRelation, query_boolean_relat
 use self::context::{ConstraintFrame, Context, Environment, constraint_frame_for_assumed_branch};
 pub use self::domain::AbstractValue;
 use self::engine::Engine;
-pub use self::routing::ValueKey;
-use self::routing::contains_region;
 use crate::Function;
+use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg};
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+
+fn contains_region(rvsdg: &Rvsdg, ancestor: Region, mut region: Region) -> bool {
+    loop {
+        if region == ancestor {
+            return true;
+        }
+
+        if region == rvsdg.global_region() {
+            return false;
+        }
+
+        region = rvsdg[rvsdg[region].owner()].region();
+    }
+}
 
 /// Identifies a control-flow context for a [ContextualValueAnalysis] session.
 ///
@@ -468,7 +480,8 @@ mod tests {
     use std::iter;
 
     use super::domain::AbstractU32;
-    use super::{AbstractValue, AssumptionResult, ContextualValueAnalysis, ValueKey};
+    use super::{AbstractValue, AssumptionResult, ContextualValueAnalysis};
+    use crate::rvsdg::analyse::ValueKey;
     use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
     use crate::rvsdg::{Rvsdg, ValueInput, ValueOrigin, ValueOutput};
     use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_I32, TY_PREDICATE, TY_U32};

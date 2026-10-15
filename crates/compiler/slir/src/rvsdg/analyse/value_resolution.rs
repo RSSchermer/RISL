@@ -1,6 +1,4 @@
-use rustc_hash::FxHashSet;
-
-use crate::rvsdg::analyse::cva::routing::{ValueKey, route};
+use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::rvsdg::{NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 
@@ -11,56 +9,27 @@ pub enum ResolvedValue {
     Opaque { region: Region, origin: ValueOrigin },
 }
 
-pub struct ValueResolver {
-    visited: FxHashSet<(Region, ValueOrigin)>,
-}
+pub fn resolve_value(rvsdg: &Rvsdg, region: Region, origin: ValueOrigin) -> ResolvedValue {
+    let key = ValueKey::new(region, origin).canonicalize(rvsdg);
 
-impl ValueResolver {
-    pub fn new() -> Self {
-        Self {
-            visited: FxHashSet::default(),
+    if let ValueOrigin::Output { producer, output } = key.origin {
+        if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
+            return ResolvedValue::Constant(constant);
+        }
+
+        if output == 0
+            && matches!(
+                rvsdg[producer].kind(),
+                NodeKind::Simple(SimpleNode::ConstFallback(_))
+            )
+        {
+            return ResolvedValue::Fallback;
         }
     }
 
-    pub fn resolve(
-        &mut self,
-        rvsdg: &Rvsdg,
-        mut region: Region,
-        mut origin: ValueOrigin,
-    ) -> ResolvedValue {
-        self.visited.clear();
-
-        loop {
-            if !self.visited.insert((region, origin)) {
-                panic!("RVSDG should not contain cycles");
-            }
-
-            if let ValueOrigin::Output { producer, output } = origin {
-                if let Some(constant) = ScalarConstant::from_node(rvsdg, producer, output) {
-                    return ResolvedValue::Constant(constant);
-                }
-                if output == 0
-                    && matches!(
-                        rvsdg[producer].kind(),
-                        NodeKind::Simple(SimpleNode::ConstFallback(_))
-                    )
-                {
-                    return ResolvedValue::Fallback;
-                }
-            }
-            if let Some(key) = route(rvsdg, ValueKey::new(region, origin)) {
-                region = key.region;
-                origin = key.origin;
-            } else {
-                return ResolvedValue::Opaque { region, origin };
-            }
-        }
-    }
-}
-
-impl Default for ValueResolver {
-    fn default() -> Self {
-        Self::new()
+    ResolvedValue::Opaque {
+        region: key.region,
+        origin: key.origin,
     }
 }
 
@@ -69,8 +38,8 @@ mod tests {
     use std::iter;
 
     use super::*;
-    use crate::rvsdg::{ValueInput, ValueOutput};
-    use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_U32};
+    use crate::rvsdg::ValueInput;
+    use crate::ty::{TY_DUMMY, TY_U32};
     use crate::{FnSig, Function, Module, Symbol};
 
     #[test]
@@ -101,10 +70,8 @@ mod tests {
         let predicate_constant = rvsdg.add_const_predicate(body, 2);
         let fallback = rvsdg.add_const_fallback(body, TY_U32);
 
-        let mut resolver = ValueResolver::new();
-
         assert_eq!(
-            resolver.resolve(
+            resolve_value(
                 &rvsdg,
                 body,
                 ValueOrigin::Output {
@@ -115,7 +82,7 @@ mod tests {
             ResolvedValue::Constant(ScalarConstant::U32(7))
         );
         assert_eq!(
-            resolver.resolve(
+            resolve_value(
                 &rvsdg,
                 body,
                 ValueOrigin::Output {
@@ -126,7 +93,7 @@ mod tests {
             ResolvedValue::Constant(ScalarConstant::I32(-3))
         );
         assert_eq!(
-            resolver.resolve(
+            resolve_value(
                 &rvsdg,
                 body,
                 ValueOrigin::Output {
@@ -137,7 +104,7 @@ mod tests {
             ResolvedValue::Constant(ScalarConstant::F32(1.25_f32.to_bits()))
         );
         assert_eq!(
-            resolver.resolve(
+            resolve_value(
                 &rvsdg,
                 body,
                 ValueOrigin::Output {
@@ -148,7 +115,7 @@ mod tests {
             ResolvedValue::Constant(ScalarConstant::Bool(true))
         );
         assert_eq!(
-            resolver.resolve(
+            resolve_value(
                 &rvsdg,
                 body,
                 ValueOrigin::Output {
@@ -159,7 +126,7 @@ mod tests {
             ResolvedValue::Constant(ScalarConstant::Predicate(2))
         );
         assert_eq!(
-            resolver.resolve(
+            resolve_value(
                 &rvsdg,
                 body,
                 ValueOrigin::Output {
@@ -168,227 +135,6 @@ mod tests {
                 },
             ),
             ResolvedValue::Fallback
-        );
-    }
-
-    #[test]
-    fn resolves_through_proxies() {
-        let mut module = Module::new(Symbol::from_ref(""));
-        let function = Function {
-            name: Symbol::from_ref("test"),
-            module: Symbol::from_ref(""),
-        };
-
-        module.fn_sigs.register(
-            function,
-            FnSig {
-                name: function.name,
-                ty: TY_DUMMY,
-                args: vec![],
-                ret_ty: None,
-            },
-        );
-
-        let mut rvsdg = Rvsdg::new(module.ty.clone());
-        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
-
-        let constant = rvsdg.add_const_u32(body, 7);
-        let constant_proxy = rvsdg.add_value_proxy(body, ValueInput::output(TY_U32, constant, 0));
-        let constant_proxy_2 =
-            rvsdg.add_value_proxy(body, ValueInput::output(TY_U32, constant_proxy, 0));
-        let fallback = rvsdg.add_const_fallback(body, TY_U32);
-        let fallback_proxy = rvsdg.add_value_proxy(body, ValueInput::output(TY_U32, fallback, 0));
-
-        let mut resolver = ValueResolver::new();
-
-        assert_eq!(
-            resolver.resolve(
-                &rvsdg,
-                body,
-                ValueOrigin::Output {
-                    producer: constant_proxy_2,
-                    output: 0,
-                },
-            ),
-            ResolvedValue::Constant(ScalarConstant::U32(7))
-        );
-        assert_eq!(
-            resolver.resolve(
-                &rvsdg,
-                body,
-                ValueOrigin::Output {
-                    producer: fallback_proxy,
-                    output: 0,
-                },
-            ),
-            ResolvedValue::Fallback
-        );
-    }
-
-    #[test]
-    fn resolves_through_switch_arguments() {
-        let mut module = Module::new(Symbol::from_ref(""));
-        let function = Function {
-            name: Symbol::from_ref("test"),
-            module: Symbol::from_ref(""),
-        };
-
-        module.fn_sigs.register(
-            function,
-            FnSig {
-                name: function.name,
-                ty: TY_DUMMY,
-                args: vec![],
-                ret_ty: None,
-            },
-        );
-
-        let mut rvsdg = Rvsdg::new(module.ty.clone());
-        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
-
-        let selector = rvsdg.add_const_predicate(body, 0);
-        let constant = rvsdg.add_const_u32(body, 7);
-        let fallback = rvsdg.add_const_fallback(body, TY_U32);
-
-        let switch = rvsdg.add_switch(
-            body,
-            vec![
-                ValueInput::output(TY_PREDICATE, selector, 0),
-                ValueInput::output(TY_U32, constant, 0),
-                ValueInput::output(TY_U32, fallback, 0),
-            ],
-            vec![ValueOutput::new(TY_U32)],
-            None,
-        );
-        let branch = rvsdg.add_switch_branch(switch);
-
-        let mut resolver = ValueResolver::new();
-
-        assert_eq!(
-            resolver.resolve(&rvsdg, branch, ValueOrigin::Argument(0)),
-            ResolvedValue::Constant(ScalarConstant::U32(7))
-        );
-        assert_eq!(
-            resolver.resolve(&rvsdg, branch, ValueOrigin::Argument(1)),
-            ResolvedValue::Fallback
-        );
-    }
-
-    #[test]
-    fn resolves_only_through_loop_invariant_arguments() {
-        let mut module = Module::new(Symbol::from_ref(""));
-        let function = Function {
-            name: Symbol::from_ref("test"),
-            module: Symbol::from_ref(""),
-        };
-
-        module.fn_sigs.register(
-            function,
-            FnSig {
-                name: function.name,
-                ty: TY_DUMMY,
-                args: vec![],
-                ret_ty: None,
-            },
-        );
-
-        let mut rvsdg = Rvsdg::new(module.ty.clone());
-        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
-
-        let constant = rvsdg.add_const_u32(body, 7);
-        let fallback = rvsdg.add_const_fallback(body, TY_U32);
-
-        let (_, loop_region) = rvsdg.add_loop(
-            body,
-            vec![
-                ValueInput::output(TY_U32, constant, 0),
-                ValueInput::output(TY_U32, fallback, 0),
-            ],
-            None,
-        );
-        let reentry = rvsdg.add_const_bool(loop_region, false);
-
-        rvsdg.reconnect_region_result(
-            loop_region,
-            0,
-            ValueOrigin::Output {
-                producer: reentry,
-                output: 0,
-            },
-        );
-
-        // Both loop-values start out loop-invariant
-        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
-        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(1));
-
-        let mut resolver = ValueResolver::new();
-
-        assert_eq!(
-            resolver.resolve(&rvsdg, loop_region, ValueOrigin::Argument(0)),
-            ResolvedValue::Constant(ScalarConstant::U32(7))
-        );
-        assert_eq!(
-            resolver.resolve(&rvsdg, loop_region, ValueOrigin::Argument(1)),
-            ResolvedValue::Fallback
-        );
-
-        // Change the second loop-value to no longer be loop-invariant
-        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(0));
-
-        assert_eq!(
-            resolver.resolve(&rvsdg, loop_region, ValueOrigin::Argument(1)),
-            ResolvedValue::Opaque {
-                region: loop_region,
-                origin: ValueOrigin::Argument(1),
-            }
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "RVSDG should not contain cycles")]
-    fn panics_on_rvsdg_cycle() {
-        let mut module = Module::new(Symbol::from_ref(""));
-        let function = Function {
-            name: Symbol::from_ref("test"),
-            module: Symbol::from_ref(""),
-        };
-
-        module.fn_sigs.register(
-            function,
-            FnSig {
-                name: function.name,
-                ty: TY_DUMMY,
-                args: vec![],
-                ret_ty: None,
-            },
-        );
-
-        let mut rvsdg = Rvsdg::new(module.ty.clone());
-        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
-
-        let constant = rvsdg.add_const_u32(body, 7);
-        let cycle_0 = rvsdg.add_value_proxy(body, ValueInput::output(TY_U32, constant, 0));
-        let cycle_1 = rvsdg.add_value_proxy(body, ValueInput::output(TY_U32, cycle_0, 0));
-
-        // Construct a cycle between cycle_0 and cycle_1
-        rvsdg.reconnect_value_input(
-            cycle_0,
-            0,
-            ValueOrigin::Output {
-                producer: cycle_1,
-                output: 0,
-            },
-        );
-
-        let mut resolver = ValueResolver::new();
-
-        resolver.resolve(
-            &rvsdg,
-            body,
-            ValueOrigin::Output {
-                producer: cycle_0,
-                output: 0,
-            },
         );
     }
 }

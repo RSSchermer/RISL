@@ -2,8 +2,8 @@ use indexmap::{IndexMap, IndexSet};
 
 use super::domain::AbstractPredicate;
 use super::engine::Engine;
-use super::routing::contains_region;
-use super::{AbstractValue, ContextId, QueryCache, ValueKey, branches_matching_selector};
+use super::{AbstractValue, ContextId, QueryCache, branches_matching_selector, contains_region};
+use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::rvsdg::{Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 use crate::ty::{TY_I32, TY_U32};
@@ -254,10 +254,7 @@ impl<'a, 'graph, 'frames> ContextBuilder<'a, 'graph, 'frames> {
     }
 
     fn record_value(&mut self, key: ValueKey, constraints: AbstractValue) -> bool {
-        let Some(key) = key.canonicalize(self.engine.rvsdg) else {
-            return false;
-        };
-
+        let key = key.canonicalize(self.engine.rvsdg);
         let env = self.parent.with_constraint_frame(&self.constraint_frame);
         let base = env.assumption_derived_constraints(self.engine.rvsdg, key);
         let refined = base.refine(&constraints);

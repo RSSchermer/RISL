@@ -6,7 +6,7 @@
 //!
 //! [dead_value_elimination]: crate::rvsdg::transform::dead_value_elimination
 
-use crate::rvsdg::analyse::value_resolution::{ResolvedValue, ValueResolver};
+use crate::rvsdg::analyse::value_resolution::{ResolvedValue, resolve_value};
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{Connectivity, Node, Region, Rvsdg, ValueOrigin, visit};
 
@@ -26,14 +26,12 @@ impl RegionNodesVisitor for SwitchNodeCollector<'_> {
 
 pub struct ConstSwitchOutputExtractor {
     switch_node_queue: Vec<Node>,
-    resolver: ValueResolver,
 }
 
 impl ConstSwitchOutputExtractor {
     pub fn new() -> Self {
         Self {
             switch_node_queue: Vec::new(),
-            resolver: ValueResolver::new(),
         }
     }
 
@@ -72,9 +70,7 @@ impl ConstSwitchOutputExtractor {
             for branch in branches {
                 let origin = rvsdg[branch].value_results()[output].origin;
 
-                let ResolvedValue::Constant(constant) =
-                    self.resolver.resolve(rvsdg, branch, origin)
-                else {
+                let ResolvedValue::Constant(constant) = resolve_value(rvsdg, branch, origin) else {
                     common = None;
 
                     break;

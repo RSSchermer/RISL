@@ -78,8 +78,9 @@ use std::collections::VecDeque;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::cva::{
-    AbstractValue, AssumptionResult, BooleanRelation, ContextId, ContextualValueAnalysis, ValueKey,
+    AbstractValue, AssumptionResult, BooleanRelation, ContextId, ContextualValueAnalysis,
     query_boolean_relation,
 };
 use crate::rvsdg::analyse::region_stratification::RegionStratifier;

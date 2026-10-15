@@ -3,8 +3,9 @@ use rustc_hash::FxHashSet;
 use super::context::constraint_frame_for_assumed_branch;
 use super::domain::AbstractPredicate;
 use super::{
-    AbstractValue, AssumedBranchData, Environment, QueryCache, ValueKey, branches_matching_selector,
+    AbstractValue, AssumedBranchData, Environment, QueryCache, branches_matching_selector,
 };
+use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::rvsdg::{Node, NodeKind, Rvsdg, SimpleNode, ValueOrigin};
 
@@ -58,12 +59,7 @@ impl<'a> Engine<'a> {
             return AbstractValue::bottom(ty);
         }
 
-        let Some(key) = key.canonicalize(self.rvsdg) else {
-            // A cycle of identity-preserving routes has no canonical value to evaluate.
-            self.conservative_fallback_revision += 1;
-
-            return AbstractValue::top(ty);
-        };
+        let key = key.canonicalize(self.rvsdg);
 
         if let Some(value) = cache.value_constraints.get(&key) {
             // We've successfully evaluated this value before, so we can return the cached result.
