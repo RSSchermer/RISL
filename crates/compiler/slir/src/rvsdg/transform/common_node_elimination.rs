@@ -63,8 +63,6 @@ enum SimpleNodeMetadata {
     OpToDegrees,
     OpVector(Vector),
     OpMatrix(Matrix),
-    OpCaseToBranchSelector(Int, Vec<BranchCase>),
-    OpBoolToBranchSelector,
     OpBranchSelectorToCase(Int, Vec<BranchCase>),
     OpConvertToU32,
     OpConvertToI32,
@@ -133,10 +131,6 @@ impl SimpleNodeMetadata {
             SimpleNode::OpToDegrees(_) => SimpleNodeMetadata::OpToDegrees,
             SimpleNode::OpVector(n) => SimpleNodeMetadata::OpVector(n.intrinsic().ty),
             SimpleNode::OpMatrix(n) => SimpleNodeMetadata::OpMatrix(n.intrinsic().ty),
-            SimpleNode::OpCaseToBranchSelector(n) => {
-                SimpleNodeMetadata::OpCaseToBranchSelector(n.encoding(), n.cases().to_vec())
-            }
-            SimpleNode::OpBoolToBranchSelector(_) => SimpleNodeMetadata::OpBoolToBranchSelector,
             SimpleNode::OpBranchSelectorToCase(n) => {
                 SimpleNodeMetadata::OpBranchSelectorToCase(n.encoding(), n.cases().to_vec())
             }
@@ -147,6 +141,12 @@ impl SimpleNodeMetadata {
             SimpleNode::OpArrayLength(_) => SimpleNodeMetadata::OpArrayLength,
             SimpleNode::ValueProxy(_) => SimpleNodeMetadata::ValueProxy,
             SimpleNode::Reaggregation(_) => SimpleNodeMetadata::Reaggregation,
+
+            // Don't deduplicate branch-selector conversions to preserve predicate continuation
+            // form. See also the branch-selector-normalization transform.
+            SimpleNode::OpCaseToBranchSelector(_) | SimpleNode::OpBoolToBranchSelector(_) => {
+                return None;
+            }
 
             // We don't ever consider alloca nodes or nodes that are part of the state chain to be
             // duplicates.
@@ -264,7 +264,7 @@ impl CommonNodeEliminator {
 mod tests {
     use super::*;
     use crate::rvsdg::{StateOrigin, ValueInput, ValueOrigin};
-    use crate::ty::{TY_DUMMY, TY_U32};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_U32};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol};
 
     #[test]
@@ -532,5 +532,128 @@ mod tests {
         let mut eliminator = CommonNodeEliminator::new();
         // Should NOT eliminate because they are stateful.
         assert!(!eliminator.process_region(&mut rvsdg, region));
+    }
+
+    #[test]
+    fn test_common_node_elimination_ignores_branch_selector_convertors() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("m"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_BOOL,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_U32,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, Vec::new());
+
+        let bool_selector_0 =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::argument(TY_BOOL, 0));
+        let bool_switch_0 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, bool_selector_0, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(bool_switch_0);
+        rvsdg.add_switch_branch(bool_switch_0);
+
+        let bool_selector_1 =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::argument(TY_BOOL, 0));
+        let bool_switch_1 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, bool_selector_1, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(bool_switch_1);
+        rvsdg.add_switch_branch(bool_switch_1);
+
+        let case_selector_0 = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 1),
+            Int::U32,
+            vec![BranchCase::from(0u32)],
+        );
+        let case_switch_0 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, case_selector_0, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(case_switch_0);
+        rvsdg.add_switch_branch(case_switch_0);
+
+        let case_selector_1 = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 1),
+            Int::U32,
+            vec![BranchCase::from(0u32)],
+        );
+        let case_switch_1 = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, case_selector_1, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(case_switch_1);
+        rvsdg.add_switch_branch(case_switch_1);
+
+        let mut eliminator = CommonNodeEliminator::new();
+        assert!(!eliminator.process_region(&mut rvsdg, region));
+
+        assert_eq!(
+            rvsdg[bool_switch_0].value_inputs()[0].origin,
+            ValueOrigin::Output {
+                producer: bool_selector_0,
+                output: 0,
+            }
+        );
+        assert_eq!(rvsdg[bool_selector_0].value_outputs()[0].users.len(), 1);
+
+        assert_eq!(
+            rvsdg[bool_switch_1].value_inputs()[0].origin,
+            ValueOrigin::Output {
+                producer: bool_selector_1,
+                output: 0,
+            }
+        );
+        assert_eq!(rvsdg[bool_selector_1].value_outputs()[0].users.len(), 1);
+
+        assert_eq!(
+            rvsdg[case_switch_0].value_inputs()[0].origin,
+            ValueOrigin::Output {
+                producer: case_selector_0,
+                output: 0,
+            }
+        );
+        assert_eq!(rvsdg[case_selector_0].value_outputs()[0].users.len(), 1);
+
+        assert_eq!(
+            rvsdg[case_switch_1].value_inputs()[0].origin,
+            ValueOrigin::Output {
+                producer: case_selector_1,
+                output: 0,
+            }
+        );
+        assert_eq!(rvsdg[case_selector_1].value_outputs()[0].users.len(), 1);
     }
 }
