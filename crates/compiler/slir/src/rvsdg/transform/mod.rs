@@ -14,6 +14,7 @@ pub mod enum_replacement;
 pub mod fallback_value_replacement;
 pub mod function_inlining;
 pub mod identical_branch_elimination;
+pub mod instruction_combining;
 pub mod invalid_ptr_replacement;
 pub mod loop_pointer_normalization;
 pub mod loop_slice_offset_normalization;
@@ -42,6 +43,7 @@ use crate::rvsdg::transform::const_switch_output_extraction::ConstSwitchOutputEx
 use crate::rvsdg::transform::contextual_node_reduction::ContextualNodeReducer;
 use crate::rvsdg::transform::dead_loop_value_normalization::DeadLoopValueNormalizer;
 use crate::rvsdg::transform::identical_branch_elimination::IdenticalBranchElimination;
+use crate::rvsdg::transform::instruction_combining::InstructionCombiner;
 use crate::rvsdg::transform::passthrough_elimination::PassthroughEliminator;
 use crate::rvsdg::transform::redundant_state_link_elimination::RedundantStateLinkEliminator;
 use crate::rvsdg::transform::switch_fallback_unification::SwitchFallbackUnifier;
@@ -87,6 +89,7 @@ fn optimize_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
 
 struct LoopingOptimizer {
     contextual_value_optimizer: ContextualNodeReducer,
+    instruction_combiner: InstructionCombiner,
     switch_merger: SwitchMerger,
     common_value_eliminator: CommonValueEliminator,
     switch_fallback_unifier: SwitchFallbackUnifier,
@@ -101,6 +104,7 @@ impl LoopingOptimizer {
     fn new() -> Self {
         Self {
             contextual_value_optimizer: ContextualNodeReducer::new(),
+            instruction_combiner: InstructionCombiner::new(),
             switch_merger: SwitchMerger::new(),
             common_value_eliminator: CommonValueEliminator::new(),
             switch_fallback_unifier: SwitchFallbackUnifier::new(),
@@ -126,6 +130,7 @@ impl LoopingOptimizer {
             do_iteration |= self
                 .contextual_value_optimizer
                 .optimize_function(module, rvsdg, function);
+            do_iteration |= self.instruction_combiner.combine_in_fn(rvsdg, function);
             do_iteration |= self.switch_merger.merge_in_fn(module, rvsdg, function);
             do_iteration |= self
                 .switch_fallback_unifier
