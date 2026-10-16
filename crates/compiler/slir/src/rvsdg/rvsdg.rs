@@ -3885,6 +3885,15 @@ impl Rvsdg {
         }
     }
 
+    pub fn value_users(&self, region: Region, origin: ValueOrigin) -> &ThinSet<ValueUser> {
+        match origin {
+            ValueOrigin::Argument(arg) => &self[region].value_arguments[arg as usize].users,
+            ValueOrigin::Output { producer, output } => {
+                &self[producer].value_outputs()[output as usize].users
+            }
+        }
+    }
+
     pub fn reconnect_value_user(
         &mut self,
         region: Region,
