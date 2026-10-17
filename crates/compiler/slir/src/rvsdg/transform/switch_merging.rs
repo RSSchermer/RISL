@@ -4,9 +4,52 @@ use crate::rvsdg::analyse::region_stratification::RegionStratifier;
 use crate::rvsdg::transform::region_replication::replicate_region;
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
-    Connectivity, Node, NodeKind, Region, Rvsdg, StateOrigin, ValueOrigin, ValueUser, visit,
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, StateOrigin, ValueOrigin, ValueUser,
+    visit,
 };
 use crate::{Function, Module};
+
+fn equivalent_selectors(
+    rvsdg: &Rvsdg,
+    region: Region,
+    origin_0: ValueOrigin,
+    origin_1: ValueOrigin,
+) -> bool {
+    use NodeKind::*;
+    use SimpleNode::*;
+
+    if origin_0 == origin_1 {
+        return true;
+    }
+
+    let (
+        ValueOrigin::Output {
+            producer: selector_0,
+            output: 0,
+        },
+        ValueOrigin::Output {
+            producer: selector_1,
+            output: 0,
+        },
+    ) = (origin_0, origin_1)
+    else {
+        return false;
+    };
+
+    if rvsdg[selector_0].region() != region || rvsdg[selector_1].region() != region {
+        return false;
+    }
+
+    match (rvsdg[selector_0].kind(), rvsdg[selector_1].kind()) {
+        (Simple(OpBoolToBranchSelector(a)), Simple(OpBoolToBranchSelector(b))) => {
+            a.value_input() == b.value_input()
+        }
+        (Simple(OpCaseToBranchSelector(a)), Simple(OpCaseToBranchSelector(b))) => {
+            a.value_input() == b.value_input() && a.intrinsic() == b.intrinsic()
+        }
+        _ => false,
+    }
+}
 
 fn merge_switch_nodes(
     module: &mut Module,
@@ -200,7 +243,28 @@ impl RegionSwitchMerger {
                         break 'inner;
                     }
 
-                    if other.predicate_origin == candidate.predicate_origin {
+                    let candidate_data = rvsdg[candidate.switch_node].expect_switch();
+                    let other_data = rvsdg[other.switch_node].expect_switch();
+
+                    if candidate_data.branches().len() != other_data.branches().len() {
+                        continue 'inner;
+                    }
+
+                    // If both switch nodes are part of the state chain, then they must be adjacent
+                    // in the state chain.
+                    if candidate_data.state().is_some()
+                        && let Some(state) = other_data.state()
+                        && state.origin != StateOrigin::Node(candidate.switch_node)
+                    {
+                        continue 'inner;
+                    }
+
+                    if equivalent_selectors(
+                        rvsdg,
+                        region,
+                        candidate.predicate_origin,
+                        other.predicate_origin,
+                    ) {
                         merge_switch_nodes(
                             module,
                             rvsdg,
@@ -308,8 +372,8 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{ValueInput, ValueOutput};
-    use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_U32};
-    use crate::{BinaryOperator, FnSig, Symbol};
+    use crate::ty::{Int, TY_BOOL, TY_DUMMY, TY_PREDICATE, TY_U32};
+    use crate::{BinaryOperator, BranchCase, FnArg, FnSig, Symbol};
 
     #[test]
     fn test_merge_same_stratum_switch_nodes() {
@@ -771,5 +835,399 @@ mod tests {
             switch_1_data.value_outputs()[1].users.is_empty(),
             "switch-1's newly added output should not have any users"
         );
+    }
+
+    #[test]
+    fn test_merge_same_stratum_switch_nodes_with_equivalent_bool_selectors() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: [TY_BOOL, TY_U32, TY_U32, TY_U32, TY_U32]
+                    .into_iter()
+                    .map(|ty| FnArg {
+                        ty,
+                        shader_io_binding: None,
+                    })
+                    .collect(),
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector_0_node =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::argument(TY_BOOL, 0));
+        let selector_1_node =
+            rvsdg.add_op_bool_to_branch_selector(region, ValueInput::argument(TY_BOOL, 0));
+
+        assert_ne!(selector_0_node, selector_1_node);
+
+        let switch_0_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector_0_node, 0),
+                ValueInput::argument(TY_U32, 1),
+                ValueInput::argument(TY_U32, 2),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let switch_0_branch_0 = rvsdg.add_switch_branch(switch_0_node);
+        let switch_0_branch_1 = rvsdg.add_switch_branch(switch_0_node);
+
+        rvsdg.reconnect_region_result(switch_0_branch_0, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(switch_0_branch_1, 0, ValueOrigin::Argument(1));
+
+        let switch_1_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector_1_node, 0),
+                ValueInput::argument(TY_U32, 3),
+                ValueInput::argument(TY_U32, 4),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let switch_1_branch_0 = rvsdg.add_switch_branch(switch_1_node);
+        let switch_1_branch_1 = rvsdg.add_switch_branch(switch_1_node);
+
+        rvsdg.reconnect_region_result(switch_1_branch_0, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(switch_1_branch_1, 0, ValueOrigin::Argument(1));
+
+        let add_node = rvsdg.add_op_binary(
+            region,
+            BinaryOperator::Add,
+            ValueInput::output(TY_U32, switch_0_node, 0),
+            ValueInput::output(TY_U32, switch_1_node, 0),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: add_node,
+                output: 0,
+            },
+        );
+
+        let mut merger = SwitchMerger::new();
+
+        assert!(merger.merge_in_fn(&mut module, &mut rvsdg, function));
+        assert!(!rvsdg.is_live_node(switch_0_node));
+        assert!(rvsdg.is_live_node(switch_1_node));
+
+        let switch_1_data = rvsdg[switch_1_node].expect_switch();
+
+        assert_eq!(
+            switch_1_data.value_inputs(),
+            &[
+                ValueInput::output(TY_PREDICATE, selector_1_node, 0),
+                ValueInput::argument(TY_U32, 3),
+                ValueInput::argument(TY_U32, 4),
+                ValueInput::argument(TY_U32, 1),
+                ValueInput::argument(TY_U32, 2),
+            ]
+        );
+        assert_eq!(switch_1_data.value_outputs().len(), 2);
+        assert_eq!(switch_1_data.branches().len(), 2);
+
+        assert_eq!(
+            rvsdg[switch_1_branch_0].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_0].value_results()[1].origin,
+            ValueOrigin::Argument(2)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_1].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_1].value_results()[1].origin,
+            ValueOrigin::Argument(3)
+        );
+
+        let add_data = rvsdg[add_node].expect_op_binary();
+
+        assert_eq!(
+            add_data.lhs_input(),
+            &ValueInput::output(TY_U32, switch_1_node, 1)
+        );
+        assert_eq!(
+            add_data.rhs_input(),
+            &ValueInput::output(TY_U32, switch_1_node, 0)
+        );
+    }
+
+    #[test]
+    fn test_merge_same_stratum_switch_nodes_with_equivalent_case_selectors() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: [TY_U32; 7]
+                    .into_iter()
+                    .map(|ty| FnArg {
+                        ty,
+                        shader_io_binding: None,
+                    })
+                    .collect(),
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector_0_node = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 0),
+            Int::U32,
+            [BranchCase::from(7u32), BranchCase::from(2u32)],
+        );
+        let selector_1_node = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 0),
+            Int::U32,
+            [BranchCase::from(7u32), BranchCase::from(2u32)],
+        );
+
+        assert_ne!(selector_0_node, selector_1_node);
+
+        let switch_0_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector_0_node, 0),
+                ValueInput::argument(TY_U32, 1),
+                ValueInput::argument(TY_U32, 2),
+                ValueInput::argument(TY_U32, 3),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let switch_0_branch_0 = rvsdg.add_switch_branch(switch_0_node);
+        let switch_0_branch_1 = rvsdg.add_switch_branch(switch_0_node);
+        let switch_0_branch_2 = rvsdg.add_switch_branch(switch_0_node);
+
+        rvsdg.reconnect_region_result(switch_0_branch_0, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(switch_0_branch_1, 0, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(switch_0_branch_2, 0, ValueOrigin::Argument(2));
+
+        let switch_1_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector_1_node, 0),
+                ValueInput::argument(TY_U32, 4),
+                ValueInput::argument(TY_U32, 5),
+                ValueInput::argument(TY_U32, 6),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let switch_1_branch_0 = rvsdg.add_switch_branch(switch_1_node);
+        let switch_1_branch_1 = rvsdg.add_switch_branch(switch_1_node);
+        let switch_1_branch_2 = rvsdg.add_switch_branch(switch_1_node);
+
+        rvsdg.reconnect_region_result(switch_1_branch_0, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(switch_1_branch_1, 0, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(switch_1_branch_2, 0, ValueOrigin::Argument(2));
+
+        let add_node = rvsdg.add_op_binary(
+            region,
+            BinaryOperator::Add,
+            ValueInput::output(TY_U32, switch_0_node, 0),
+            ValueInput::output(TY_U32, switch_1_node, 0),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: add_node,
+                output: 0,
+            },
+        );
+
+        let mut merger = SwitchMerger::new();
+
+        assert!(merger.merge_in_fn(&mut module, &mut rvsdg, function));
+        assert!(!rvsdg.is_live_node(switch_0_node));
+        assert!(rvsdg.is_live_node(switch_1_node));
+
+        let switch_1_data = rvsdg[switch_1_node].expect_switch();
+
+        assert_eq!(
+            switch_1_data.value_inputs(),
+            &[
+                ValueInput::output(TY_PREDICATE, selector_1_node, 0),
+                ValueInput::argument(TY_U32, 4),
+                ValueInput::argument(TY_U32, 5),
+                ValueInput::argument(TY_U32, 6),
+                ValueInput::argument(TY_U32, 1),
+                ValueInput::argument(TY_U32, 2),
+                ValueInput::argument(TY_U32, 3),
+            ]
+        );
+        assert_eq!(switch_1_data.value_outputs().len(), 2);
+        assert_eq!(
+            switch_1_data.branches(),
+            &[switch_1_branch_0, switch_1_branch_1, switch_1_branch_2]
+        );
+
+        assert_eq!(
+            rvsdg[switch_1_branch_0].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_0].value_results()[1].origin,
+            ValueOrigin::Argument(3)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_1].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_1].value_results()[1].origin,
+            ValueOrigin::Argument(4)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_2].value_results()[0].origin,
+            ValueOrigin::Argument(2)
+        );
+        assert_eq!(
+            rvsdg[switch_1_branch_2].value_results()[1].origin,
+            ValueOrigin::Argument(5)
+        );
+
+        let add_data = rvsdg[add_node].expect_op_binary();
+
+        assert_eq!(
+            add_data.lhs_input(),
+            &ValueInput::output(TY_U32, switch_1_node, 1)
+        );
+        assert_eq!(
+            add_data.rhs_input(),
+            &ValueInput::output(TY_U32, switch_1_node, 0)
+        );
+    }
+
+    #[test]
+    fn test_do_not_merge_same_stratum_switch_nodes_with_different_case_lists() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: [TY_U32; 7]
+                    .into_iter()
+                    .map(|ty| FnArg {
+                        ty,
+                        shader_io_binding: None,
+                    })
+                    .collect(),
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector_0_node = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 0),
+            Int::U32,
+            [BranchCase::from(7u32), BranchCase::from(2u32)],
+        );
+        let selector_1_node = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::argument(TY_U32, 0),
+            Int::U32,
+            [BranchCase::from(2u32), BranchCase::from(7u32)],
+        );
+
+        assert_ne!(selector_0_node, selector_1_node);
+
+        let switch_0_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector_0_node, 0),
+                ValueInput::argument(TY_U32, 1),
+                ValueInput::argument(TY_U32, 2),
+                ValueInput::argument(TY_U32, 3),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let switch_0_branch_0 = rvsdg.add_switch_branch(switch_0_node);
+        let switch_0_branch_1 = rvsdg.add_switch_branch(switch_0_node);
+        let switch_0_branch_2 = rvsdg.add_switch_branch(switch_0_node);
+
+        rvsdg.reconnect_region_result(switch_0_branch_0, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(switch_0_branch_1, 0, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(switch_0_branch_2, 0, ValueOrigin::Argument(2));
+
+        let switch_1_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, selector_1_node, 0),
+                ValueInput::argument(TY_U32, 4),
+                ValueInput::argument(TY_U32, 5),
+                ValueInput::argument(TY_U32, 6),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+        let switch_1_branch_0 = rvsdg.add_switch_branch(switch_1_node);
+        let switch_1_branch_1 = rvsdg.add_switch_branch(switch_1_node);
+        let switch_1_branch_2 = rvsdg.add_switch_branch(switch_1_node);
+
+        rvsdg.reconnect_region_result(switch_1_branch_0, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(switch_1_branch_1, 0, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(switch_1_branch_2, 0, ValueOrigin::Argument(2));
+
+        let add_node = rvsdg.add_op_binary(
+            region,
+            BinaryOperator::Add,
+            ValueInput::output(TY_U32, switch_0_node, 0),
+            ValueInput::output(TY_U32, switch_1_node, 0),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: add_node,
+                output: 0,
+            },
+        );
+
+        let mut merger = SwitchMerger::new();
+
+        assert!(!merger.merge_in_fn(&mut module, &mut rvsdg, function));
+        assert!(rvsdg.is_live_node(switch_0_node));
+        assert!(rvsdg.is_live_node(switch_1_node));
     }
 }
