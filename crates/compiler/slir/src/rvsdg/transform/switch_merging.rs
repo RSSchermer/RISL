@@ -163,6 +163,8 @@ impl RegionSwitchMerger {
     }
 
     fn collect_candidates(&mut self, rvsdg: &Rvsdg, region: Region) {
+        self.candidates.clear();
+
         self.region_stratifier
             .stratify(rvsdg, region, |node, stratum| {
                 if let NodeKind::Switch(n) = rvsdg[node].kind() {
@@ -178,44 +180,55 @@ impl RegionSwitchMerger {
     fn merge_in_region(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, region: Region) -> bool {
         let mut changed = false;
 
-        self.collect_candidates(rvsdg, region);
+        'round: loop {
+            self.collect_candidates(rvsdg, region);
 
-        while let Some(candidate) = self.candidates.pop_front() {
-            let max_stratum = candidate.stratum + 1;
+            while let Some(candidate) = self.candidates.pop_front() {
+                let max_stratum = candidate.stratum + 1;
 
-            'inner: for other in &self.candidates {
-                // The candidate node list was collected in such a way that the candidates will be
-                // ordered by "stratum" (see analyze::region_stratification). We allow two switch
-                // nodes to merge if they are either in the same stratum or in consecutive strata:
-                // if this is the case, then we are assured that there are no connections between
-                // the two switch nodes that travel through another node (only direct connections,
-                // if any).
+                'inner: for other in &self.candidates {
+                    // The candidate node list was collected in such a way that the candidates will
+                    // be ordered by "stratum" (see analyze::region_stratification). We allow two
+                    // switch nodes to merge if they are either in the same stratum or in
+                    // consecutive strata: if this is the case, then we are assured that there are
+                    // no connections between the two switch nodes that travel through another node
+                    // (only direct connections, if any).
 
-                if other.stratum > max_stratum {
-                    // The stratum gap is too large and, because of the ordering, will only get
-                    // larger for later candidates, so we can stop looking for candidates here.
-                    break 'inner;
-                }
+                    if other.stratum > max_stratum {
+                        // The stratum gap is too large and, because of the ordering, will only get
+                        // larger for later candidates, so we can stop looking for candidates here.
+                        break 'inner;
+                    }
 
-                if other.predicate_origin == candidate.predicate_origin {
-                    merge_switch_nodes(
-                        module,
-                        rvsdg,
-                        region,
-                        candidate.switch_node,
-                        other.switch_node,
-                    );
-                    changed = true;
+                    if other.predicate_origin == candidate.predicate_origin {
+                        merge_switch_nodes(
+                            module,
+                            rvsdg,
+                            region,
+                            candidate.switch_node,
+                            other.switch_node,
+                        );
+                        changed = true;
 
-                    // We break here because the `candidate` switch node no longer exists:
-                    // `merge_switch_nodes` merges the first switch node argument into the second
-                    // switch node argument, then removes the first switch node from the RVSDG.
-                    // The second switch node `other` is still in the candidates list, so if there
-                    // are more nodes to merge into `other`, then we'll find them and merge in
-                    // further iterations of the outer loop.
-                    break 'inner;
+                        // When merging two nodes in the same stratum, the stratum of the resulting
+                        // switch is obvious: it is this same stratum. However, when merging two
+                        // switch nodes in different strata, this fails. This invalidates our
+                        // measure for determining whether switch nodes can be safely merged (they
+                        // must be on the same stratum or on adjacent strata). We therefore abort
+                        // the current round and recollect and restratify the switch node candidates
+                        // from the updated RVSDG.
+                        if other.stratum != candidate.stratum {
+                            continue 'round;
+                        }
+
+                        // The candidate no longer exists; the survivor remains in the queue
+                        // and can participate in further same-stratum merges this round.
+                        break 'inner;
+                    }
                 }
             }
+
+            break;
         }
 
         changed
