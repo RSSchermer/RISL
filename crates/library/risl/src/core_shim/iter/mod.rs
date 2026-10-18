@@ -2,6 +2,8 @@ use std::num::NonZero;
 
 use risl_macros::gpu;
 
+pub mod chain;
+
 // The body of this shim is identical to the body of the regular Rust `core` version. We still have
 // to shim this function, because of MIR optimizations performed by rustc when compiling core/std.
 // In this particular case, it will inline NonZero::new, which exposes a transmute that rislc cannot
@@ -47,4 +49,31 @@ where
     }
 
     iter.spec_advance_by(n)
+}
+
+// As with advance_by above, precompiled core can inline NonZero construction here.
+#[gpu]
+#[cfg_attr(
+    rislc,
+    rislc::core_shim("core::iter::DoubleEndedIterator::advance_back_by")
+)]
+pub fn double_ended_iterator_advance_back_by<I>(
+    iter: &mut I,
+    n: usize,
+) -> Result<(), NonZero<usize>>
+where
+    I: DoubleEndedIterator + ?Sized,
+{
+    let mut i = 0;
+
+    while i < n {
+        if iter.next_back().is_none() {
+            // SAFETY: `i` is always less than `n`.
+            return Err(unsafe { NonZero::new_unchecked(n - i) });
+        }
+
+        i += 1;
+    }
+
+    Ok(())
 }

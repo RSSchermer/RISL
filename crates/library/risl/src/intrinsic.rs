@@ -48,6 +48,11 @@ gen_intrinsic!(slice_iter_set_start: fn slice_iter_mut_set_start<T>(slice: &mut 
 gen_intrinsic!(slice_iter_end: fn slice_iter_mut_end<T>(slice: &core::slice::IterMut<'_, T>) -> usize);
 gen_intrinsic!(slice_iter_set_end: fn slice_iter_mut_set_end<T>(slice: &mut core::slice::IterMut<'_, T>, end: usize));
 
+gen_intrinsic!(chain_a_ref: fn chain_a_ref<A, B>(iter: &core::iter::Chain<A, B>) -> &Option<A>);
+gen_intrinsic!(chain_a_ref: fn chain_a_mut<A, B>(iter: &mut core::iter::Chain<A, B>) -> &mut Option<A>);
+gen_intrinsic!(chain_b_ref: fn chain_b_ref<A, B>(iter: &core::iter::Chain<A, B>) -> &Option<B>);
+gen_intrinsic!(chain_b_ref: fn chain_b_mut<A, B>(iter: &mut core::iter::Chain<A, B>) -> &mut Option<B>);
+
 gen_intrinsic!(non_zero_new: fn non_zero_new<T: ZeroablePrimitive>(n: T) -> Option<NonZero<T>>);
 gen_intrinsic!(non_zero_new_unchecked: fn non_zero_new_unchecked<T: ZeroablePrimitive>(n: T) -> NonZero<T>);
 gen_intrinsic!(non_zero_get: fn non_zero_get<T: ZeroablePrimitive>(n: NonZero<T>) -> T);

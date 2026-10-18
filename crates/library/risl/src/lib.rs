@@ -1,6 +1,7 @@
 #![feature(
     core_intrinsics,
     custom_inner_attributes,
+    iter_advance_by,
     nonzero_internals,
     ptr_metadata,
     specialization,

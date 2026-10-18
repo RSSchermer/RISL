@@ -31,6 +31,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::SliceIterEnd => define_slice_iter_end(instance, cx),
             RislIntrinsic::SliceIterSetEnd => define_slice_iter_set_end(instance, cx),
             RislIntrinsic::SliceIterClone => define_slice_iter_clone(instance, cx),
+            RislIntrinsic::ChainARef => define_chain_field_ref(instance, cx, 0),
+            RislIntrinsic::ChainBRef => define_chain_field_ref(instance, cx, 1),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
@@ -96,6 +98,8 @@ pub enum RislIntrinsic {
     SliceIterEnd,
     SliceIterSetEnd,
     SliceIterClone,
+    ChainARef,
+    ChainBRef,
     MemResourceAsRef,
     NonZeroNew,
     NonZeroNewUnchecked,
@@ -165,6 +169,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(slice_iter_end)]" => RislIntrinsic::SliceIterEnd,
         "#[rislc::intrinsic(slice_iter_set_end)]" => RislIntrinsic::SliceIterSetEnd,
         "#[rislc::intrinsic(slice_iter_clone)]" => RislIntrinsic::SliceIterClone,
+        "#[rislc::intrinsic(chain_a_ref)]" => RislIntrinsic::ChainARef,
+        "#[rislc::intrinsic(chain_b_ref)]" => RislIntrinsic::ChainBRef,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
@@ -1074,6 +1080,22 @@ fn define_slice_iter_clone(instance: Instance, cx: &CodegenContext) {
     cfg.add_stmt_op_store(bb, BlockPosition::Append, ret_ptr.into(), val.into());
 
     cfg.set_terminator(bb, Terminator::return_void());
+}
+
+fn define_chain_field_ref(instance: Instance, cx: &CodegenContext, field: u32) {
+    let function = cx.get_fn(&instance);
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+    let iter_ptr = body.argument_values()[0];
+
+    let (_, field_ptr) =
+        cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, iter_ptr.into(), field);
+
+    cfg.set_terminator(bb, Terminator::return_value(field_ptr.into()));
 }
 
 fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {
