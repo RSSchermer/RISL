@@ -571,12 +571,31 @@ impl PointerReconstructionContext {
             switch_node: Node,
             inner_origin: ValueOrigin,
         ) -> ValueOrigin {
+            // If the pointer is a "fallback value", we'll create a new fallback value in the outer
+            //region.
+            if let ValueOrigin::Output {
+                producer,
+                output: 0,
+            } = inner_origin
+                && let NodeKind::Simple(SimpleNode::ConstFallback(fallback)) =
+                    rvsdg[producer].kind()
+            {
+                let ty = fallback.ty();
+                let outer_region = rvsdg[switch_node].region();
+                let fallback = rvsdg.add_const_fallback(outer_region, ty);
+
+                return ValueOrigin::Output {
+                    producer: fallback,
+                    output: 0,
+                };
+            }
+
             // Originating pointer values must already be available outside the switch node, as
             // an originating pointer value may not outlive its region. (We don't currently enforce
             // this in SLIR, but all pointer values derive from Rust references, and the Rust
-            // borrow checker will enforce this for us.) Therefore, the `inner_origin` must be an
-            // argument origin, and we'll resolve the outer origin as the origin of the argument's
-            // corresponding input.
+            // borrow checker will enforce this for us.) Apart from the fallbacks handled above,
+            // `inner_origin` must be an argument origin, and we'll resolve the outer origin as the
+            // origin of the argument's corresponding input.
 
             let ValueOrigin::Argument(argument) = inner_origin else {
                 panic!("originating pointer value must originate outside the switch region")
