@@ -16,5 +16,6 @@ mod iter;
 mod num;
 mod ops;
 mod slice;
+mod switch_int;
 mod variable_pointer;
 mod while_loop;

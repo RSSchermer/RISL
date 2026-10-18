@@ -1033,7 +1033,7 @@ impl<'a, 'tcx> ConstCodegenMethods for CodegenContext<'a, 'tcx> {
     }
 
     fn const_uint_big(&self, t: Self::Type, u: u128) -> Self::Value {
-        slir::cfg::Value::InlineConst(slir::cfg::InlineConst::U32(u as u32)).into()
+        self.const_uint(t, u as u64)
     }
 
     fn const_real(&self, t: Self::Type, val: f64) -> Self::Value {
