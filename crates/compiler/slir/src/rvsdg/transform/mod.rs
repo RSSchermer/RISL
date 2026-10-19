@@ -57,6 +57,10 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     memory_transform::transform_entry_points(module, rvsdg);
     redundant_state_link_elimination::transform_entry_points(module, rvsdg);
     offset_slice_replacement::transform_entry_points(module, rvsdg);
+    // After offset-slice-replacement, unsized "slice" array values should have been made redundant.
+    // However, such "dead" values have not yet been removed. We do an early dead-value-elimination
+    // pass here so that later passes may assume the absence of unsized "slice" array values.
+    dead_value_elimination::transform_entry_points(module, rvsdg);
     pred_to_case_extraction::transform_entry_points(module, rvsdg);
     pred_to_case_to_pred_merging::transform_entry_points(module, rvsdg);
     switchify_pred_to_case::transform_entry_points(module, rvsdg);
