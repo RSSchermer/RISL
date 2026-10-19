@@ -2,7 +2,9 @@ use rustc_hash::FxHashSet;
 
 use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
-use crate::rvsdg::{Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, ValueUser, visit};
+use crate::rvsdg::{
+    Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, ValueUser, visit,
+};
 use crate::{BranchCase, Function, Module};
 
 struct NodeCollector<'a> {
@@ -73,6 +75,7 @@ impl CasesMatcher {
 struct DependentFinder {
     dependents: Vec<Node>,
     visited: FxHashSet<(Region, ValueUser)>,
+    all_uses_supported: bool,
 }
 
 impl DependentFinder {
@@ -80,22 +83,48 @@ impl DependentFinder {
         Self {
             dependents: Vec::new(),
             visited: FxHashSet::default(),
+            all_uses_supported: true,
         }
     }
 
-    fn find_dependents(&mut self, rvsdg: &Rvsdg, node: Node) -> &[Node] {
+    fn find_dependents(&mut self, rvsdg: &Rvsdg, node: Node) -> Option<&[Node]> {
         self.dependents.clear();
         self.visited.clear();
+        self.all_uses_supported = true;
 
         self.visit_value_output(rvsdg, node, 0);
 
-        &self.dependents
+        self.all_uses_supported.then_some(&self.dependents)
     }
 }
 
 impl ValueFlowVisitor for DependentFinder {
     fn should_visit(&mut self, region: Region, user: ValueUser) -> bool {
-        self.visited.insert((region, user))
+        self.all_uses_supported && self.visited.insert((region, user))
+    }
+
+    fn visit_region_result(&mut self, rvsdg: &Rvsdg, region: Region, result: u32) {
+        // We don't follow values that flow out of switch or loop nodes. If the value is a proper
+        // "passthrough" value (a value that passes through a loop or switch node unaltered), then a
+        // prior passthrough-elimination pass should have normalized such value-flow to bypass the
+        // switch/loop node. There is one exception: we do follow values into loop-regions, if the
+        // loop-value is loop-invariant. In such cases the value may reach the loop-region argument
+        // without invalidating the merge, but only if the corresponding loop output is unused.
+
+        let owner = rvsdg[region].owner();
+
+        if let NodeKind::Loop(_) = rvsdg[owner].kind()
+            && result > 0
+            && rvsdg[region].value_results()[result as usize].origin
+                == ValueOrigin::Argument(result - 1)
+            && rvsdg[owner].value_outputs()[result as usize - 1]
+                .users
+                .is_empty()
+        {
+            return;
+        }
+
+        self.all_uses_supported = false;
     }
 
     fn visit_value_input(&mut self, rvsdg: &Rvsdg, node: Node, input: u32) {
@@ -105,12 +134,21 @@ impl ValueFlowVisitor for DependentFinder {
         match rvsdg[node].kind() {
             Simple(OpBranchSelectorToCase(_)) => self.dependents.push(node),
             Switch(_) if input == 0 => self.dependents.push(node),
-            Switch(_) | Loop(_) => {
-                // We don't currently trace into nested regions; the goal of pred-to-case-to-pred
-                // merging is to identify switch nodes that can be merged, and we can only merge
-                // switch nodes that are in the same region.
+            Switch(_) => visit::value_flow::visit_value_input(self, rvsdg, node, input),
+            Loop(n) => {
+                let region = n.loop_region();
+
+                // See the comment in visit_region_result
+                if rvsdg[region].value_results()[input as usize + 1].origin
+                    == ValueOrigin::Argument(input)
+                    && rvsdg[node].value_outputs()[input as usize].users.is_empty()
+                {
+                    self.visit_region_argument(rvsdg, region, input);
+                } else {
+                    self.all_uses_supported = false;
+                }
             }
-            _ => unreachable!("node kind cannot take a predicate type value as input"),
+            _ => self.all_uses_supported = false,
         }
     }
 }
@@ -156,13 +194,26 @@ impl Merger {
                     continue;
                 }
 
-                if let CasesMatch::Permutation(permutation) = case_match {
-                    for dependent in self
-                        .dependent_finder
-                        .find_dependents(rvsdg, case_to_pred)
-                        .iter()
-                        .copied()
-                    {
+                // Apply the permutation to this OpCaseToBranchSelector's dependents. If the
+                // permutation is the identity permutation, then we can skip this step.
+                if let CasesMatch::Permutation(permutation) = case_match
+                    && permutation.iter().enumerate().any(|(i, &j)| i != j)
+                {
+                    let Some(dependents) =
+                        self.dependent_finder.find_dependents(rvsdg, case_to_pred)
+                    else {
+                        // If the dependent_finder returned None, then at least one of the
+                        // downstream users doesn't support the merge, so we abort merging this
+                        // OpCaseToBranchSelector.
+                        continue;
+                    };
+
+                    for dependent in dependents.iter().copied() {
+                        // A previous permutation may have removed a branch containing this node.
+                        if !rvsdg.is_live_node(dependent) {
+                            continue;
+                        }
+
                         match rvsdg[dependent].kind() {
                             Switch(_) => rvsdg.permute_switch_branches(dependent, permutation),
                             Simple(OpBranchSelectorToCase(_)) => rvsdg
@@ -219,7 +270,9 @@ impl PredToCaseToPredMerger {
         collector.visit_node(rvsdg, fn_node);
 
         for node in self.candidates.drain(..) {
-            self.merger.try_merge_pred_to_case_to_pred(rvsdg, node);
+            if rvsdg.is_live_node(node) {
+                self.merger.try_merge_pred_to_case_to_pred(rvsdg, node);
+            }
         }
     }
 }
@@ -499,6 +552,408 @@ mod tests {
             switch_data.branches(),
             &[branch_1, branch_0],
             "the switch node's branches were reordered"
+        );
+    }
+
+    #[test]
+    fn test_propagate_merge_into_switch_branches() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+        let inner_selector = rvsdg.add_const_predicate(region, 0);
+        let pred_to_case = rvsdg.add_op_branch_selector_to_case(
+            region,
+            ValueInput::output(TY_PREDICATE, inner_selector, 0),
+            Int::U32,
+            [BranchCase::from(1u32), BranchCase::from(0u32)],
+        );
+        let case_to_pred = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::output(TY_U32, pred_to_case, 0),
+            Int::U32,
+            [BranchCase::from(0u32)],
+        );
+        let outer_selector = rvsdg.add_const_predicate(region, 0);
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, outer_selector, 0),
+                ValueInput::output(TY_PREDICATE, case_to_pred, 0),
+            ],
+            vec![ValueOutput::new(TY_U32)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch_node);
+        let consumer_0 = rvsdg.add_op_branch_selector_to_case(
+            branch_0,
+            ValueInput::argument(TY_PREDICATE, 0),
+            Int::U32,
+            [BranchCase::from(111u32), BranchCase::from(222u32)],
+        );
+
+        rvsdg.reconnect_region_result(
+            branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: consumer_0,
+                output: 0,
+            },
+        );
+
+        let branch_1 = rvsdg.add_switch_branch(switch_node);
+        let consumer_1 = rvsdg.add_op_branch_selector_to_case(
+            branch_1,
+            ValueInput::argument(TY_PREDICATE, 0),
+            Int::U32,
+            [BranchCase::from(333u32), BranchCase::from(444u32)],
+        );
+
+        rvsdg.reconnect_region_result(
+            branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: consumer_1,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: switch_node,
+                output: 0,
+            },
+        );
+
+        PredToCaseToPredMerger::new().merge_in_fn(&mut rvsdg, function);
+
+        assert!(!rvsdg.is_live_node(pred_to_case));
+        assert!(!rvsdg.is_live_node(case_to_pred));
+        assert_eq!(
+            rvsdg[switch_node].value_inputs()[1].origin,
+            ValueOrigin::Output {
+                producer: inner_selector,
+                output: 0,
+            },
+            "the ordinary switch input now receives the original selector"
+        );
+        assert_eq!(
+            rvsdg[consumer_0]
+                .expect_op_branch_selector_to_case()
+                .cases(),
+            &[BranchCase::from(222u32), BranchCase::from(111u32)],
+            "the consumer in the first branch was adjusted"
+        );
+        assert_eq!(
+            rvsdg[consumer_1]
+                .expect_op_branch_selector_to_case()
+                .cases(),
+            &[BranchCase::from(444u32), BranchCase::from(333u32)],
+            "the consumer in the second branch was adjusted"
+        );
+    }
+
+    #[test]
+    fn test_propagate_merge_into_loop_when_loop_value_is_loop_invariant() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let pred_to_case = rvsdg.add_op_branch_selector_to_case(
+            region,
+            ValueInput::output(TY_PREDICATE, selector, 0),
+            Int::U32,
+            [BranchCase::from(1u32), BranchCase::from(0u32)],
+        );
+        let case_to_pred = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::output(TY_U32, pred_to_case, 0),
+            Int::U32,
+            [BranchCase::from(0u32)],
+        );
+        let initial_value = rvsdg.add_const_u32(region, 0);
+
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, case_to_pred, 0),
+                ValueInput::output(TY_U32, initial_value, 0),
+            ],
+            None,
+        );
+        let consumer = rvsdg.add_op_branch_selector_to_case(
+            loop_region,
+            ValueInput::argument(TY_PREDICATE, 0),
+            Int::U32,
+            [BranchCase::from(111u32), BranchCase::from(222u32)],
+        );
+        let reentry = rvsdg.add_const_bool(loop_region, false);
+
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: reentry,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(
+            loop_region,
+            2,
+            ValueOrigin::Output {
+                producer: consumer,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: loop_node,
+                output: 1,
+            },
+        );
+
+        PredToCaseToPredMerger::new().merge_in_fn(&mut rvsdg, function);
+
+        assert!(!rvsdg.is_live_node(pred_to_case));
+        assert!(!rvsdg.is_live_node(case_to_pred));
+        assert_eq!(
+            rvsdg[loop_node].value_inputs()[0].origin,
+            ValueOrigin::Output {
+                producer: selector,
+                output: 0,
+            },
+            "the loop input now receives the original selector"
+        );
+        assert_eq!(
+            rvsdg[consumer].expect_op_branch_selector_to_case().cases(),
+            &[BranchCase::from(222u32), BranchCase::from(111u32)],
+            "the consumer inside the loop was adjusted"
+        );
+    }
+
+    #[test]
+    fn test_reject_merge_into_loop_when_loop_value_is_not_loop_invariant() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let pred_to_case = rvsdg.add_op_branch_selector_to_case(
+            region,
+            ValueInput::output(TY_PREDICATE, selector, 0),
+            Int::U32,
+            [BranchCase::from(1u32), BranchCase::from(0u32)],
+        );
+        let case_to_pred = rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput::output(TY_U32, pred_to_case, 0),
+            Int::U32,
+            [BranchCase::from(0u32)],
+        );
+        let initial_value = rvsdg.add_const_u32(region, 0);
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(TY_PREDICATE, case_to_pred, 0),
+                ValueInput::output(TY_U32, initial_value, 0),
+            ],
+            None,
+        );
+        let consumer = rvsdg.add_op_branch_selector_to_case(
+            loop_region,
+            ValueInput::argument(TY_PREDICATE, 0),
+            Int::U32,
+            [BranchCase::from(111u32), BranchCase::from(222u32)],
+        );
+        let feedback_selector = rvsdg.add_const_predicate(loop_region, 0);
+        let reentry = rvsdg.add_const_bool(loop_region, false);
+
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: reentry,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(
+            loop_region,
+            1,
+            ValueOrigin::Output {
+                producer: feedback_selector,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(
+            loop_region,
+            2,
+            ValueOrigin::Output {
+                producer: consumer,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: loop_node,
+                output: 1,
+            },
+        );
+
+        PredToCaseToPredMerger::new().merge_in_fn(&mut rvsdg, function);
+
+        assert!(rvsdg.is_live_node(pred_to_case));
+        assert!(rvsdg.is_live_node(case_to_pred));
+        assert_eq!(
+            rvsdg[loop_node].value_inputs()[0].origin,
+            ValueOrigin::Output {
+                producer: case_to_pred,
+                output: 0,
+            },
+            "the loop-input is unchanged"
+        );
+        assert_eq!(
+            rvsdg[consumer].expect_op_branch_selector_to_case().cases(),
+            &[BranchCase::from(111u32), BranchCase::from(222u32)],
+            "the consumer inside the loop is unchanged"
+        );
+    }
+
+    #[test]
+    fn test_reject_merge_if_value_flow_exits_switch() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_PREDICATE),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let switch_node = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+
+        let branch_0 = rvsdg.add_switch_branch(switch_node);
+        let branch_selector = rvsdg.add_const_predicate(branch_0, 0);
+        let pred_to_case = rvsdg.add_op_branch_selector_to_case(
+            branch_0,
+            ValueInput::output(TY_PREDICATE, branch_selector, 0),
+            Int::U32,
+            [BranchCase::from(1u32), BranchCase::from(0u32)],
+        );
+        let case_to_pred = rvsdg.add_op_case_to_branch_selector(
+            branch_0,
+            ValueInput::output(TY_U32, pred_to_case, 0),
+            Int::U32,
+            [BranchCase::from(0u32)],
+        );
+
+        rvsdg.reconnect_region_result(
+            branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: case_to_pred,
+                output: 0,
+            },
+        );
+
+        let branch_1 = rvsdg.add_switch_branch(switch_node);
+        let other_selector = rvsdg.add_const_predicate(branch_1, 0);
+
+        rvsdg.reconnect_region_result(
+            branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: other_selector,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: switch_node,
+                output: 0,
+            },
+        );
+
+        PredToCaseToPredMerger::new().merge_in_fn(&mut rvsdg, function);
+
+        assert!(rvsdg.is_live_node(pred_to_case));
+        assert!(rvsdg.is_live_node(case_to_pred));
+        assert_eq!(
+            rvsdg[branch_0].value_results()[0].origin,
+            ValueOrigin::Output {
+                producer: case_to_pred,
+                output: 0,
+            },
         );
     }
 }
