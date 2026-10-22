@@ -1,13 +1,10 @@
 use rustc_hash::FxHashSet;
 
-use super::context::constraint_frame_for_assumed_branch;
 use super::domain::AbstractPredicate;
-use super::{
-    AbstractValue, AssumedBranchData, Environment, QueryCache, branches_matching_selector,
-};
+use super::{AbstractValue, Environment, QueryCache, branches_matching_selector};
 use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
-use crate::rvsdg::{Node, NodeKind, Rvsdg, SimpleNode, ValueOrigin};
+use crate::rvsdg::{NodeKind, Rvsdg, SimpleNode, ValueOrigin};
 
 const MAX_DEPTH: usize = 64;
 
@@ -154,8 +151,9 @@ impl<'a> Engine<'a> {
             let mut result = AbstractValue::bottom(ty);
 
             for branch in branches {
-                let branch_result_value =
-                    self.branch_result_constraints(producer, output, branch, env, cache);
+                let branch_result_key =
+                    ValueKey::for_branch_result(self.rvsdg, producer, output, branch);
+                let branch_result_value = self.evaluate_value(branch_result_key, env, cache);
 
                 result = result.join(&branch_result_value);
             }
@@ -258,86 +256,6 @@ impl<'a> Engine<'a> {
             // Loop outputs and the outputs on unsupported simple nodes are not evaluated; we
             // conservatively return "top" to indicate that we have not derived any constraints.
             _ => AbstractValue::top(ty),
-        }
-    }
-
-    pub(super) fn branch_result_constraints(
-        &mut self,
-        switch: Node,
-        output: u32,
-        branch: usize,
-        env: &Environment,
-        cache: &mut QueryCache,
-    ) -> AbstractValue {
-        let key = ValueKey::for_branch_result(self.rvsdg, switch, output, branch);
-
-        if let Some(assumed_branch) = env.assumed_branch(switch) {
-            let constraints = if assumed_branch == branch {
-                self.evaluate_value(key, env, cache)
-            } else {
-                AbstractValue::bottom(key.ty(self.rvsdg))
-            };
-
-            return constraints;
-        }
-
-        let cache_key = (switch, branch);
-
-        if let Some(assumed_branch_data) = cache.assumed_branch_data.get_mut(&cache_key) {
-            return self.evaluate_assumed_branch_result(
-                key,
-                switch,
-                branch,
-                env,
-                assumed_branch_data,
-            );
-        }
-
-        if !self.try_take_analysis_step() {
-            return AbstractValue::top(key.ty(self.rvsdg));
-        }
-
-        let revision = self.conservative_fallback_revision;
-
-        let mut assumed_branch_data =
-            match constraint_frame_for_assumed_branch(self, env, switch, branch) {
-                Some(constraint_frame) => AssumedBranchData::Context {
-                    constraint_frame,
-                    cache: QueryCache::default(),
-                },
-                None => AssumedBranchData::Contradictory,
-            };
-
-        if revision == self.conservative_fallback_revision {
-            let assumed_branch_data = cache
-                .assumed_branch_data
-                .entry(cache_key)
-                .or_insert(assumed_branch_data);
-
-            self.evaluate_assumed_branch_result(key, switch, branch, env, assumed_branch_data)
-        } else {
-            self.evaluate_assumed_branch_result(key, switch, branch, env, &mut assumed_branch_data)
-        }
-    }
-
-    fn evaluate_assumed_branch_result(
-        &mut self,
-        key: ValueKey,
-        switch: Node,
-        branch: usize,
-        env: &Environment,
-        assumed_branch: &mut AssumedBranchData,
-    ) -> AbstractValue {
-        match assumed_branch {
-            AssumedBranchData::Contradictory => AbstractValue::bottom(key.ty(self.rvsdg)),
-            AssumedBranchData::Context {
-                constraint_frame,
-                cache,
-            } => self.evaluate_value(
-                key,
-                &env.with_assumed_branch(switch, branch, constraint_frame),
-                cache,
-            ),
         }
     }
 }

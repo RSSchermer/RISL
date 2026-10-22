@@ -107,26 +107,6 @@ impl<'a> Environment<'a> {
         result
     }
 
-    /// Extends the environment with both an explicit branch assumption and its derived constraints.
-    pub fn with_assumed_branch<'b>(
-        &'b self,
-        node: Node,
-        branch: usize,
-        constraint_frame: &'b ConstraintFrame,
-    ) -> Environment<'b> {
-        let mut branch_assumptions = self.branch_assumptions.clone();
-        let mut frames = self.frames.clone();
-
-        branch_assumptions.push((node, branch));
-        frames.push(constraint_frame);
-
-        Environment {
-            scope: self.scope,
-            branch_assumptions,
-            frames,
-        }
-    }
-
     /// If, within this context environment, a branch was assumed for the `switch` node, returns
     /// the branch index.
     ///
@@ -498,7 +478,8 @@ fn collect_switch_output_implications(
                 unreachable!()
             };
 
-            let value = engine.branch_result_constraints(switch, output, branch, env, cache);
+            let result_key = ValueKey::for_branch_result(engine.rvsdg, switch, output, branch);
+            let value = engine.evaluate_value(result_key, env, cache);
 
             !value
                 .refine(&env.assumption_derived_constraints(engine.rvsdg, key))

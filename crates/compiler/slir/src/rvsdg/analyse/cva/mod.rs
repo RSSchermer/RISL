@@ -149,25 +149,14 @@ fn branches_matching_selector(selector: &AbstractValue, count: usize) -> Vec<usi
         .collect()
 }
 
-/// The completed result of constructing an environment under one branch assumption.
-enum AssumedBranchData {
-    Contradictory,
-    Context {
-        constraint_frame: ConstraintFrame,
-        cache: QueryCache,
-    },
-}
-
 #[derive(Default)]
 struct QueryCache {
     value_constraints: FxHashMap<ValueKey, AbstractValue>,
-    assumed_branch_data: FxHashMap<(Node, usize), AssumedBranchData>,
 }
 
 impl QueryCache {
     fn clear(&mut self) {
         self.value_constraints.clear();
-        self.assumed_branch_data.clear();
     }
 }
 
