@@ -70,6 +70,7 @@ mod context;
 pub mod domain;
 mod engine;
 
+use std::collections::hash_map::Entry;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustc_hash::FxHashMap;
@@ -149,14 +150,108 @@ fn branches_matching_selector(selector: &AbstractValue, count: usize) -> Vec<usi
         .collect()
 }
 
-#[derive(Default)]
+/// Retained progress on an interrupted value evaluation, not a completed cache entry.
+#[derive(Clone, Debug)]
+struct IncompleteValue {
+    /// The conservative constraints established by the incomplete query.
+    constraints: AbstractValue,
+
+    /// The largest allowance at entry to a budget-limited attempt, including its own expansion.
+    ///
+    /// Both root and recursive attempts set this. Depth/recursion-interrupted attempts do not.
+    largest_requested_budget: Option<usize>,
+}
+
 struct QueryCache {
-    value_constraints: FxHashMap<ValueKey, AbstractValue>,
+    /// Values that we're produced by queries that did not terminate early due to budget or depth
+    /// constraints.
+    ///
+    /// No amount of additional budget would refine these values further. All value-flow paths
+    /// queried for such values reached end-points that did not warrant further propagation, such as
+    /// a constant node output or a function argument.
+    complete_values: FxHashMap<ValueKey, AbstractValue>,
+
+    /// Values that we're produced by queries that terminated because they ran out of work-budget,
+    /// rather than by reaching natural end-points.
+    ///
+    /// Repeating such queries with a larger work-budget might produce more precise results (though
+    /// this is not guaranteed).
+    ///
+    /// When this is `None`, the incomplete value cache is disabled, and queries that terminate due
+    /// to budget constraints are discarded.
+    incomplete_values: Option<FxHashMap<ValueKey, IncompleteValue>>,
 }
 
 impl QueryCache {
+    fn new() -> Self {
+        Self {
+            complete_values: FxHashMap::default(),
+            incomplete_values: None,
+        }
+    }
+
+    fn with_incomplete_values() -> Self {
+        Self {
+            complete_values: FxHashMap::default(),
+            incomplete_values: Some(FxHashMap::default()),
+        }
+    }
+
+    fn get_complete(&self, key: ValueKey) -> Option<&AbstractValue> {
+        self.complete_values.get(&key)
+    }
+
+    fn get_incomplete(&self, key: ValueKey) -> Option<&IncompleteValue> {
+        self.incomplete_values.as_ref()?.get(&key)
+    }
+
+    fn record_complete(&mut self, key: ValueKey, value: AbstractValue) {
+        if let Some(incomplete_values) = &mut self.incomplete_values {
+            incomplete_values.remove(&key);
+        }
+
+        self.complete_values.insert(key, value);
+    }
+
+    fn record_incomplete(&mut self, key: ValueKey, bound: &AbstractValue, budget: Option<usize>) {
+        debug_assert!(self.get_complete(key).is_none());
+
+        let Some(incomplete_values) = &mut self.incomplete_values else {
+            return;
+        };
+
+        match incomplete_values.entry(key) {
+            Entry::Occupied(mut entry) => {
+                let value = entry.get_mut();
+
+                if value.constraints != *bound {
+                    value.constraints = bound.clone();
+                }
+
+                if let Some(budget) = budget {
+                    value.largest_requested_budget =
+                        Some(value.largest_requested_budget.unwrap_or(0).max(budget));
+                }
+            }
+            Entry::Vacant(entry) => {
+                // We only record "top" values if we also have a budget to record; a "top" value
+                // without a budget does not represent more useful information than a missing entry.
+                if !bound.is_top() || budget.is_some() {
+                    entry.insert(IncompleteValue {
+                        constraints: bound.clone(),
+                        largest_requested_budget: budget,
+                    });
+                }
+            }
+        }
+    }
+
     fn clear(&mut self) {
-        self.value_constraints.clear();
+        self.complete_values.clear();
+
+        if let Some(incomplete_values) = &mut self.incomplete_values {
+            incomplete_values.clear();
+        }
     }
 }
 
@@ -216,7 +311,7 @@ impl<'a> ContextualValueAnalysis<'a> {
                 branch_assumption: None,
                 constraint_frame: ConstraintFrame::default(),
             }],
-            caches: vec![QueryCache::default()],
+            caches: vec![QueryCache::with_incomplete_values()],
             child_contexts: FxHashMap::default(),
         }
     }
@@ -231,7 +326,16 @@ impl<'a> ContextualValueAnalysis<'a> {
     }
 
     /// Evaluates the constraints that can be derived for the given `value` under the assumptions
-    /// made for the `context`.
+    /// made for the `context` and under the default budget constraints.
+    ///
+    /// This behaves identically to calling [evaluate_value_with_budget] with the default budget set
+    /// for this [ContextualValueAnalysis] session. See [evaluate_value_with_budget] for details.
+    pub fn evaluate_value(&mut self, value: ValueKey, context: ContextId) -> AbstractValue {
+        self.evaluate_value_with_budget(value, context, self.work_budget)
+    }
+
+    /// Evaluates the constraints that can be derived for the given `value` under the assumptions
+    /// made for the `context` and under the given `budget` constraint.
     ///
     /// This does not necessarily produce the tightest possible constraints on the value, it may
     /// produce a conservative over-approximation. However, if a concrete instance of the value is
@@ -239,16 +343,66 @@ impl<'a> ContextualValueAnalysis<'a> {
     /// the context, that concrete instance can be considered impossible.
     ///
     /// This may return a "bottom" value if the assumptions lead to a contradiction.
-    pub fn evaluate_value(&mut self, value: ValueKey, context: ContextId) -> AbstractValue {
+    ///
+    /// The `budget` limits the amount of work this query performs. It does not guarantee that the
+    /// query actually performs that amount of work; it acts only as an upper bound. If the same
+    /// `value` and `context` combination is tried again later, then the query is only re-evaluated
+    /// if the budget is larger than the largest budget the query was tried with so far during this
+    /// [ContextualValueAnalysis] session. If the budget is equal or smaller, a cached result is
+    /// returned instead.
+    ///
+    /// A query may benefit from cached work performed by a query performed earlier in the same
+    /// session. Cached values do not spend budget, meaning that the order in which queries are
+    /// performed can affect the accuracy they are able to achieve under the same budget
+    /// constraints. Queries performed in value-flow order ("top-down") can generally be expected to
+    /// make more efficient use of their budgets. For example, should you want to evaluate the
+    /// outputs of many nodes in a graph, it may be beneficial to sort them in "stratification
+    /// order" (see [region_stratification]).
+    ///
+    /// [region_stratification]: crate::rvsdg::analyse::region_stratification
+    pub fn evaluate_value_with_budget(
+        &mut self,
+        value: ValueKey,
+        context: ContextId,
+        budget: usize,
+    ) -> AbstractValue {
+        self.evaluate_value_impl(value, context, budget, false)
+    }
+
+    /// Evaluates the constraints that can be derived for the given `value` under the assumptions
+    /// made for the `context` and under the given `budget` constraint.
+    ///
+    /// Behaves similarly to [evaluate_value_with_budget], but will re-evaluate the value even if
+    /// the `budget` is equal to or smaller than the largest budget the value has been evaluated
+    /// with earlier in this [ContextualValueAnalysis] session.
+    pub fn retry_value(
+        &mut self,
+        value: ValueKey,
+        context: ContextId,
+        budget: usize,
+    ) -> AbstractValue {
+        self.evaluate_value_impl(value, context, budget, true)
+    }
+
+    fn evaluate_value_impl(
+        &mut self,
+        value: ValueKey,
+        context: ContextId,
+        budget: usize,
+        force_retry: bool,
+    ) -> AbstractValue {
         self.validate_context_id(context);
 
-        let env = Environment::init(&self.contexts, context);
+        let ty = value.ty(self.graph);
 
-        Engine::new(self.graph, self.work_budget).evaluate_value(
-            value,
-            &env,
-            &mut self.caches[context.index],
-        )
+        if !AbstractValue::supports_type(ty) {
+            return AbstractValue::Unsupported(ty);
+        }
+
+        let env = Environment::init(&self.contexts, context);
+        let mut engine = Engine::new(self.graph, budget, force_retry);
+
+        engine.evaluate_value(value, &env, &mut self.caches[context.index])
     }
 
     /// Assumes that control-flow has selected the given `branch` for the `switch` node and
@@ -313,11 +467,14 @@ impl<'a> ContextualValueAnalysis<'a> {
         self.apply_branch_assumption(context, switch, branch)
     }
 
-    /// Enters a contained region, establishing its enclosing branch assumptions and loop scope.
+    /// Returns a new context for the given region.
     ///
-    /// Conflicting branch scopes are contradictory; regions outside the context's loop/function
-    /// scope are unknown. Loop entry does not specialize changing arguments to their initial values.
-    pub(crate) fn context_for_region(
+    /// This assumes all enclosing branch regions (if any). If the region is itself a switch branch,
+    /// then this also assumes that switch branch.
+    ///
+    /// For a branch region, this is essentially the same as calling [assume_branch]. This is
+    /// primarily a convenience method for establishing context for loop regions.
+    pub fn context_for_region(
         &mut self,
         parent_context: ContextId,
         region: Region,
@@ -387,7 +544,7 @@ impl<'a> ContextualValueAnalysis<'a> {
 
         let env = Environment::init(&self.contexts, context);
 
-        let mut engine = Engine::new(self.graph, self.work_budget);
+        let mut engine = Engine::new(self.graph, self.work_budget, false);
 
         if !env.is_in_context(self.graph, self.graph[switch].region()) {
             return AssumptionResult::Unknown;
@@ -457,7 +614,7 @@ impl<'a> ContextualValueAnalysis<'a> {
             },
             constraint_frame,
         });
-        self.caches.push(QueryCache::default());
+        self.caches.push(QueryCache::with_incomplete_values());
         self.child_contexts.insert(child_key, id);
 
         id
@@ -2079,6 +2236,128 @@ mod tests {
                     switch_branch_0_context
                 )
                 .is_top()
+        );
+    }
+
+    #[test]
+    fn larger_work_budget_produces_more_precise_value() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut graph = Rvsdg::new(module.ty.clone());
+        let (_, body) = graph.register_function(&module, function, iter::empty());
+
+        let a = graph.add_const_u32(body, 1);
+        let b = graph.add_const_u32(body, 2);
+
+        let c = graph.add_const_u32(body, 4);
+
+        let sum = graph.add_op_binary(
+            body,
+            BinaryOperator::Add,
+            ValueInput::output(TY_U32, a, 0),
+            ValueInput::output(TY_U32, b, 0),
+        );
+
+        let product = graph.add_op_binary(
+            body,
+            BinaryOperator::Mul,
+            ValueInput::output(TY_U32, sum, 0),
+            ValueInput::output(TY_U32, c, 0),
+        );
+
+        let mut analysis = ContextualValueAnalysis::new(&graph, function);
+        let root_context = analysis.root_context();
+        let value = ValueKey::new(
+            body,
+            ValueOrigin::Output {
+                producer: product,
+                output: 0,
+            },
+        );
+
+        assert_eq!(
+            analysis.evaluate_value_with_budget(value, root_context, 1),
+            AbstractValue::top(TY_U32)
+        );
+
+        assert_eq!(
+            analysis
+                .evaluate_value_with_budget(value, root_context, 64)
+                .to_scalar_constant(),
+            Some(ScalarConstant::U32(12))
+        );
+    }
+
+    #[test]
+    fn forced_retry_produces_more_precise_value() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref("test"),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut graph = Rvsdg::new(module.ty.clone());
+        let (_, body) = graph.register_function(&module, function, iter::empty());
+
+        let a = graph.add_const_u32(body, 1);
+        let b = graph.add_const_u32(body, 2);
+
+        let sum = graph.add_op_binary(
+            body,
+            BinaryOperator::Add,
+            ValueInput::output(TY_U32, a, 0),
+            ValueInput::output(TY_U32, b, 0),
+        );
+
+        let mut analysis = ContextualValueAnalysis::new(&graph, function);
+        let root_context = analysis.root_context();
+        let value = ValueKey::new(
+            body,
+            ValueOrigin::Output {
+                producer: sum,
+                output: 0,
+            },
+        );
+
+        assert_eq!(
+            analysis.evaluate_value_with_budget(value, root_context, 2),
+            AbstractValue::top(TY_U32)
+        );
+
+        assert_eq!(
+            analysis.evaluate_value_with_budget(value, root_context, 2),
+            AbstractValue::top(TY_U32)
+        );
+
+        assert_eq!(
+            analysis
+                .retry_value(value, root_context, 2)
+                .to_scalar_constant(),
+            Some(ScalarConstant::U32(3))
         );
     }
 }

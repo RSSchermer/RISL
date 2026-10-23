@@ -37,6 +37,10 @@ pub enum AbstractValue {
 }
 
 impl AbstractValue {
+    pub(super) fn supports_type(ty: Type) -> bool {
+        matches!(ty, TY_BOOL | TY_F32 | TY_I32 | TY_U32 | TY_PREDICATE)
+    }
+
     /// Returns an unconstrained value of the given type.
     ///
     /// This is the "top" value in the lattice-theory sense: constraint-reasoning cannot use the

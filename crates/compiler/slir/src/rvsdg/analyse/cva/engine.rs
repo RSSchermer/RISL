@@ -1,3 +1,5 @@
+use std::mem;
+
 use rustc_hash::FxHashSet;
 
 use super::domain::AbstractPredicate;
@@ -12,15 +14,9 @@ const MAX_DEPTH: usize = 64;
 pub struct Engine<'a> {
     pub rvsdg: &'a Rvsdg,
     pub remaining_work_budget: usize,
-
-    /// A number that increments every time we have to fall back to a conservative result because we
-    /// ran out of work budget or exceeded the analysis depth limit.
-    ///
-    /// We store a copy of this value before running a query, then check the copy against the
-    /// actual value after the query to determine whether we had to fallback. This then informs the
-    /// caching decision, as we don't want to cache "incomplete" results that we may be able to
-    /// improve later.
-    conservative_fallback_revision: usize,
+    force_retry: bool,
+    did_stop_early: bool,
+    hit_depth_or_recursion_limit: bool,
 
     /// A set that logs the active value queries during the current analysis, used to guard against
     /// recursion.
@@ -28,15 +24,18 @@ pub struct Engine<'a> {
 }
 
 impl<'a> Engine<'a> {
-    pub fn new(rvsdg: &'a Rvsdg, remaining: usize) -> Self {
+    pub fn new(rvsdg: &'a Rvsdg, remaining: usize, force_retry: bool) -> Self {
         Self {
             rvsdg,
             remaining_work_budget: remaining,
-            conservative_fallback_revision: 0,
+            force_retry,
+            did_stop_early: false,
+            hit_depth_or_recursion_limit: false,
             active_value_queries: Default::default(),
         }
     }
 
+    /// Evaluates a supported scalar value. Recursive value-flow traversal must preserve type support.
     pub fn evaluate_value(
         &mut self,
         key: ValueKey,
@@ -45,9 +44,7 @@ impl<'a> Engine<'a> {
     ) -> AbstractValue {
         let ty = key.ty(self.rvsdg);
 
-        if let value @ AbstractValue::Unsupported(_) = AbstractValue::top(ty) {
-            return value;
-        }
+        debug_assert!(AbstractValue::supports_type(ty));
 
         // If the value does not occur within a region that is part of the currently assumed
         // control-flow, then the value never exists and is contradictory; we'll signal this with a
@@ -58,46 +55,86 @@ impl<'a> Engine<'a> {
 
         let key = key.canonicalize(self.rvsdg);
 
-        if let Some(value) = cache.value_constraints.get(&key) {
+        if let Some(value) = cache.get_complete(key) {
             // We've successfully evaluated this value before, so we can return the cached result.
-
             return value.clone();
         }
 
-        if !self.try_take_analysis_step() {
-            // We ran out of work budget or exceeded the depth limit; conservatively return "top".
+        let budget = self.remaining_work_budget;
 
-            return AbstractValue::top(ty);
+        if !self.force_retry {
+            if let Some(previous) = cache.get_incomplete(key) {
+                if previous
+                    .largest_requested_budget
+                    .is_some_and(|b| b >= budget)
+                    && self.active_value_queries.len() < MAX_DEPTH
+                    && !self.active_value_queries.contains(&key)
+                {
+                    self.did_stop_early = true;
+
+                    return previous.constraints.clone();
+                }
+            }
         }
 
-        if !self.active_value_queries.insert(key) {
-            // We seem to have recursed to a value we encountered earlier in this same query chain;
-            // conservatively return "top".
+        let can_expand = self.try_take_analysis_step();
 
-            self.conservative_fallback_revision += 1;
+        if !can_expand || !self.active_value_queries.insert(key) {
+            let recursive = self.active_value_queries.contains(&key);
 
-            return AbstractValue::top(ty);
+            if recursive {
+                self.did_stop_early = true;
+                self.hit_depth_or_recursion_limit = true;
+            }
+
+            let value = cache
+                .get_incomplete(key)
+                .map_or_else(|| AbstractValue::top(ty), |value| value.constraints.clone());
+
+            if !can_expand && self.active_value_queries.len() < MAX_DEPTH && !recursive {
+                cache.record_incomplete(key, &value, Some(budget));
+            }
+
+            return value;
         }
 
-        let revision = self.conservative_fallback_revision;
+        let parent_did_stop_early = mem::take(&mut self.did_stop_early);
+        let parent_hit_depth_or_recursion_limit = mem::take(&mut self.hit_depth_or_recursion_limit);
+
         let value = self.forward_infer_constraints(key, env, cache);
         let value = value.refine(&env.assumption_derived_constraints(self.rvsdg, key));
 
+        // Integer refinement uses a fallback mechanism where, if the maximum supported intervals
+        // are exceeded, it falls back to the prior `self` value. We therefore use the `previous`
+        // value as the `self` value here to ensure we at least never regress the result.
+        let value = if let Some(previous) = cache.get_incomplete(key) {
+            if previous.constraints.is_top() || previous.constraints == value {
+                value
+            } else {
+                previous.constraints.refine(&value)
+            }
+        } else {
+            value
+        };
+
         self.active_value_queries.remove(&key);
 
-        // Cache the result, but only if the revision number was not incremented during the
-        // evaluation of the query; if the revision was incremented, the value may be incomplete,
-        // and we don't want to cache incomplete results that we may be able to improve later.
-        if revision == self.conservative_fallback_revision {
-            cache.value_constraints.insert(key, value.clone());
+        if !self.did_stop_early {
+            cache.record_complete(key, value.clone());
+        } else {
+            let budget = (!self.hit_depth_or_recursion_limit).then_some(budget);
+            cache.record_incomplete(key, &value, budget);
         }
+
+        self.did_stop_early |= parent_did_stop_early;
+        self.hit_depth_or_recursion_limit |= parent_hit_depth_or_recursion_limit;
 
         value
     }
 
     fn try_consume_work_unit(&mut self) -> bool {
         if self.remaining_work_budget == 0 {
-            self.conservative_fallback_revision += 1;
+            self.did_stop_early = true;
 
             false
         } else {
@@ -109,7 +146,8 @@ impl<'a> Engine<'a> {
 
     fn try_take_analysis_step(&mut self) -> bool {
         if self.active_value_queries.len() >= MAX_DEPTH {
-            self.conservative_fallback_revision += 1;
+            self.did_stop_early = true;
+            self.hit_depth_or_recursion_limit = true;
 
             return false;
         }

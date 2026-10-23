@@ -219,7 +219,7 @@ impl<'a, 'graph, 'frames> ContextBuilder<'a, 'graph, 'frames> {
             parent,
             constraint_frame: ConstraintFrame::default(),
             contradictory: false,
-            cache: QueryCache::default(),
+            cache: QueryCache::new(),
         };
 
         let selector = ValueKey::for_node_input(builder.engine.rvsdg, switch, 0);
