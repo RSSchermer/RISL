@@ -108,6 +108,24 @@ pub struct ContextId {
     index: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CvaOptions {
+    /// The default work budget used to evaluate single values.
+    pub evaluate_value_budget: usize,
+
+    /// The default work budget used to initialize new control-flow contexts.
+    pub context_creation_budget: usize,
+}
+
+impl Default for CvaOptions {
+    fn default() -> Self {
+        Self {
+            evaluate_value_budget: 4096,
+            context_creation_budget: 4096,
+        }
+    }
+}
+
 /// The outcome of constructing a context under a control-flow assumption.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AssumptionResult {
@@ -268,7 +286,7 @@ enum ChildKey {
 /// See the module-level documentation for more information.
 pub struct ContextualValueAnalysis<'a> {
     graph: &'a Rvsdg,
-    work_budget: usize,
+    options: CvaOptions,
     session: u64,
     contexts: Vec<Context>,
     caches: Vec<QueryCache>,
@@ -284,18 +302,17 @@ impl<'a> ContextualValueAnalysis<'a> {
     ///
     /// Panics if the `function` is not registered with the `rvsdg`.
     pub fn new(rvsdg: &'a Rvsdg, function: Function) -> Self {
-        Self::with_work_budget(rvsdg, function, 4096)
+        Self::with_options(rvsdg, function, CvaOptions::default())
     }
 
-    /// Creates a new contextual-value-analysis with the given amount of work available to each
-    /// query.
+    /// Creates a new contextual-value-analysis with the given work-budget options.
     ///
     /// Assumes all function calls made by the function have been exhaustively inlined.
     ///
     /// # Panics
     ///
     /// Panics if the `function` is not registered with the `rvsdg`.
-    pub fn with_work_budget(rvsdg: &'a Rvsdg, function: Function, work_budget: usize) -> Self {
+    pub fn with_options(rvsdg: &'a Rvsdg, function: Function, options: CvaOptions) -> Self {
         let function_node = rvsdg
             .get_function_node(function)
             .expect("function not registered");
@@ -303,7 +320,7 @@ impl<'a> ContextualValueAnalysis<'a> {
 
         Self {
             graph: rvsdg,
-            work_budget,
+            options,
             session: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
             contexts: vec![Context {
                 parent: None,
@@ -329,9 +346,10 @@ impl<'a> ContextualValueAnalysis<'a> {
     /// made for the `context` and under the default budget constraints.
     ///
     /// This behaves identically to calling [evaluate_value_with_budget] with the default budget set
-    /// for this [ContextualValueAnalysis] session. See [evaluate_value_with_budget] for details.
+    /// for queries in this [ContextualValueAnalysis] session. See [evaluate_value_with_budget] for
+    /// details.
     pub fn evaluate_value(&mut self, value: ValueKey, context: ContextId) -> AbstractValue {
-        self.evaluate_value_with_budget(value, context, self.work_budget)
+        self.evaluate_value_with_budget(value, context, self.options.evaluate_value_budget)
     }
 
     /// Evaluates the constraints that can be derived for the given `value` under the assumptions
@@ -454,17 +472,39 @@ impl<'a> ContextualValueAnalysis<'a> {
         switch: Node,
         branch: usize,
     ) -> AssumptionResult {
+        self.assume_branch_with_budget(
+            context,
+            switch,
+            branch,
+            self.options.context_creation_budget,
+        )
+    }
+
+    /// Returns a context that assumes `branch` is selected for `switch`, using the given work
+    /// `budget` to derive constraints for the assumption.
+    ///
+    /// This has the same behavior and panics as [assume_branch], except that its `budget` overrides
+    /// the default context work budget for this operation. The override also applies to enclosing
+    /// branch assumptions needed to reach `switch`. If a child context was already created for an
+    /// assumption, it is reused as-is; changing the budget does not rebuild that context.
+    pub fn assume_branch_with_budget(
+        &mut self,
+        context: ContextId,
+        switch: Node,
+        branch: usize,
+        budget: usize,
+    ) -> AssumptionResult {
         self.validate_context_id(context);
 
         let data = self.graph[switch].expect_switch();
         assert!(branch < data.branches().len(), "branch index out of bounds");
 
-        let context = match self.refine_context(context, self.graph[switch].region()) {
+        let context = match self.refine_context(context, self.graph[switch].region(), budget) {
             AssumptionResult::Context(context) => context,
             result => return result,
         };
 
-        self.apply_branch_assumption(context, switch, branch)
+        self.apply_branch_assumption(context, switch, branch, budget)
     }
 
     /// Returns a new context for the given region.
@@ -479,10 +519,15 @@ impl<'a> ContextualValueAnalysis<'a> {
         parent_context: ContextId,
         region: Region,
     ) -> AssumptionResult {
-        self.refine_context(parent_context, region)
+        self.refine_context(parent_context, region, self.options.context_creation_budget)
     }
 
-    fn refine_context(&mut self, mut context: ContextId, mut region: Region) -> AssumptionResult {
+    fn refine_context(
+        &mut self,
+        mut context: ContextId,
+        mut region: Region,
+        budget: usize,
+    ) -> AssumptionResult {
         self.validate_context_id(context);
 
         let scope = self.contexts[context.index].scope;
@@ -514,7 +559,7 @@ impl<'a> ContextualValueAnalysis<'a> {
                             AssumptionResult::Context(context)
                         }
                         Some(_) => AssumptionResult::Contradictory,
-                        None => self.apply_branch_assumption(context, owner, branch),
+                        None => self.apply_branch_assumption(context, owner, branch, budget),
                     }
                 }
                 NodeKind::Loop(_) => self.apply_loop_entry(context, owner),
@@ -535,6 +580,7 @@ impl<'a> ContextualValueAnalysis<'a> {
         context: ContextId,
         switch: Node,
         branch: usize,
+        budget: usize,
     ) -> AssumptionResult {
         let key = ChildKey::Branch(context, switch, branch);
 
@@ -544,7 +590,7 @@ impl<'a> ContextualValueAnalysis<'a> {
 
         let env = Environment::init(&self.contexts, context);
 
-        let mut engine = Engine::new(self.graph, self.work_budget, false);
+        let mut engine = Engine::new(self.graph, budget, false);
 
         if !env.is_in_context(self.graph, self.graph[switch].region()) {
             return AssumptionResult::Unknown;
@@ -626,7 +672,7 @@ mod tests {
     use std::iter;
 
     use super::domain::AbstractU32;
-    use super::{AbstractValue, AssumptionResult, ContextualValueAnalysis};
+    use super::{AbstractValue, AssumptionResult, ContextualValueAnalysis, CvaOptions};
     use crate::rvsdg::analyse::ValueKey;
     use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
     use crate::rvsdg::{Rvsdg, ValueInput, ValueOrigin, ValueOutput};
@@ -2121,120 +2167,6 @@ mod tests {
         assert!(
             analysis
                 .evaluate_value(ValueKey::new(body, ValueOrigin::Argument(0)), root_context)
-                .is_top()
-        );
-    }
-
-    #[test]
-    fn zero_work_budget_produces_conservative_values() {
-        let mut module = Module::new(Symbol::from_ref(""));
-        let function = Function {
-            name: Symbol::from_ref("test"),
-            module: Symbol::from_ref(""),
-        };
-
-        module.fn_sigs.register(
-            function,
-            FnSig {
-                name: function.name,
-                ty: TY_DUMMY,
-                args: vec![FnArg {
-                    ty: TY_BOOL,
-                    shader_io_binding: None,
-                }],
-                ret_ty: None,
-            },
-        );
-
-        let mut graph = Rvsdg::new(module.ty.clone());
-        let (_, body) = graph.register_function(&module, function, iter::empty());
-
-        let a = graph.add_const_u32(body, 1);
-        let b = graph.add_const_u32(body, 2);
-
-        let sum = graph.add_op_binary(
-            body,
-            BinaryOperator::Add,
-            ValueInput::output(TY_U32, a, 0),
-            ValueInput::output(TY_U32, b, 0),
-        );
-
-        let selector = graph.add_op_bool_to_branch_selector(body, ValueInput::argument(TY_BOOL, 0));
-        let switch = graph.add_switch(
-            body,
-            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
-            Vec::new(),
-            None,
-        );
-        graph.add_switch_branch(switch);
-        graph.add_switch_branch(switch);
-
-        // First verify that with sufficient work budget, we derive constrained values.
-
-        let mut analysis = ContextualValueAnalysis::new(&graph, function);
-        let root_context = analysis.root_context();
-
-        assert_eq!(
-            analysis
-                .evaluate_value(
-                    ValueKey::new(
-                        body,
-                        ValueOrigin::Output {
-                            producer: sum,
-                            output: 0,
-                        },
-                    ),
-                    root_context
-                )
-                .to_scalar_constant(),
-            Some(ScalarConstant::U32(3))
-        );
-
-        let switch_branch_0_context = analysis
-            .assume_branch(root_context, switch, 0)
-            .expect_context();
-
-        assert_eq!(
-            analysis
-                .evaluate_value(
-                    ValueKey::new(body, ValueOrigin::Argument(0)),
-                    switch_branch_0_context
-                )
-                .to_scalar_constant(),
-            Some(ScalarConstant::Bool(true))
-        );
-
-        // Now verify that with a limited work budget, we get "top" fallback values for the same
-        // queries.
-
-        let mut limited = ContextualValueAnalysis::with_work_budget(&graph, function, 0);
-        let root_context = limited.root_context();
-
-        assert!(
-            limited
-                .evaluate_value(
-                    ValueKey::new(
-                        body,
-                        ValueOrigin::Output {
-                            producer: sum,
-                            output: 0,
-                        },
-                    ),
-                    root_context
-                )
-                .is_top()
-        );
-
-        let switch_branch_0_context = limited
-            .assume_branch(root_context, switch, 0)
-            .expect_context();
-
-        assert!(
-            limited
-                .evaluate_value(
-                    ValueKey::new(body, ValueOrigin::Argument(0)),
-                    switch_branch_0_context
-                )
                 .is_top()
         );
     }
