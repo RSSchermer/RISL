@@ -3,7 +3,7 @@ use std::mem;
 use rustc_hash::FxHashSet;
 
 use super::domain::AbstractPredicate;
-use super::{AbstractValue, Environment, QueryCache, branches_matching_selector};
+use super::{AbstractValue, BudgetFraction, Environment, QueryCache, branches_matching_selector};
 use crate::rvsdg::analyse::ValueKey;
 use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
 use crate::rvsdg::{NodeKind, Rvsdg, SimpleNode, ValueOrigin};
@@ -14,6 +14,9 @@ const MAX_DEPTH: usize = 64;
 pub struct Engine<'a> {
     pub rvsdg: &'a Rvsdg,
     pub remaining_work_budget: usize,
+    work_budget_floor: usize,
+    binary_lhs_budget_fraction: BudgetFraction,
+    switch_selector_budget_fraction: BudgetFraction,
     force_retry: bool,
     did_stop_early: bool,
     hit_depth_or_recursion_limit: bool,
@@ -24,10 +27,19 @@ pub struct Engine<'a> {
 }
 
 impl<'a> Engine<'a> {
-    pub fn new(rvsdg: &'a Rvsdg, remaining: usize, force_retry: bool) -> Self {
+    pub fn new(
+        rvsdg: &'a Rvsdg,
+        remaining: usize,
+        force_retry: bool,
+        binary_lhs_budget_fraction: BudgetFraction,
+        switch_selector_budget_fraction: BudgetFraction,
+    ) -> Self {
         Self {
             rvsdg,
             remaining_work_budget: remaining,
+            work_budget_floor: 0,
+            binary_lhs_budget_fraction,
+            switch_selector_budget_fraction,
             force_retry,
             did_stop_early: false,
             hit_depth_or_recursion_limit: false,
@@ -60,7 +72,7 @@ impl<'a> Engine<'a> {
             return value.clone();
         }
 
-        let budget = self.remaining_work_budget;
+        let budget = self.available_work_budget();
 
         if !self.force_retry {
             if let Some(previous) = cache.get_incomplete(key) {
@@ -132,8 +144,32 @@ impl<'a> Engine<'a> {
         value
     }
 
+    fn available_work_budget(&self) -> usize {
+        self.remaining_work_budget
+            .saturating_sub(self.work_budget_floor)
+    }
+
+    fn evaluate_value_with_allowance(
+        &mut self,
+        key: ValueKey,
+        env: &Environment,
+        cache: &mut QueryCache,
+        allowance: usize,
+    ) -> AbstractValue {
+        let parent_floor = self.work_budget_floor;
+        let available = self.available_work_budget();
+
+        self.work_budget_floor = self.remaining_work_budget - allowance.min(available);
+
+        let value = self.evaluate_value(key, env, cache);
+
+        self.work_budget_floor = parent_floor;
+
+        value
+    }
+
     fn try_consume_work_unit(&mut self) -> bool {
-        if self.remaining_work_budget == 0 {
+        if self.available_work_budget() == 0 {
             self.did_stop_early = true;
 
             false
@@ -178,20 +214,27 @@ impl<'a> Engine<'a> {
         }
 
         if self.rvsdg[producer].is_switch() {
-            let selector = self.evaluate_value(
-                ValueKey::for_node_input(self.rvsdg, producer, 0),
-                env,
-                cache,
-            );
+            let selector_key = ValueKey::for_node_input(self.rvsdg, producer, 0);
+            let selector_allowance = self
+                .switch_selector_budget_fraction
+                .apply_to(self.available_work_budget());
+            let selector =
+                self.evaluate_value_with_allowance(selector_key, env, cache, selector_allowance);
             let count = self.rvsdg[producer].expect_switch().branches().len();
             let branches = branches_matching_selector(&selector, count);
+            let candidate_count = branches.len();
 
             let mut result = AbstractValue::bottom(ty);
 
-            for branch in branches {
+            for (index, branch) in branches.into_iter().enumerate() {
+                let branches_remaining = candidate_count - index;
+                let available = self.available_work_budget();
+                let allowance = available / branches_remaining
+                    + usize::from(available % branches_remaining != 0);
                 let branch_result_key =
                     ValueKey::for_branch_result(self.rvsdg, producer, output, branch);
-                let branch_result_value = self.evaluate_value(branch_result_key, env, cache);
+                let branch_result_value =
+                    self.evaluate_value_with_allowance(branch_result_key, env, cache, allowance);
 
                 result = result.join(&branch_result_value);
             }
@@ -206,11 +249,11 @@ impl<'a> Engine<'a> {
         match self.rvsdg[producer].kind() {
             NodeKind::Simple(SimpleNode::OpBinary(op)) => {
                 let op = op.operator();
-                let lhs = self.evaluate_value(
-                    ValueKey::for_node_input(self.rvsdg, producer, 0),
-                    env,
-                    cache,
-                );
+                let lhs_key = ValueKey::for_node_input(self.rvsdg, producer, 0);
+                let lhs_allowance = self
+                    .binary_lhs_budget_fraction
+                    .apply_to(self.available_work_budget());
+                let lhs = self.evaluate_value_with_allowance(lhs_key, env, cache, lhs_allowance);
                 let rhs = self.evaluate_value(
                     ValueKey::for_node_input(self.rvsdg, producer, 1),
                     env,

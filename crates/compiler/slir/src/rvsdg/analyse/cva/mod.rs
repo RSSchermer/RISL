@@ -108,6 +108,57 @@ pub struct ContextId {
     index: usize,
 }
 
+/// A validated fraction used to reserve part of the available work budget.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct BudgetFraction {
+    numerator: u64,
+    denominator: u64,
+}
+
+impl BudgetFraction {
+    pub const ZERO: Self = Self {
+        numerator: 0,
+        denominator: 1,
+    };
+
+    pub const HALF: Self = Self {
+        numerator: 1,
+        denominator: 2,
+    };
+
+    pub const ONE: Self = Self {
+        numerator: 1,
+        denominator: 1,
+    };
+
+    /// Creates a fraction in the inclusive range from zero to one.
+    ///
+    /// Returns `None` if `denominator` is zero or `numerator` is greater than `denominator`.
+    pub const fn new(numerator: u64, denominator: u64) -> Option<Self> {
+        if denominator == 0 || numerator > denominator {
+            None
+        } else {
+            let mut divisor = numerator;
+            let mut remainder = denominator;
+
+            while remainder != 0 {
+                let next = divisor % remainder;
+                divisor = remainder;
+                remainder = next;
+            }
+
+            Some(Self {
+                numerator: numerator / divisor,
+                denominator: denominator / divisor,
+            })
+        }
+    }
+
+    fn apply_to(self, budget: usize) -> usize {
+        ((budget as u128 * self.numerator as u128) / self.denominator as u128) as usize
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct CvaOptions {
     /// The default work budget used to evaluate single values.
@@ -115,6 +166,22 @@ pub struct CvaOptions {
 
     /// The default work budget used to initialize new control-flow contexts.
     pub context_creation_budget: usize,
+
+    /// The fraction of the work-budget the evaluation of the output binary operation passes to the
+    /// left-hand-side operand.
+    ///
+    /// The remaining fraction of the budget - along with any left-over budget from the evaluation
+    /// of the left-hand-side operand - is passed to the right-hand-side operand.
+    pub binary_lhs_budget_fraction: BudgetFraction,
+
+    /// The fraction of the work the evaluation of a switch node output passes to the switch node's
+    /// selector input.
+    ///
+    /// The result of selector evaluation is first used to rule out any unreachable branches. The
+    /// remaining fraction of the budget - along with any left-over budget from the evaluation of
+    /// the selector - is even distributed amongst the output's corresponding branch results in the
+    /// remaining branches.
+    pub switch_selector_budget_fraction: BudgetFraction,
 }
 
 impl Default for CvaOptions {
@@ -122,6 +189,8 @@ impl Default for CvaOptions {
         Self {
             evaluate_value_budget: 4096,
             context_creation_budget: 4096,
+            binary_lhs_budget_fraction: BudgetFraction::HALF,
+            switch_selector_budget_fraction: BudgetFraction::HALF,
         }
     }
 }
@@ -174,7 +243,8 @@ struct IncompleteValue {
     /// The conservative constraints established by the incomplete query.
     constraints: AbstractValue,
 
-    /// The largest allowance at entry to a budget-limited attempt, including its own expansion.
+    /// The largest local allowance offered at entry to a budget-limited attempt, including its own
+    /// expansion and excluding work reserved for an ancestor's siblings.
     ///
     /// Both root and recursive attempts set this. Depth/recursion-interrupted attempts do not.
     largest_requested_budget: Option<usize>,
@@ -418,7 +488,13 @@ impl<'a> ContextualValueAnalysis<'a> {
         }
 
         let env = Environment::init(&self.contexts, context);
-        let mut engine = Engine::new(self.graph, budget, force_retry);
+        let mut engine = Engine::new(
+            self.graph,
+            budget,
+            force_retry,
+            self.options.binary_lhs_budget_fraction,
+            self.options.switch_selector_budget_fraction,
+        );
 
         engine.evaluate_value(value, &env, &mut self.caches[context.index])
     }
@@ -590,7 +666,13 @@ impl<'a> ContextualValueAnalysis<'a> {
 
         let env = Environment::init(&self.contexts, context);
 
-        let mut engine = Engine::new(self.graph, budget, false);
+        let mut engine = Engine::new(
+            self.graph,
+            budget,
+            false,
+            self.options.binary_lhs_budget_fraction,
+            self.options.switch_selector_budget_fraction,
+        );
 
         if !env.is_in_context(self.graph, self.graph[switch].region()) {
             return AssumptionResult::Unknown;
@@ -672,7 +754,9 @@ mod tests {
     use std::iter;
 
     use super::domain::AbstractU32;
-    use super::{AbstractValue, AssumptionResult, ContextualValueAnalysis, CvaOptions};
+    use super::{
+        AbstractValue, AssumptionResult, BudgetFraction, ContextualValueAnalysis, CvaOptions,
+    };
     use crate::rvsdg::analyse::ValueKey;
     use crate::rvsdg::analyse::scalar_constant::ScalarConstant;
     use crate::rvsdg::{Rvsdg, ValueInput, ValueOrigin, ValueOutput};
@@ -680,6 +764,30 @@ mod tests {
     use crate::{
         BinaryOperator, BranchCase, FnArg, FnSig, Function, Module, Symbol, UnaryOperator,
     };
+
+    #[test]
+    fn budget_fraction_new_validates_and_rounds_down() {
+        assert_eq!(BudgetFraction::new(1, 0), None);
+        assert_eq!(BudgetFraction::new(2, 1), None);
+        assert_eq!(BudgetFraction::new(0, 7), Some(BudgetFraction::ZERO));
+        assert_eq!(BudgetFraction::new(1, 2), Some(BudgetFraction::HALF));
+        assert_eq!(BudgetFraction::new(1, 1), Some(BudgetFraction::ONE));
+
+        let options = CvaOptions::default();
+
+        assert_eq!(options.binary_lhs_budget_fraction, BudgetFraction::HALF);
+        assert_eq!(
+            options.switch_selector_budget_fraction,
+            BudgetFraction::HALF
+        );
+        assert_eq!(BudgetFraction::new(2, 3).unwrap().apply_to(5), 3);
+        assert_eq!(
+            BudgetFraction::new(u64::MAX - 1, u64::MAX)
+                .unwrap()
+                .apply_to(usize::MAX),
+            usize::MAX - 1
+        );
+    }
 
     #[test]
     fn recursive_exact_unsigned_evaluation() {
@@ -2265,7 +2373,15 @@ mod tests {
             ValueInput::output(TY_U32, b, 0),
         );
 
-        let mut analysis = ContextualValueAnalysis::new(&graph, function);
+        let mut analysis = ContextualValueAnalysis::with_options(
+            &graph,
+            function,
+            CvaOptions {
+                evaluate_value_budget: 2,
+                binary_lhs_budget_fraction: BudgetFraction::ONE,
+                ..CvaOptions::default()
+            },
+        );
         let root_context = analysis.root_context();
         let value = ValueKey::new(
             body,
