@@ -22,7 +22,7 @@ use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
 use crate::rvsdg::{
     Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueInput, ValueOrigin, visit,
 };
-use crate::ty::{Int, TY_BOOL, TY_U32};
+use crate::ty::{Int, TY_BOOL, TY_I32, TY_U32};
 use crate::{BranchCase, Module};
 
 #[derive(Clone, Debug)]
@@ -290,11 +290,25 @@ impl BranchSelectorNormalizer {
                     // node. We assume the value will never actually be used and may provide any value
                     // as a valid value.
 
-                    let node = if value_ty == TY_BOOL {
-                        rvsdg.add_const_bool(branch_region, false)
-                    } else {
-                        rvsdg.add_const_u32(branch_region, 0)
+                    let node = match value_ty {
+                        TY_BOOL => rvsdg.add_const_bool(branch_region, false),
+                        TY_I32 => rvsdg.add_const_i32(branch_region, 0),
+                        TY_U32 => rvsdg.add_const_u32(branch_region, 0),
+                        _ => unreachable!(),
                     };
+
+                    ValueOrigin::Output {
+                        producer: node,
+                        output: 0,
+                    }
+                }
+                ResolvedValue::Case { value, .. } if value_ty == TY_U32 && value.ty == TY_I32 => {
+                    // We allow "identity" case mappings to fold into `Index` value kinds, even if
+                    // the case value is unsigned. However, we'll have to convert the value to an
+                    // unsigned integer. Note that after conversion, negative values will still
+                    // correctly map to the default case.
+
+                    let node = rvsdg.add_op_convert_to_u32(branch_region, *value);
 
                     ValueOrigin::Output {
                         producer: node,
@@ -642,7 +656,7 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::{ValueOrigin, ValueOutput};
-    use crate::ty::{TY_BOOL, TY_DUMMY, TY_PREDICATE};
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_I32, TY_PREDICATE};
     use crate::{FnSig, Function, Symbol};
 
     #[test]
@@ -1505,6 +1519,381 @@ mod tests {
                 producer: b1_val,
                 output: 0
             }
+        );
+    }
+
+    #[test]
+    fn test_normalize_signed_case_fallback() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let source = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+
+        let alternative = rvsdg.add_switch_branch(source);
+        let alternative_value = rvsdg.add_const_fallback(alternative, TY_PREDICATE);
+        rvsdg.reconnect_region_result(
+            alternative,
+            0,
+            ValueInput::output(TY_PREDICATE, alternative_value, 0).origin,
+        );
+
+        let mapped = rvsdg.add_switch_branch(source);
+        let payload = rvsdg.add_const_i32(mapped, -7);
+        let mapped_selector = rvsdg.add_op_case_to_branch_selector(
+            mapped,
+            ValueInput::output(TY_I32, payload, 0),
+            Int::I32,
+            vec![BranchCase::from(-7i32)],
+        );
+        rvsdg.reconnect_region_result(
+            mapped,
+            0,
+            ValueInput::output(TY_PREDICATE, mapped_selector, 0).origin,
+        );
+
+        let consumer = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, source, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(consumer);
+        rvsdg.add_switch_branch(consumer);
+
+        BranchSelectorNormalizer::new().transform_region(&mut rvsdg, region);
+
+        assert_eq!(rvsdg[source].value_outputs()[1].ty, TY_I32);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[consumer].expect_switch().branch_selector().origin
+        else {
+            panic!("expected normalization node");
+        };
+        assert_eq!(
+            rvsdg[producer].value_inputs()[0],
+            ValueInput::output(TY_I32, source, 1)
+        );
+        let op = rvsdg[producer].expect_op_case_to_branch_selector();
+        assert_eq!(op.encoding(), Int::I32);
+        assert_eq!(op.cases(), &[BranchCase::from(-7i32)]);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[alternative].value_results()[1].origin
+        else {
+            panic!("expected constant alternative");
+        };
+        assert_eq!(rvsdg[producer].expect_const_i32().value(), 0);
+        assert_eq!(
+            rvsdg[mapped].value_results()[1].origin,
+            ValueInput::output(TY_I32, payload, 0).origin
+        );
+    }
+
+    #[test]
+    fn test_normalize_signed_case_constant() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let source = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+
+        let alternative = rvsdg.add_switch_branch(source);
+        let alternative_value = rvsdg.add_const_predicate(alternative, 1);
+        rvsdg.reconnect_region_result(
+            alternative,
+            0,
+            ValueInput::output(TY_PREDICATE, alternative_value, 0).origin,
+        );
+
+        let mapped = rvsdg.add_switch_branch(source);
+        let payload = rvsdg.add_const_i32(mapped, -7);
+        let mapped_selector = rvsdg.add_op_case_to_branch_selector(
+            mapped,
+            ValueInput::output(TY_I32, payload, 0),
+            Int::I32,
+            vec![BranchCase::from(0i32)],
+        );
+        rvsdg.reconnect_region_result(
+            mapped,
+            0,
+            ValueInput::output(TY_PREDICATE, mapped_selector, 0).origin,
+        );
+
+        let consumer = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, source, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(consumer);
+        rvsdg.add_switch_branch(consumer);
+
+        BranchSelectorNormalizer::new().transform_region(&mut rvsdg, region);
+
+        assert_eq!(rvsdg[source].value_outputs()[1].ty, TY_U32);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[consumer].expect_switch().branch_selector().origin
+        else {
+            panic!("expected normalization node");
+        };
+        assert_eq!(
+            rvsdg[producer].value_inputs()[0],
+            ValueInput::output(TY_U32, source, 1)
+        );
+        let op = rvsdg[producer].expect_op_case_to_branch_selector();
+        assert_eq!(op.encoding(), Int::U32);
+        assert_eq!(op.cases(), &[BranchCase::from(0u32)]);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[alternative].value_results()[1].origin
+        else {
+            panic!("expected constant alternative");
+        };
+        assert_eq!(rvsdg[producer].expect_const_u32().value(), 1);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[mapped].value_results()[1].origin
+        else {
+            panic!("expected signed-to-unsigned conversion");
+        };
+        assert!(rvsdg[producer].is_op_convert_to_u32());
+        assert_eq!(
+            rvsdg[producer].value_inputs()[0],
+            ValueInput::output(TY_I32, payload, 0)
+        );
+    }
+
+    #[test]
+    fn test_normalize_unsigned_case_fallback() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let source = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+
+        let alternative = rvsdg.add_switch_branch(source);
+        let alternative_value = rvsdg.add_const_fallback(alternative, TY_PREDICATE);
+        rvsdg.reconnect_region_result(
+            alternative,
+            0,
+            ValueInput::output(TY_PREDICATE, alternative_value, 0).origin,
+        );
+
+        let mapped = rvsdg.add_switch_branch(source);
+        let payload = rvsdg.add_const_u32(mapped, 7);
+        let mapped_selector = rvsdg.add_op_case_to_branch_selector(
+            mapped,
+            ValueInput::output(TY_U32, payload, 0),
+            Int::U32,
+            vec![BranchCase::from(7u32)],
+        );
+        rvsdg.reconnect_region_result(
+            mapped,
+            0,
+            ValueInput::output(TY_PREDICATE, mapped_selector, 0).origin,
+        );
+
+        let consumer = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, source, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(consumer);
+        rvsdg.add_switch_branch(consumer);
+
+        BranchSelectorNormalizer::new().transform_region(&mut rvsdg, region);
+
+        assert_eq!(rvsdg[source].value_outputs()[1].ty, TY_U32);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[consumer].expect_switch().branch_selector().origin
+        else {
+            panic!("expected normalization node");
+        };
+        assert_eq!(
+            rvsdg[producer].value_inputs()[0],
+            ValueInput::output(TY_U32, source, 1)
+        );
+        let op = rvsdg[producer].expect_op_case_to_branch_selector();
+        assert_eq!(op.encoding(), Int::U32);
+        assert_eq!(op.cases(), &[BranchCase::from(7u32)]);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[alternative].value_results()[1].origin
+        else {
+            panic!("expected constant alternative");
+        };
+        assert_eq!(rvsdg[producer].expect_const_u32().value(), 0);
+        assert_eq!(
+            rvsdg[mapped].value_results()[1].origin,
+            ValueInput::output(TY_U32, payload, 0).origin
+        );
+    }
+
+    #[test]
+    fn test_normalize_bool_fallback() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let function = Function {
+            name: Symbol::from_ref("f"),
+            module: Symbol::from_ref("test"),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let selector = rvsdg.add_const_predicate(region, 0);
+        let source = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, selector, 0)],
+            vec![ValueOutput::new(TY_PREDICATE)],
+            None,
+        );
+
+        let alternative = rvsdg.add_switch_branch(source);
+        let alternative_value = rvsdg.add_const_fallback(alternative, TY_PREDICATE);
+        rvsdg.reconnect_region_result(
+            alternative,
+            0,
+            ValueInput::output(TY_PREDICATE, alternative_value, 0).origin,
+        );
+
+        let mapped = rvsdg.add_switch_branch(source);
+        let payload = rvsdg.add_const_bool(mapped, true);
+        let mapped_selector =
+            rvsdg.add_op_bool_to_branch_selector(mapped, ValueInput::output(TY_BOOL, payload, 0));
+        rvsdg.reconnect_region_result(
+            mapped,
+            0,
+            ValueInput::output(TY_PREDICATE, mapped_selector, 0).origin,
+        );
+
+        let consumer = rvsdg.add_switch(
+            region,
+            vec![ValueInput::output(TY_PREDICATE, source, 0)],
+            vec![],
+            None,
+        );
+        rvsdg.add_switch_branch(consumer);
+        rvsdg.add_switch_branch(consumer);
+
+        BranchSelectorNormalizer::new().transform_region(&mut rvsdg, region);
+
+        assert_eq!(rvsdg[source].value_outputs()[1].ty, TY_BOOL);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[consumer].expect_switch().branch_selector().origin
+        else {
+            panic!("expected normalization node");
+        };
+        assert!(rvsdg[producer].is_op_bool_to_branch_selector());
+        assert_eq!(
+            rvsdg[producer].value_inputs()[0],
+            ValueInput::output(TY_BOOL, source, 1)
+        );
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[alternative].value_results()[1].origin
+        else {
+            panic!("expected constant alternative");
+        };
+        assert_eq!(rvsdg[producer].expect_const_bool().value(), false);
+        assert_eq!(
+            rvsdg[mapped].value_results()[1].origin,
+            ValueInput::output(TY_BOOL, payload, 0).origin
         );
     }
 }
