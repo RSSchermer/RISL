@@ -940,8 +940,21 @@ impl WgslModuleWriter {
     }
 
     fn should_inline(&mut self, cx: Context, local_binding: LocalBinding) -> bool {
-        cx.scf[local_binding].kind().is_expr_binding()
-            && cx.local_binding_use_counts[local_binding] < 2
+        if let LocalBindingKind::ExprBinding(stmt) = cx.scf[local_binding].kind() {
+            // We currently inline expressions that are used only once. We exclude `load`
+            // expressions, as inlining loads runs the risk of accidental load-store reordering. A
+            // more advanced analysis that accounts for aliasing stores would be required to safely
+            // inline loads.
+
+            cx.local_binding_use_counts[local_binding] < 2
+                && !cx.scf[*stmt]
+                    .expect_expr_binding()
+                    .expression()
+                    .kind()
+                    .is_op_load()
+        } else {
+            false
+        }
     }
 
     fn write_expression(&mut self, cx: Context, expression: &Expression, inline_cx: InlineContext) {
