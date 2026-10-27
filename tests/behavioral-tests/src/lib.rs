@@ -11,6 +11,7 @@ mod adt;
 mod array;
 mod closure;
 mod cmp;
+mod condition_partial_initialization;
 mod enum_result;
 mod iter;
 mod num;

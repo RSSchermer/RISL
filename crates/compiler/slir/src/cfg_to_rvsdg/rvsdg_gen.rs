@@ -281,6 +281,10 @@ impl<'a> RegionBuilder<'a> {
         let mut value_inputs = Vec::with_capacity(item_deps.len() + demand.len());
         let mut inner_input_state = InputStateTracker::new();
 
+        // Ensure value origins are available for every value demanded in the loop-body, including
+        // values that may not yet be initialized (by adding "fallback" values).
+        self.ensure_value_origins(demand);
+
         for value in demand {
             value_inputs.push(self.input_state_tracker[*value]);
             inner_input_state.insert_value_arg(self.cfg, *value);
@@ -487,6 +491,25 @@ impl<'a> RegionBuilder<'a> {
         self.state_origin = StateOrigin::Node(node);
     }
 
+    /// Ensure that a value origin exists in the tracker for each value in `values`.
+    ///
+    /// Creates a "fallback" value for any value that was not already available in the tracker.
+    fn ensure_value_origins(&mut self, values: &[LocalBinding]) {
+        for value in values {
+            if !self
+                .input_state_tracker
+                .state
+                .contains_key(&InputState::Value(*value))
+            {
+                let ty = self.cfg[*value].ty();
+                let producer = self.rvsdg.add_const_fallback(self.region, ty);
+
+                self.input_state_tracker
+                    .insert_value_node(self.cfg, *value, producer, 0);
+            }
+        }
+    }
+
     fn connect_value_result(&mut self, result: u32, value: Value) {
         let input = self.resolve_value(value);
 
@@ -598,6 +621,10 @@ fn build_body(
         input_state_tracker,
         state_origin: StateOrigin::Argument,
     };
+
+    // Ensure value origins are available for every value demanded by the function-body, including
+    // uninitialized values (by adding "fallback" values).
+    region_builder.ensure_value_origins(demand.get(control_tree.root()));
 
     region_builder.visit_node_expect_linear(control_tree.root(), &[]);
 }
