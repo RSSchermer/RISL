@@ -20,6 +20,7 @@ risl-smi = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 slotmap = { workspace = true, features = ["serde"] }
+smallbitvec = { workspace = true }
 smallvec = { workspace = true, features = ["serde"] }
 thin-vec = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }

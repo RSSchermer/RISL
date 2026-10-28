@@ -1,107 +1,107 @@
+//! Removes switch branches that contain probable UB.
+//!
+//! For the time being, the only UB we look for is dereferencing a fallback (null) pointer.
+//!
+//! If removing such branches from a switch node would leave the switch node with only a single
+//! branch, that branch is inlined into the switch node's outer region and the switch node
+//! itself is removed (see [inline_switch_node]). Otherwise, the branches are removed and the
+//! switch node's branch-selector converter is adjusted (see [retain_switch_branches]).
+
+use std::collections::VecDeque;
+
 use rustc_hash::FxHashSet;
+use smallbitvec::SmallBitVec;
 
 use crate::Module;
 use crate::rvsdg::transform::region_replication::inline_switch_branch;
 use crate::rvsdg::transform::switch_branch_pruning::retain_switch_branches;
-use crate::rvsdg::visit::region_nodes::RegionNodesVisitor;
-use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin, visit};
+use crate::rvsdg::{Connectivity, Node, NodeKind, Region, Rvsdg, SimpleNode, ValueOrigin};
 
-pub struct ConditionalUbEliminator {
-    switch_collector: SwitchCollector,
-    fallback_pointer_origin_finder: FallbackPointerOriginFinder,
-    valid_branch_buffer: Vec<usize>,
+struct Job {
+    switch_node: Node,
+    retained_branches: SmallBitVec,
 }
 
-impl ConditionalUbEliminator {
-    pub fn new() -> Self {
-        Self {
-            switch_collector: SwitchCollector::new(),
-            fallback_pointer_origin_finder: FallbackPointerOriginFinder::new(),
-            valid_branch_buffer: vec![],
-        }
+struct JobCollector<'a> {
+    jobs: &'a mut VecDeque<Job>,
+    fallback_pointer_origin_finder: &'a mut FallbackPointerOriginFinder,
+}
+
+impl JobCollector<'_> {
+    /// Returns `true` if the `region` contains at least one of the kinds of UB we currently
+    /// identify.
+    fn collect(&mut self, rvsdg: &Rvsdg, region: Region) -> bool {
+        self.jobs.clear();
+        self.visit_region(rvsdg, region)
     }
 
-    pub fn transform_region(&mut self, module: &mut Module, rvsdg: &mut Rvsdg, region: Region) {
-        self.switch_collector.collect(rvsdg, region);
-
-        while let Some(node) = self.switch_collector.next() {
-            self.valid_branch_buffer.clear();
-
-            let data = rvsdg[node].expect_switch();
-
-            for (i, branch) in data.branches().iter().enumerate() {
-                if !self.branch_contains_ub(rvsdg, *branch) {
-                    self.valid_branch_buffer.push(i);
-                }
-            }
-
-            apply_elimination(module, rvsdg, node, &self.valid_branch_buffer)
-        }
-    }
-
-    fn branch_contains_ub(&mut self, rvsdg: &Rvsdg, branch: Region) -> bool {
-        // For now, we only test for one type of UB: memory operations that operate on invalid
-        // pointers.
-
-        self.branch_contains_invalid_mem_op(rvsdg, branch)
-    }
-
-    fn branch_contains_invalid_mem_op(&mut self, rvsdg: &Rvsdg, branch: Region) -> bool {
-        // Find all memory operations in the branch and check if their pointer input is invalid.
-        // We consider pointer input invalid if it traces back to a `ConstFallback` node.
-
-        for node in rvsdg[branch].nodes() {
-            match rvsdg[*node].kind() {
-                NodeKind::Simple(SimpleNode::OpLoad(_))
-                | NodeKind::Simple(SimpleNode::OpStore(_)) => {
-                    let ptr_origin = rvsdg[*node].value_inputs()[0].origin;
-
-                    if self
-                        .fallback_pointer_origin_finder
-                        .trace(rvsdg, branch, ptr_origin)
-                    {
-                        return true;
-                    }
-                }
-                _ => {}
+    /// Returns `true` if the `region` contains at least one of the kinds of UB we currently
+    /// identify.
+    fn visit_region(&mut self, rvsdg: &Rvsdg, region: Region) -> bool {
+        for node in rvsdg[region].nodes() {
+            if self.visit_node(rvsdg, region, *node) {
+                return true;
             }
         }
 
         false
     }
-}
 
-struct SwitchCollector {
-    candidate_stack: Vec<Node>,
-}
+    /// Returns `true` if reaching the node results in at least one of the kinds of UB we currently
+    /// identify.
+    fn visit_node(&mut self, rvsdg: &Rvsdg, region: Region, node: Node) -> bool {
+        use NodeKind::*;
+        use SimpleNode::*;
 
-impl SwitchCollector {
-    fn new() -> Self {
-        Self {
-            candidate_stack: Vec::new(),
+        match rvsdg[node].kind() {
+            Switch(_) => self.visit_switch_node(rvsdg, node),
+            Loop(loop_data) => self.visit_region(rvsdg, loop_data.loop_region()),
+            Simple(OpLoad(_)) | Simple(OpStore(_)) => {
+                // Dereferencing a fallback pointer is UB.
+
+                let ptr_origin = rvsdg[node].value_inputs()[0].origin;
+
+                self.fallback_pointer_origin_finder
+                    .trace(rvsdg, region, ptr_origin)
+            }
+            _ => false,
         }
     }
 
-    fn collect(&mut self, rvsdg: &Rvsdg, region: Region) {
-        self.candidate_stack.clear();
-        self.visit_region(rvsdg, region);
-    }
+    /// Returns `true` if all branches of the switch node contain at least one of the kinds of UB we
+    /// currently identify.
+    fn visit_switch_node(&mut self, rvsdg: &Rvsdg, switch_node: Node) -> bool {
+        let switch_data = rvsdg[switch_node].expect_switch();
+        let branch_count = switch_data.branches().len();
 
-    fn next(&mut self) -> Option<Node> {
-        // Last in, first out: ensures we visit inner switch nodes before outer switch nodes. If we
-        // in the future decide to mark entire switch nodes as UB (all branches exhibit UB), this
-        // processing order ensures we'll only need a single pass.
-        self.candidate_stack.pop()
-    }
-}
+        let mut retained_branches = SmallBitVec::with_capacity(branch_count);
 
-impl RegionNodesVisitor for SwitchCollector {
-    fn visit_node(&mut self, rvsdg: &Rvsdg, node: Node) {
-        if let NodeKind::Switch(_) = rvsdg[node].kind() {
-            self.candidate_stack.push(node);
+        for branch in switch_data.branches() {
+            let prior_job_count = self.jobs.len();
+
+            if !self.visit_region(rvsdg, *branch) {
+                retained_branches.push(true);
+            } else {
+                // The branch won't be retained, but we may have recorded jobs for nested switch
+                // nodes. We'll truncate the job list back to the prior job count to discard those.
+                self.jobs.truncate(prior_job_count);
+
+                retained_branches.push(false);
+            }
         }
 
-        visit::region_nodes::visit_node(self, rvsdg, node);
+        if retained_branches.all_false() {
+            true
+        } else {
+            if !retained_branches.all_true() {
+                self.jobs.push_back(Job {
+                    switch_node,
+                    retained_branches,
+                });
+            }
+
+            false
+        }
     }
 }
 
@@ -197,6 +197,8 @@ fn apply_elimination(
     switch_node: Node,
     valid_branches: &[usize],
 ) {
+    assert!(!valid_branches.is_empty());
+
     let data = rvsdg[switch_node].expect_switch();
     let branch_count = data.branches().len();
 
@@ -204,15 +206,75 @@ fn apply_elimination(
         return;
     }
 
-    if valid_branches.is_empty() {
-        panic!("a switch is expected to have at least one valid branch");
-    }
-
     if valid_branches.len() == 1 {
         // There's only a single branch left: inline it.
         inline_switch_branch(module, rvsdg, switch_node, valid_branches[0]);
     } else {
         retain_switch_branches(rvsdg, switch_node, valid_branches);
+    }
+}
+
+pub struct ConditionalUbEliminator {
+    queue: VecDeque<Job>,
+    fallback_pointer_origin_finder: FallbackPointerOriginFinder,
+    retained_branches_buffer: Vec<usize>,
+}
+
+impl ConditionalUbEliminator {
+    pub fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            fallback_pointer_origin_finder: FallbackPointerOriginFinder::new(),
+            retained_branches_buffer: vec![],
+        }
+    }
+
+    /// Removes switch branches that contain probable UB, for switch nodes in the `region`.
+    ///
+    /// See the [module-level documentation](crate::rvsdg::transform::conditional_ub_elimination)
+    /// for details.
+    ///
+    /// Note that this does not just apply to direct child nodes of the `region`; nested regions
+    /// are also processed, recursively.
+    ///
+    /// Return `true` if the region contains unconditional UB (UB that cannot be eliminated by
+    /// pruning branches).
+    pub fn transform_region(
+        &mut self,
+        module: &mut Module,
+        rvsdg: &mut Rvsdg,
+        region: Region,
+    ) -> bool {
+        let mut job_collector = JobCollector {
+            jobs: &mut self.queue,
+            fallback_pointer_origin_finder: &mut self.fallback_pointer_origin_finder,
+        };
+
+        if job_collector.collect(rvsdg, region) {
+            return true;
+        }
+
+        // Process jobs from the inside out. Inlining a switch node as a single branch reason does
+        // not move the pre-existing nodes but rather creates copies. Processing from the outside
+        // in would therefore risk running jobs on switch nodes that no longer exist.
+        while let Some(job) = self.queue.pop_front() {
+            self.retained_branches_buffer.clear();
+
+            for (branch_index, retained) in job.retained_branches.iter().enumerate() {
+                if retained {
+                    self.retained_branches_buffer.push(branch_index);
+                }
+            }
+
+            apply_elimination(
+                module,
+                rvsdg,
+                job.switch_node,
+                &self.retained_branches_buffer,
+            )
+        }
+
+        false
     }
 }
 
@@ -226,7 +288,9 @@ pub fn transform_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
             .expect("function not registered");
         let body_region = rvsdg[fn_node].expect_function().body_region();
 
-        eliminator.transform_region(module, rvsdg, body_region);
+        if eliminator.transform_region(module, rvsdg, body_region) {
+            panic!("encountered unconditional UB in entry point function");
+        }
     }
 }
 
@@ -429,6 +493,7 @@ mod tests {
         );
 
         let mut eliminator = ConditionalUbEliminator::new();
+
         eliminator.transform_region(&mut module, &mut rvsdg, body);
 
         // Verify that switch still exists but has 2 branches
@@ -554,6 +619,7 @@ mod tests {
         );
 
         let mut eliminator = ConditionalUbEliminator::new();
+
         eliminator.transform_region(&mut module, &mut rvsdg, body);
 
         // Verify that switch in loop was inlined (since only branch 1 remains)
@@ -571,5 +637,115 @@ mod tests {
         // producer should be the replicated const_u32(42)
         let val = rvsdg[producer].expect_const_u32();
         assert_eq!(val.value(), 42);
+    }
+
+    #[test]
+    fn test_conditional_ub_elimination_nested_all_ub() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Symbol::from_ref(""),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, body) = rvsdg.register_function(&module, function, iter::empty());
+
+        let outer_condition = rvsdg.add_const_bool(body, true);
+        let outer_selector = rvsdg
+            .add_op_bool_to_branch_selector(body, ValueInput::output(TY_BOOL, outer_condition, 0));
+        let outer_switch = rvsdg.add_switch(
+            body,
+            vec![ValueInput::output(TY_PREDICATE, outer_selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            Some(StateOrigin::Argument),
+        );
+
+        let outer_branch_0 = rvsdg.add_switch_branch(outer_switch);
+        let outer_branch_0_value = rvsdg.add_const_u32(outer_branch_0, 42);
+        rvsdg.reconnect_region_result(
+            outer_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: outer_branch_0_value,
+                output: 0,
+            },
+        );
+
+        let outer_branch_1 = rvsdg.add_switch_branch(outer_switch);
+        let inner_condition = rvsdg.add_const_bool(outer_branch_1, true);
+        let inner_selector = rvsdg.add_op_bool_to_branch_selector(
+            outer_branch_1,
+            ValueInput::output(TY_BOOL, inner_condition, 0),
+        );
+        let inner_switch = rvsdg.add_switch(
+            outer_branch_1,
+            vec![ValueInput::output(TY_PREDICATE, inner_selector, 0)],
+            vec![ValueOutput::new(TY_U32)],
+            Some(StateOrigin::Argument),
+        );
+
+        // Add two branches that both contain a load from a fallback pointer.
+        for _ in 0..2 {
+            let inner_branch = rvsdg.add_switch_branch(inner_switch);
+            let ptr_fallback = rvsdg.add_const_fallback(inner_branch, TY_PTR_U32);
+            let load = rvsdg.add_op_load(
+                inner_branch,
+                ValueInput::output(TY_PTR_U32, ptr_fallback, 0),
+                StateOrigin::Argument,
+            );
+            rvsdg.reconnect_region_result(
+                inner_branch,
+                0,
+                ValueOrigin::Output {
+                    producer: load,
+                    output: 0,
+                },
+            );
+        }
+
+        rvsdg.reconnect_region_result(
+            outer_branch_1,
+            0,
+            ValueOrigin::Output {
+                producer: inner_switch,
+                output: 0,
+            },
+        );
+
+        rvsdg.reconnect_region_result(
+            body,
+            0,
+            ValueOrigin::Output {
+                producer: outer_switch,
+                output: 0,
+            },
+        );
+
+        let mut eliminator = ConditionalUbEliminator::new();
+
+        assert!(!eliminator.transform_region(&mut module, &mut rvsdg, body));
+
+        assert!(!rvsdg.is_live_node(outer_switch));
+        assert!(!rvsdg.is_live_node(inner_switch));
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[body].value_results()[0].origin
+        else {
+            panic!("expected the function result to connect the first output of a node");
+        };
+        assert_eq!(rvsdg[producer].expect_const_u32().value(), 42);
+        assert_eq!(*rvsdg[body].state_result(), StateOrigin::Argument);
     }
 }
