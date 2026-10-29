@@ -296,17 +296,15 @@ impl Enum {
                 niche_variants,
                 niche_start,
             } => {
-                let variant_index = if valid_range.contains(tag_value) {
+                let niche_index = tag_value.wrapping_sub(*niche_start) & self.tag_ty.mask();
+                let count = (niche_variants.end() - niche_variants.start() + 1) as u128;
+
+                let variant_index = if niche_index < count {
+                    niche_variants.start() + niche_index as usize
+                } else if valid_range.contains(tag_value) {
                     *untagged_variant
                 } else {
-                    let niche_index = tag_value.wrapping_sub(*niche_start) & self.tag_ty.mask();
-                    let count = (niche_variants.end() - niche_variants.start() + 1) as u128;
-
-                    if niche_index < count {
-                        niche_variants.start() + niche_index as usize
-                    } else {
-                        panic!("invalid tag value for niche-encoded enum");
-                    }
+                    panic!("invalid tag value for niche-encoded enum");
                 };
 
                 EnumDiscriminant {
@@ -413,25 +411,25 @@ pub enum EnumTagEncoding {
     ///
     /// To resolve the active variant index:
     ///
-    /// 1. Read the tag value `v` from the [Enum::tag_offset] as raw bits of [Enum::tag_primitive]
+    /// 1. Read the tag value `v` from the [Enum::tag_offset] as raw bits of [Enum::tag_ty]
     ///    size, zero-extended to a `u128`.
-    /// 2. If `v` is within `valid_range`, the active variant is `untagged_variant`.
-    /// 3. Otherwise, calculate the niche index:
-    ///    `niche_index = v.wrapping_sub(niche_start) & Enum::tag_primitive.mask()`.
-    /// 4. If `niche_index` is less than the count of variants in `niche_variants`:
+    /// 2. Calculate the niche index:
+    ///    `niche_index = v.wrapping_sub(niche_start) & Enum::tag_ty.mask()`.
+    /// 3. If `niche_index` is less than the count of variants in `niche_variants`:
     ///    The active variant is `niche_variants.start() + (niche_index as usize)`.
     ///    If this results in the `untagged_variant` index, the tag is invalid (UB).
+    /// 4. Otherwise, if `v` is within `valid_range`, the active variant is `untagged_variant`.
     /// 5. Otherwise, the result is undefined (UB).
     ///
     /// Note that `niche_variants` is a contiguous range of indices. It is possible for
     /// `untagged_variant` index to fall within this range; if it does, the niche value that would
     /// correspond to it is simply never used by the compiler.
     Niche {
-        /// The range of bit patterns that are considered valid for the niche field of the
-        /// `untagged_variant`.
+        /// The valid range for the enum's tag scalar.
         ///
-        /// Any value `V` that falls within this range indicates that the `untagged_variant` is
-        /// active. Values outside this range are niches and represent one of the `niche_variants`.
+        /// This may include niche representations, so explicit niche encodings must be checked
+        /// first. Only values outside the niche interval and inside this range select the
+        /// `untagged_variant`.
         valid_range: WrappingRange,
 
         /// The index of the variant that is active when the tag value represents a valid
@@ -440,8 +438,8 @@ pub enum EnumTagEncoding {
 
         /// The range of variant indices that are encoded as niches.
         ///
-        /// These indices are represented by bit patterns that are outside the valid range of the
-        /// niche field in the `untagged_variant`.
+        /// These indices are represented by bit patterns that are invalid for the niche field
+        /// in the `untagged_variant`, but may be included in the enum tag's `valid_range`.
         niche_variants: RangeInclusive<usize>,
 
         /// The bit pattern value that corresponds to the first variant in `niche_variants`.
@@ -1246,5 +1244,188 @@ impl Deref for KindRef<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_niche_discriminant_pointer() {
+        let enum_data = Enum {
+            variants: vec![
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 7,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 42,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: EnumTagTy::Pointer,
+            tag_encoding: EnumTagEncoding::Niche {
+                valid_range: WrappingRange { start: 1, end: 0 },
+                untagged_variant: 1,
+                niche_variants: 0..=0,
+                niche_start: 0,
+            },
+            tag_offset: 0,
+        };
+
+        let bytes = 0u64.to_le_bytes();
+
+        assert_eq!(enum_data.read_discriminant(&bytes).value, 7);
+        assert_eq!(enum_data.read_discriminant(&bytes).ty, Int::U32);
+        assert_eq!(enum_data.resolve_variant_index(&bytes), 0);
+    }
+
+    #[test]
+    fn test_niche_discriminant_pointer_untagged() {
+        let enum_data = Enum {
+            variants: vec![
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 7,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 42,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: EnumTagTy::Pointer,
+            tag_encoding: EnumTagEncoding::Niche {
+                valid_range: WrappingRange { start: 1, end: 0 },
+                untagged_variant: 1,
+                niche_variants: 0..=0,
+                niche_start: 0,
+            },
+            tag_offset: 0,
+        };
+
+        let bytes = 256u64.to_le_bytes();
+
+        assert_eq!(enum_data.read_discriminant(&bytes).value, 42);
+        assert_eq!(enum_data.read_discriminant(&bytes).ty, Int::U32);
+        assert_eq!(enum_data.resolve_variant_index(&bytes), 1);
+    }
+
+    #[test]
+    fn test_niche_discriminant_wrapping() {
+        let enum_data = Enum {
+            variants: vec![
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 10,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 20,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 30,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 40,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: Int {
+                size: IntSize::I8,
+                signed: false,
+            }
+            .into(),
+            tag_encoding: EnumTagEncoding::Niche {
+                valid_range: WrappingRange { start: 0, end: 255 },
+                untagged_variant: 3,
+                niche_variants: 0..=2,
+                niche_start: 254,
+            },
+            tag_offset: 0,
+        };
+
+        // The tag_ty has a width of 8 bits, so variant `2` wraps to value `(254 + 2) % 256 = 0`.
+        // Variant `2` has discriminant `30`.
+        assert_eq!(enum_data.read_discriminant(&[0]).value, 30);
+    }
+
+    #[test]
+    fn test_niche_discriminant_wrapping_untagged() {
+        let enum_data = Enum {
+            variants: vec![
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 10,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 20,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 30,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 40,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: Int {
+                size: IntSize::I8,
+                signed: false,
+            }
+            .into(),
+            tag_encoding: EnumTagEncoding::Niche {
+                valid_range: WrappingRange { start: 0, end: 255 },
+                untagged_variant: 3,
+                niche_variants: 0..=2,
+                niche_start: 254,
+            },
+            tag_offset: 0,
+        };
+
+        // The niche range starts at `254`, and since the tag is a width of 8 bits, wraps to `0`
+        // at `256`. Therefore, the tag values that map to the niche variants are: `254`, `255`,
+        // and `0`. A value of `1` should then map to the untagged variant. The untagged variant
+        // has discriminant `40`.
+        assert_eq!(enum_data.read_discriminant(&[1]).value, 40);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid tag value for niche-encoded enum")]
+    fn test_niche_discriminant_invalid_tag() {
+        let enum_data = Enum {
+            variants: vec![
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 7,
+                },
+                EnumVariant {
+                    ty: TY_DUMMY,
+                    discriminant: 42,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: Int {
+                size: IntSize::I8,
+                signed: false,
+            }
+            .into(),
+            tag_encoding: EnumTagEncoding::Niche {
+                valid_range: WrappingRange { start: 0, end: 3 },
+                untagged_variant: 1,
+                niche_variants: 0..=0,
+                niche_start: 0,
+            },
+            tag_offset: 0,
+        };
+
+        enum_data.read_discriminant(&[4]);
     }
 }
