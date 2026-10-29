@@ -47,11 +47,11 @@ enum PointerTrace {
     /// it reaches an [OpElementPtr] or an [OpFieldPtr] node.
     Aggregate,
 
-    /// The trace reaches the output of an [OpLoad] node.
+    /// The trace reaches the output of an [OpLoad], [OpExtractField], or [OpExtractElement] node.
     ///
-    /// We make no attempt to trace pointer values to memory stores and loads; we instead assume
-    /// that the pointer could have originated from any alloca, binding, or constant with a
-    /// compatible type.
+    /// We make no attempt to trace pointer values through memory stores and loads or aggregate
+    /// extractions; we instead assume that the pointer could have originated from any alloca,
+    /// binding, or constant with a compatible type.
     Blocked,
 }
 
@@ -72,9 +72,9 @@ struct PointerAnalyzer {
     /// that contains a type that is compatible with any type in this set (as per
     /// [TypeRegistry::can_coerce]) will not be promoted this round.
     ///
-    /// This is because we make no attempt to trace pointer values to memory stores and loads; we
-    /// instead assume that the pointer could have originated from any alloca with a compatible
-    /// type.
+    /// This is because we make no attempt to trace pointer values through memory stores and loads
+    /// or aggregate extractions; we instead assume that the pointer could have originated from any
+    /// alloca with a compatible type.
     ///
     /// Note that we are guaranteed to be able to promote such allocas during some later round, due
     /// to two top-level constraints on RISL:
@@ -319,21 +319,17 @@ impl PointerAnalyzer {
                     PointerTrace::Alloca(node)
                 }
             }
-            Simple(OpLoad(data)) => {
-                // We won't try to trace a pointer value through mem-ops, we'll simply never
-                // promote a dependent mem-op if its input pointer trace reaches the output of an
-                // OpLoad node. That means that if the loaded pointer were to originate from an
-                // OpAlloca node, then that OpAlloca node would need to be blacklisted from
-                // promotion this round (we can only promote an OpAlloca if we can promote *all*
-                // mem-ops to/from that alloca in the same round). However, since we don't trace
-                // a pointer value through mem-ops, we don't know which OpAlloca (if any) to
-                // blacklist. What we do instead is add the OpLoad's output type to the
-                // `blocked_types` set. All entries in the `blocked_types` set will later serve
-                // as blanket blacklists for all OpAlloca nodes with matching value types.
+            Simple(OpLoad(_) | OpExtractField(_) | OpExtractElement(_)) => {
+                // We won't try to trace a pointer value through mem-ops or aggregate extractions.
+                // The alloca holding an aggregate is not the root of a pointer extracted from it.
+                // Dependent mem-ops must wait until promotion or scalar replacement exposes that
+                // root. Since we don't know which OpAlloca (if any) the pointer originates from,
+                // we block all allocas with matching pointee types this round: an alloca can only
+                // be promoted if *all* mem-ops to/from it can be promoted in the same round.
                 //
                 // See also comment on the `blocked_types` field.
 
-                let output_ty = data.value_output().ty;
+                let output_ty = rvsdg[node].value_outputs()[output as usize].ty;
 
                 let TypeKind::Ptr(pointee_ty) = *rvsdg.ty().kind(output_ty) else {
                     panic!("expected to be tracing a pointer value");
@@ -377,20 +373,19 @@ impl WorkCollector<'_> {
         // mem-ops on that alloca are promotable this round. During analysis, we blacklist allocas
         // that we know to be a root for mem-ops that cannot be promoted yet for other reasons (the
         // trace was classified as "variable" or "aggregate"). We've also tracked a list of
-        // "blocked types" for traces that were blocked by an OpLoad, so that no root could be
-        // determined. We therefore conservatively also exclude all allocas that store a type that
-        // matches a type in the blocked_types list. This is still not quite enough to guarantee we
-        // exclude all allocas that cannot yet be completely promoted: since we don't trace beyond
-        // the OpLoad we cannot know if the pointer-value we loaded from it was refined from a
+        // "blocked types" for traces that were blocked by a load or aggregate extraction, so that
+        // no root could be determined. We therefore conservatively also exclude all allocas that
+        // store a type that matches a type in the blocked_types list. This is still not quite enough
+        // to guarantee we exclude all allocas that cannot yet be completely promoted: since we don't
+        // trace beyond the blocking node we cannot know if the pointer-value was refined from a
         // pointer to an aggregate type before it was stored (e.g., by an OpElementPtr node). We
         // therefore also conservatively exclude all allocas that store an aggregate type if there
         // is even a single type in the blocked_types set.
         //
-        // Note that all blocking OpLoad will eventually be promoted away, thus unlocking such
-        // excluded allocas in a later round of memory-promotion-and-legalization. Since the
-        // blocked_list being non-empty always implies that at least one more round is required
-        // anyway, this conservative exclusion mechanism does not actually increase the total number
-        // of rounds and should not have a major performance impact.
+        // Blocking loads need promotion, and blocking extractions may need scalar replacement,
+        // before such excluded allocas can be unlocked in a later round. Since blocking already
+        // requires another round, this conservative exclusion mechanism should not have a major
+        // performance impact.
         for (candidate, alloca) in self.promotion_candidates.iter() {
             if !self.analyzer.alloca_blacklist.contains(alloca) {
                 let ty = rvsdg[*alloca].expect_op_alloca().ty();
