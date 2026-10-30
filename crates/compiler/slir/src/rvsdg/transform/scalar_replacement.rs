@@ -1,5 +1,5 @@
-//! Replaces alloca nodes and constant dependencies of aggregate types with multiple allocas or
-//! constants, one for each of the aggregate's parts.
+//! Replaces alloca nodes, constant dependencies, and fallback values of aggregate types with
+//! multiple allocas or constants, one for each of the aggregate's parts.
 //!
 //! We'll also refer to this as "splitting" an alloca node or constant dependency.
 //!
@@ -185,7 +185,8 @@ use rustc_hash::FxHashSet;
 
 use crate::rvsdg::analyse::element_index::ElementIndex;
 use crate::rvsdg::transform::enum_replacement::{
-    replace_enum_alloca, replace_enum_constant_dependency,
+    ConstEnumReplacement, ConstEnumReplacementKind, replace_enum_alloca,
+    replace_enum_const_fallback, replace_enum_constant_dependency,
 };
 use crate::rvsdg::visit::value_flow::ValueFlowVisitor;
 use crate::rvsdg::{
@@ -204,6 +205,7 @@ enum SwitchOutputSplitKind {
 pub enum Job {
     Alloca(Node),
     ConstantDependency { fn_node: Node, dep_index: u32 },
+    ConstFallback(Node),
 }
 
 /// Whether the given type must be split for reasons of legalization.
@@ -224,7 +226,7 @@ fn ty_must_split(ty_registry: &TypeRegistry, ty: Type) -> bool {
     }
 }
 
-/// Whether an alloca or constant dependency of the given type would be a candidate for splitting.
+/// Whether an aggregate of the given type would be a candidate for splitting.
 ///
 /// Struct and enum types are always candidates for splitting. Array types are only candidates if
 /// they contain a type that must be split (see [ty_must_split]). See the "Splitting switch node
@@ -238,13 +240,22 @@ fn ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
     }
 }
 
-/// Collects all [OpAlloca] nodes and constant dependencies of aggregate types in a region and
-/// all sub-regions (e.g. a switch node branch region) into a queue of candidates for scalar
-/// replacement.
+fn fallback_ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
+    let ty = match *ty_registry.kind(ty) {
+        TypeKind::Ptr(pointee_ty) => pointee_ty,
+        _ => ty,
+    };
+
+    ty_is_candidate(ty_registry, ty)
+}
+
+/// Collects all [OpAlloca] nodes, constant dependencies, and [ConstFallback] nodes of aggregate
+/// types in a region and all sub-regions (e.g. a switch node branch region) into a queue of
+/// candidates for scalar replacement.
 ///
 /// Note that this does not yet make any decisions about whether we should perform a scalar
-/// replacement transform on a given [OpAlloca] node or constant dependency; this requires
-/// further analysis.
+/// replacement transform on a given [OpAlloca] node, constant dependency, or [ConstFallback] node;
+/// this requires further analysis.
 struct CandidateCollector<'a, 'b> {
     rvsdg: &'a Rvsdg,
     candidates: &'b mut VecDeque<Job>,
@@ -279,6 +290,11 @@ impl CandidateCollector<'_, '_> {
             NodeKind::Simple(SimpleNode::OpAlloca(op)) => {
                 if ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
                     self.candidates.push_back(Job::Alloca(node));
+                }
+            }
+            NodeKind::Simple(SimpleNode::ConstFallback(op)) => {
+                if fallback_ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
+                    self.candidates.push_back(Job::ConstFallback(node));
                 }
             }
             NodeKind::Switch(n) => {
@@ -357,6 +373,16 @@ impl JobAnalyzer {
             Job::ConstantDependency { fn_node, dep_index } => {
                 let region = rvsdg[fn_node].expect_function().body_region();
                 self.visit_region_argument(rvsdg, region, dep_index);
+            }
+            Job::ConstFallback(node) => {
+                let ty = rvsdg[node].expect_const_fallback().ty();
+
+                // Aggregate fallbacks already represent contents, so treat them as loaded to allow
+                // per-part stores. Storing a pointer fallback itself must wait for promotion, since
+                // pointers to its parts cannot replace the single stored pointer.
+                self.was_loaded = !rvsdg.ty().kind(ty).is_ptr();
+
+                self.visit_value_output(rvsdg, node, 0);
             }
         }
 
@@ -625,12 +651,18 @@ impl Replacer<'_, '_, '_> {
                     constant,
                     alloc_id,
                     offset,
-                    |var_dep_index, variant_ty| {
-                        if self.ty.kind(variant_ty).is_aggregate() {
-                            self.candidate_queue.push_back(Job::ConstantDependency {
-                                fn_node,
-                                dep_index: var_dep_index,
-                            });
+                    |replacement: ConstEnumReplacement| {
+                        if ty_is_candidate(&self.ty, replacement.ty) {
+                            let job = match replacement.kind {
+                                ConstEnumReplacementKind::ConstDependency(dep_index) => {
+                                    Job::ConstantDependency { fn_node, dep_index }
+                                }
+                                ConstEnumReplacementKind::ConstFallback(node) => {
+                                    Job::ConstFallback(node)
+                                }
+                            };
+
+                            self.candidate_queue.push_back(job);
                         }
                     },
                 );
@@ -641,6 +673,71 @@ impl Replacer<'_, '_, '_> {
         }
 
         self.redirect_region_argument(region, dep_index, &split_inputs);
+    }
+
+    fn add_fallback_part(&mut self, region: Region, ty: Type) -> ValueInput {
+        let node = self.rvsdg.add_const_fallback(region, ty);
+
+        if fallback_ty_is_candidate(&self.ty, ty) {
+            self.candidate_queue.push_back(Job::ConstFallback(node));
+        }
+
+        ValueInput::output(ty, node, 0)
+    }
+
+    fn replace_const_fallback(&mut self, node: Node) {
+        let region = self.rvsdg[node].region();
+        let ty = self.rvsdg[node].expect_const_fallback().ty();
+        let (ty, is_pointer) = match *self.ty.kind(ty) {
+            TypeKind::Ptr(pointee_ty) => (pointee_ty, true),
+            _ => (ty, false),
+        };
+
+        let mut split_inputs = Vec::new();
+
+        match self.ty.clone().kind(ty).deref() {
+            TypeKind::Struct(data) => {
+                for field in &data.fields {
+                    let field_ty = if is_pointer {
+                        self.ty.register(TypeKind::Ptr(field.ty))
+                    } else {
+                        field.ty
+                    };
+
+                    split_inputs.push(self.add_fallback_part(region, field_ty));
+                }
+            }
+            TypeKind::Array {
+                element_ty, count, ..
+            } => {
+                let element_ty = if is_pointer {
+                    self.ty.register(TypeKind::Ptr(*element_ty))
+                } else {
+                    *element_ty
+                };
+
+                for _ in 0..*count {
+                    split_inputs.push(self.add_fallback_part(region, element_ty));
+                }
+            }
+            TypeKind::Enum(_) => {
+                return replace_enum_const_fallback(
+                    self.rvsdg,
+                    node,
+                    |variant_node, variant_ty| {
+                        if fallback_ty_is_candidate(&self.ty, variant_ty) {
+                            self.candidate_queue
+                                .push_back(Job::ConstFallback(variant_node));
+                        }
+                    },
+                );
+            }
+            _ => unreachable!("type is not an aggregate, node should not have been a candidate"),
+        }
+
+        self.visit_users(node, 0, &split_inputs);
+
+        let _ = self.rvsdg.try_remove_node(node);
     }
 
     fn visit_users(&mut self, node: Node, output: u32, split_inputs: &[ValueInput]) {
@@ -1898,6 +1995,7 @@ impl RegionReplacementContext<'_> {
                     Job::ConstantDependency { fn_node, dep_index } => {
                         replacer.replace_constant_dependency(fn_node, dep_index)
                     }
+                    Job::ConstFallback(node) => replacer.replace_const_fallback(node),
                 }
 
                 // Attempt to add any newly added candidates to the end of the queue *during* this
@@ -3309,5 +3407,280 @@ mod tests {
 
         // The original OpFieldPtr node is removed.
         assert!(!rvsdg.is_live_node(field_ptr));
+    }
+
+    #[test]
+    fn test_scalar_replace_fallback_nested_value() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: module.name,
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_PTR_U32),
+            },
+        );
+
+        let array_ty = module.ty.register(TypeKind::Array {
+            element_ty: TY_PTR_U32,
+            count: 2,
+            stride: 8,
+        });
+        let struct_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![crate::ty::StructField {
+                offset: 0,
+                ty: array_ty,
+                io_binding: None,
+            }],
+        }));
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let fallback = rvsdg.add_const_fallback(region, struct_ty);
+        let field =
+            rvsdg.add_op_extract_field(region, ValueInput::output(struct_ty, fallback, 0), 0);
+        let index = rvsdg.add_const_u32(region, 1);
+        let element = rvsdg.add_op_extract_element(
+            region,
+            ValueInput::output(array_ty, field, 0),
+            ValueInput::output(TY_U32, index, 0),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: element,
+                output: 0,
+            },
+        );
+
+        let mut cx = AggregateReplacementContext::new();
+        let mut rcx = cx.for_region(&rvsdg, region);
+
+        assert!(rcx.replace(&mut module, &mut rvsdg));
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("expected fallback output");
+        };
+
+        assert_eq!(rvsdg[producer].expect_const_fallback().ty(), TY_PTR_U32);
+
+        assert!(!rvsdg.is_live_node(fallback));
+        assert!(!rvsdg.is_live_node(field));
+        assert!(!rvsdg.is_live_node(element));
+
+        assert!(!rcx.replace(&mut module, &mut rvsdg));
+    }
+
+    #[test]
+    fn test_scalar_replace_fallback_created_by_enum_replacement() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: module.name,
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_PTR_U32),
+            },
+        );
+
+        let none_ty = module
+            .ty
+            .register(TypeKind::Struct(crate::ty::Struct { fields: vec![] }));
+        let some_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![crate::ty::StructField {
+                offset: 4,
+                ty: TY_PTR_U32,
+                io_binding: None,
+            }],
+        }));
+        let some_ptr_ty = module.ty.register(TypeKind::Ptr(some_ty));
+        let enum_ty = module.ty.register(TypeKind::Enum(crate::ty::Enum {
+            variants: vec![
+                crate::ty::EnumVariant {
+                    ty: none_ty,
+                    discriminant: 0,
+                },
+                crate::ty::EnumVariant {
+                    ty: some_ty,
+                    discriminant: 1,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: Int::U32.into(),
+            tag_encoding: crate::ty::EnumTagEncoding::Direct,
+            tag_offset: 0,
+        }));
+        let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
+
+        let alloc_id = module
+            .allocations
+            .register(Allocation { bytes: vec![0; 12] });
+        let constant = Constant {
+            name: Symbol::from_ref("NONE"),
+            module: module.name,
+        };
+
+        module
+            .constants
+            .register_byte_data(constant, enum_ty, alloc_id, 0);
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let const_node = rvsdg.register_constant(&module, constant);
+        let (_, region) = rvsdg.register_function(&module, function, [const_node]);
+
+        let variant = rvsdg.add_op_variant_ptr(region, ValueInput::argument(enum_ptr_ty, 0), 1);
+        let load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(some_ptr_ty, variant, 0),
+            StateOrigin::Argument,
+        );
+        let field = rvsdg.add_op_extract_field(region, ValueInput::output(some_ty, load, 0), 0);
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: field,
+                output: 0,
+            },
+        );
+
+        let mut cx = AggregateReplacementContext::new();
+        let mut rcx = cx.for_region(&rvsdg, region);
+
+        assert!(rcx.replace(&mut module, &mut rvsdg));
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("expected load output");
+        };
+        let field_load = rvsdg[producer].expect_op_load();
+
+        assert_eq!(field_load.value_output().ty, TY_PTR_U32);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = field_load.ptr_input().origin
+        else {
+            panic!("expected fallback pointer");
+        };
+
+        assert_eq!(
+            rvsdg[producer].expect_const_fallback().ty(),
+            field_load.ptr_input().ty
+        );
+
+        assert!(!rvsdg.is_live_node(variant));
+        assert!(!rvsdg.is_live_node(load));
+        assert!(!rvsdg.is_live_node(field));
+
+        assert!(!rcx.replace(&mut module, &mut rvsdg));
+    }
+
+    #[test]
+    fn test_scalar_replace_fallback_enum_pointer() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: module.name,
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let variant_ty = module
+            .ty
+            .register(TypeKind::Struct(crate::ty::Struct { fields: vec![] }));
+        let enum_ty = module.ty.register(TypeKind::Enum(crate::ty::Enum {
+            variants: vec![crate::ty::EnumVariant {
+                ty: variant_ty,
+                discriminant: 0,
+            }],
+            discriminant_ty: Int::U32,
+            tag_ty: Int::U32.into(),
+            tag_encoding: crate::ty::EnumTagEncoding::Direct,
+            tag_offset: 0,
+        }));
+        let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let fallback = rvsdg.add_const_fallback(region, enum_ptr_ty);
+        let discriminant = rvsdg.add_op_get_discriminant(
+            region,
+            ValueInput::output(enum_ptr_ty, fallback, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: discriminant,
+                output: 0,
+            },
+        );
+
+        let mut cx = AggregateReplacementContext::new();
+        let mut rcx = cx.for_region(&rvsdg, region);
+
+        assert!(rcx.replace(&mut module, &mut rvsdg));
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("expected load output");
+        };
+        let load = rvsdg[producer].expect_op_load();
+
+        assert_eq!(load.value_output().ty, TY_U32);
+
+        let ValueOrigin::Output {
+            producer,
+            output: 0,
+        } = load.ptr_input().origin
+        else {
+            panic!("expected fallback pointer");
+        };
+        assert_eq!(rvsdg[producer].expect_const_fallback().ty(), TY_PTR_U32);
+
+        assert!(!rvsdg.is_live_node(fallback));
+        assert!(!rvsdg.is_live_node(discriminant));
     }
 }

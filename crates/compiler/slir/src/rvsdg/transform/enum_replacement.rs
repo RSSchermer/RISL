@@ -15,6 +15,18 @@ use crate::rvsdg::{
 use crate::ty::{Type, TypeKind, TypeRegistry};
 use crate::{AllocId, Allocation, Constant, Module, ty};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstEnumReplacement {
+    pub ty: Type,
+    pub kind: ConstEnumReplacementKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstEnumReplacementKind {
+    ConstDependency(u32),
+    ConstFallback(Node),
+}
+
 pub struct EnumReplacer<'a> {
     rvsdg: &'a mut Rvsdg,
     ty: TypeRegistry,
@@ -89,6 +101,47 @@ impl<'a> EnumReplacer<'a> {
         self.rvsdg.remove_node(node);
     }
 
+    pub fn replace_const_fallback<F>(&mut self, node: Node, mut with_replacements: F)
+    where
+        F: FnMut(Node, Type),
+    {
+        let node_data = &self.rvsdg[node];
+        let region = node_data.region();
+        let fallback_ty = node_data.expect_const_fallback().ty();
+        let (enum_ty, is_pointer) = match *self.ty.kind(fallback_ty) {
+            TypeKind::Ptr(pointee_ty) => (pointee_ty, true),
+            _ => (fallback_ty, false),
+        };
+        let enum_kind = self.ty.kind(enum_ty);
+        let enum_data = enum_kind.expect_enum();
+        let discriminant_ty = enum_data.discriminant_ty.backend_ty();
+
+        let discriminant_ty = if is_pointer {
+            self.ty.register(TypeKind::Ptr(discriminant_ty))
+        } else {
+            discriminant_ty
+        };
+        let discriminant_node = self.rvsdg.add_const_fallback(region, discriminant_ty);
+
+        let mut split_inputs = vec![ValueInput::output(discriminant_ty, discriminant_node, 0)];
+
+        for variant in &enum_data.variants {
+            let variant_ty = if is_pointer {
+                self.ty.register(TypeKind::Ptr(variant.ty))
+            } else {
+                variant.ty
+            };
+
+            let variant_node = self.rvsdg.add_const_fallback(region, variant_ty);
+
+            split_inputs.push(ValueInput::output(variant_ty, variant_node, 0));
+            with_replacements(variant_node, variant_ty);
+        }
+
+        self.visit_users(node, 0, &split_inputs);
+        self.rvsdg.remove_node(node);
+    }
+
     pub fn replace_constant_dependency<F>(
         &mut self,
         module: &mut Module,
@@ -99,7 +152,7 @@ impl<'a> EnumReplacer<'a> {
         offset: usize,
         mut with_replacements: F,
     ) where
-        F: FnMut(u32, Type),
+        F: FnMut(ConstEnumReplacement),
     {
         let fn_data = self.rvsdg[function_node].expect_function();
         let region = fn_data.body_region();
@@ -174,11 +227,19 @@ impl<'a> EnumReplacer<'a> {
 
                 split_inputs.push(ValueInput::argument(variant_ptr_ty, var_dep_index));
 
-                with_replacements(var_dep_index, variant_ty);
+                with_replacements(ConstEnumReplacement {
+                    ty: variant_ty,
+                    kind: ConstEnumReplacementKind::ConstDependency(var_dep_index),
+                });
             } else {
                 let fallback_node = self.rvsdg.add_const_fallback(region, variant_ptr_ty);
 
                 split_inputs.push(ValueInput::output(variant_ptr_ty, fallback_node, 0));
+
+                with_replacements(ConstEnumReplacement {
+                    ty: variant_ty,
+                    kind: ConstEnumReplacementKind::ConstFallback(fallback_node),
+                });
             }
         }
 
@@ -892,7 +953,7 @@ pub fn replace_enum_constant_dependency<F>(
     offset: usize,
     with_replacements: F,
 ) where
-    F: FnMut(u32, Type),
+    F: FnMut(ConstEnumReplacement),
 {
     let enum_ty = module.constants[constant].ty();
 
@@ -905,6 +966,19 @@ pub fn replace_enum_constant_dependency<F>(
         offset,
         with_replacements,
     )
+}
+
+pub fn replace_enum_const_fallback<F>(rvsdg: &mut Rvsdg, node: Node, with_replacements: F)
+where
+    F: FnMut(Node, Type),
+{
+    let fallback_ty = rvsdg[node].expect_const_fallback().ty();
+    let enum_ty = match *rvsdg.ty().kind(fallback_ty) {
+        TypeKind::Ptr(pointee_ty) => pointee_ty,
+        _ => fallback_ty,
+    };
+
+    EnumReplacer::new(rvsdg, enum_ty).replace_const_fallback(node, with_replacements)
 }
 
 #[cfg(test)]
