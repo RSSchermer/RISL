@@ -507,11 +507,13 @@ impl Replacer<'_, '_, '_> {
         match self.rvsdg.ty().clone().kind(ty).deref() {
             TypeKind::Enum(_) => {
                 // Enum replacement is handled separately
-                return replace_enum_alloca(&mut self.rvsdg, node, |node, ty| {
+                replace_enum_alloca(&mut self.rvsdg, node, |node, ty| {
                     if ty_is_candidate(&self.ty, ty) {
                         self.candidate_queue.push_back(Job::Alloca(node));
                     }
                 });
+
+                return;
             }
             TypeKind::Array {
                 element_ty: base,
@@ -651,18 +653,17 @@ impl Replacer<'_, '_, '_> {
                     constant,
                     alloc_id,
                     offset,
-                    |replacement: ConstEnumReplacement| {
-                        if ty_is_candidate(&self.ty, replacement.ty) {
-                            let job = match replacement.kind {
-                                ConstEnumReplacementKind::ConstDependency(dep_index) => {
-                                    Job::ConstantDependency { fn_node, dep_index }
-                                }
-                                ConstEnumReplacementKind::ConstFallback(node) => {
-                                    Job::ConstFallback(node)
-                                }
-                            };
-
-                            self.candidate_queue.push_back(job);
+                    |replacement: ConstEnumReplacement| match replacement.kind {
+                        ConstEnumReplacementKind::ConstDependency(dep_index) => {
+                            if ty_is_candidate(&self.ty, replacement.ty) {
+                                self.candidate_queue
+                                    .push_back(Job::ConstantDependency { fn_node, dep_index });
+                            }
+                        }
+                        ConstEnumReplacementKind::ConstFallback(node) => {
+                            if fallback_ty_is_candidate(&self.ty, replacement.ty) {
+                                self.candidate_queue.push_back(Job::ConstFallback(node));
+                            }
                         }
                     },
                 );
@@ -721,16 +722,14 @@ impl Replacer<'_, '_, '_> {
                 }
             }
             TypeKind::Enum(_) => {
-                return replace_enum_const_fallback(
-                    self.rvsdg,
-                    node,
-                    |variant_node, variant_ty| {
-                        if fallback_ty_is_candidate(&self.ty, variant_ty) {
-                            self.candidate_queue
-                                .push_back(Job::ConstFallback(variant_node));
-                        }
-                    },
-                );
+                replace_enum_const_fallback(self.rvsdg, node, |variant_node, variant_ty| {
+                    if fallback_ty_is_candidate(&self.ty, variant_ty) {
+                        self.candidate_queue
+                            .push_back(Job::ConstFallback(variant_node));
+                    }
+                });
+
+                return;
             }
             _ => unreachable!("type is not an aggregate, node should not have been a candidate"),
         }
