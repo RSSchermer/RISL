@@ -21,6 +21,14 @@ pub enum PointerReconstructionNode {
 }
 
 impl PointerReconstructionNode {
+    /// Returns whether every leaf in this reconstruction subtree is rooted at a `ConstFallback`.
+    pub fn is_fallback_only(&self) -> bool {
+        match self {
+            PointerReconstructionNode::Branching(node) => node.is_fallback_only(),
+            PointerReconstructionNode::Leaf(node) => node.root_is_fallback,
+        }
+    }
+
     pub fn propagate_sub_tree_inputs<F>(&mut self, mut record_leaf_inputs: F)
     where
         F: FnMut(&LeafNode, &mut IndexSet<ValueOrigin>),
@@ -75,6 +83,13 @@ pub struct BranchingNode {
 }
 
 impl BranchingNode {
+    /// Returns whether every branch in this node is rooted at a `ConstFallback`.
+    pub fn is_fallback_only(&self) -> bool {
+        self.branches
+            .iter()
+            .all(PointerReconstructionNode::is_fallback_only)
+    }
+
     pub fn propagate_sub_tree_inputs<F>(&mut self, mut record_leaf_inputs: F)
     where
         F: FnMut(&LeafNode, &mut IndexSet<ValueOrigin>),
@@ -141,6 +156,9 @@ impl Access {
 pub struct LeafNode {
     /// A pointer to the root identifier of the pointer that this leaf reconstructs.
     pub root_pointer: ValueInput,
+
+    /// Whether the root pointer is produced by a `ConstFallback` node.
+    pub root_is_fallback: bool,
 
     /// A complete access chain that will refine the [root_identifier] into the pointer that this
     /// leave reconstructs.
@@ -338,6 +356,7 @@ impl PointerReconstructionContext {
                 pointer_ty,
                 reconstruction_root: LeafNode {
                     root_pointer: ValueInput::argument(pointer_ty, argument),
+                    root_is_fallback: false,
                     access_chain: vec![],
                 }
                 .into(),
@@ -808,6 +827,7 @@ impl PointerReconstructionContext {
 
         let reconstruction_root = LeafNode {
             root_pointer: ValueInput::output(pointer_ty, op_alloca, 0),
+            root_is_fallback: false,
             access_chain: vec![],
         };
 
@@ -826,6 +846,7 @@ impl PointerReconstructionContext {
 
         let reconstruction_root = LeafNode {
             root_pointer: ValueInput::output(pointer_ty, const_fallback, 0),
+            root_is_fallback: true,
             access_chain: vec![],
         };
 

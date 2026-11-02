@@ -125,6 +125,11 @@
 //! increased register use relative to true physical pointers. Certain later optimizations, such as
 //! switch-merging, may be able to reduce this cost a little.
 //!
+//! During emulation, a leaf rooted at `ConstFallback` is memory-free: loads produce a typed fallback
+//! value and stores produce no operation. This also applies to genuine invalid accesses processed
+//! by emulation, so those accesses no longer provide UB evidence to conditional-UB elimination.
+//! Direct accesses that are not selected for emulation retain their existing UB handling.
+//!
 //! [0]: super::memory_promotion_and_legalization
 
 use indexmap::IndexSet;
@@ -192,7 +197,9 @@ impl EmulationContext {
             additional_values: &[],
         };
 
-        let emulated = emulator.emulate(info.reconstruction_root);
+        let Some(emulated) = emulator.emulate(info.reconstruction_root) else {
+            unreachable!("emulated loads always produce a value")
+        };
 
         // Now that we've constructed a node to emulate the original OpLoad, reconnect all users of
         // its value output to the emulated node's output and remove the original OpLoad.
@@ -242,7 +249,7 @@ impl EmulationContext {
             additional_values: &[value_input],
         };
 
-        emulator.emulate(info.reconstruction_root);
+        let _ = emulator.emulate(info.reconstruction_root);
 
         rvsdg.remove_node(op_store);
     }
@@ -319,20 +326,26 @@ impl<'a, F> Emulator<'a, F>
 where
     F: Fn(&mut Rvsdg, Region, ValueInput, &[ValueInput], StateOrigin) -> Node,
 {
-    fn emulate(&mut self, root_node: PointerReconstructionNode) -> Node {
+    fn emulate(&mut self, mut root_node: PointerReconstructionNode) -> Option<Node> {
+        if root_node.is_fallback_only() {
+            return self
+                .output_ty
+                .map(|_| self.add_fallback_value(self.outer_region));
+        }
+
+        root_node.propagate_sub_tree_inputs(|leaf, inputs| {
+            inputs.insert(leaf.root_pointer.origin);
+
+            for access in &leaf.access_chain {
+                if let &Access::DynamicElement(index_origin) = access {
+                    inputs.insert(index_origin);
+                }
+            }
+        });
+
         match root_node {
-            PointerReconstructionNode::Branching(mut node) => {
-                node.propagate_sub_tree_inputs(|leaf_node, input_set| {
-                    input_set.insert(leaf_node.root_pointer.origin);
-
-                    for access in &leaf_node.access_chain {
-                        if let &Access::DynamicElement(index_origin) = access {
-                            input_set.insert(index_origin);
-                        }
-                    }
-                });
-
-                self.visit_branching_node(self.outer_region, &node, None)
+            PointerReconstructionNode::Branching(node) => {
+                Some(self.visit_branching_node(self.outer_region, &node, None)?)
             }
             PointerReconstructionNode::Leaf(node) => {
                 self.visit_leaf_node(self.outer_region, &node, None)
@@ -340,12 +353,21 @@ where
         }
     }
 
+    fn add_fallback_value(&mut self, region: Region) -> Node {
+        self.rvsdg
+            .add_const_fallback(region, self.output_ty.unwrap())
+    }
+
     fn visit_branching_node(
         &mut self,
         region: Region,
         branching_node: &BranchingNode,
         input_mapping: Option<&IndexSet<ValueOrigin>>,
-    ) -> Node {
+    ) -> Option<Node> {
+        if branching_node.is_fallback_only() {
+            return self.output_ty.map(|_| self.add_fallback_value(region));
+        }
+
         let resolve_input = |rvsdg: &Rvsdg, origin| {
             let origin = if let Some(input_mapping) = input_mapping {
                 let argument = input_mapping
@@ -424,7 +446,7 @@ where
                 }
             };
 
-            if self.output_ty.is_some() {
+            if let (Some(node), Some(_)) = (node, self.output_ty) {
                 self.rvsdg.reconnect_region_result(
                     branch,
                     0,
@@ -436,7 +458,7 @@ where
             }
         }
 
-        switch_node
+        Some(switch_node)
     }
 
     fn visit_leaf_node(
@@ -444,7 +466,11 @@ where
         region: Region,
         leaf_node: &LeafNode,
         input_mapping: Option<&IndexSet<ValueOrigin>>,
-    ) -> Node {
+    ) -> Option<Node> {
+        if leaf_node.root_is_fallback {
+            return self.output_ty.map(|_| self.add_fallback_value(region));
+        }
+
         let resolve_input = |rvsdg: &Rvsdg, origin| {
             let origin = if let Some(input_mapping) = input_mapping {
                 let argument = input_mapping
@@ -518,23 +544,23 @@ where
                 })
                 .collect::<SmallVec<[ValueInput; 2]>>();
 
-            (self.op_gen)(
+            Some((self.op_gen)(
                 self.rvsdg,
                 region,
                 ptr_input,
                 &additional_values,
                 StateOrigin::Argument,
-            )
+            ))
         } else {
             // There is no parent branching node, so we are inside the outer region and the
             // additional values can be connected to directly.
-            (self.op_gen)(
+            Some((self.op_gen)(
                 self.rvsdg,
                 region,
                 ptr_input,
                 self.additional_values,
                 self.state_origin,
-            )
+            ))
         }
     }
 }
@@ -545,7 +571,9 @@ mod tests {
 
     use super::*;
     use crate::rvsdg::ValueUser;
-    use crate::ty::{TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TypeKind};
+    use crate::rvsdg::transform::conditional_ub_elimination::ConditionalUbEliminator;
+    use crate::rvsdg::transform::dead_value_elimination::DeadValueEliminator;
+    use crate::ty::{Struct, StructField, TY_DUMMY, TY_PREDICATE, TY_PTR_U32, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Module, Symbol, thin_set};
 
     #[test]
@@ -3015,5 +3043,663 @@ mod tests {
             panic!("expected Output origin for index")
         };
         assert_eq!(rvsdg[index_producer].expect_const_u32().value(), 0);
+    }
+
+    #[test]
+    fn test_emulate_all_fallback_nested_projected_load() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_PTR_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let payload_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![StructField {
+                offset: 0,
+                ty: TY_PTR_U32,
+                io_binding: None,
+            }],
+        }));
+        let payload_ptr_ty = module.ty.register(TypeKind::Ptr(payload_ty));
+        let ptr_to_ptr_u32_ty = module.ty.register(TypeKind::Ptr(TY_PTR_U32));
+
+        let fallback = rvsdg.add_const_fallback(region, payload_ptr_ty);
+        let outer_switch = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(TY_PREDICATE, 1),
+                ValueInput::output(payload_ptr_ty, fallback, 0),
+            ],
+            vec![ValueOutput::new(payload_ptr_ty)],
+            None,
+        );
+
+        let outer_branch_0 = rvsdg.add_switch_branch(outer_switch);
+        let inner_switch = rvsdg.add_switch(
+            outer_branch_0,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(payload_ptr_ty, 1),
+            ],
+            vec![ValueOutput::new(payload_ptr_ty)],
+            None,
+        );
+
+        let inner_branch_0 = rvsdg.add_switch_branch(inner_switch);
+        rvsdg.reconnect_region_result(inner_branch_0, 0, ValueOrigin::Argument(0));
+
+        let inner_branch_1 = rvsdg.add_switch_branch(inner_switch);
+        rvsdg.reconnect_region_result(inner_branch_1, 0, ValueOrigin::Argument(0));
+
+        rvsdg.reconnect_region_result(
+            outer_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: inner_switch,
+                output: 0,
+            },
+        );
+
+        let outer_branch_1 = rvsdg.add_switch_branch(outer_switch);
+        rvsdg.reconnect_region_result(outer_branch_1, 0, ValueOrigin::Argument(1));
+
+        let field_ptr = rvsdg.add_op_field_ptr(
+            region,
+            ValueInput::output(payload_ptr_ty, outer_switch, 0),
+            0,
+        );
+        let load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(ptr_to_ptr_u32_ty, field_ptr, 0),
+            StateOrigin::Argument,
+        );
+        let store_target = rvsdg.add_op_alloca(region, TY_PTR_U32);
+        let store = rvsdg.add_op_store(
+            region,
+            ValueInput::output(ptr_to_ptr_u32_ty, store_target, 0),
+            ValueInput::output(TY_PTR_U32, load, 0),
+            StateOrigin::Node(load),
+        );
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load,
+                output: 0,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+
+        emulation_context.emulate_op_load(&mut rvsdg, load);
+
+        let ValueOrigin::Output {
+            producer: fallback_value,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("the function result should connect to the fallback value");
+        };
+
+        assert!(rvsdg[fallback_value].is_const_fallback());
+        assert_eq!(
+            rvsdg[fallback_value].expect_const_fallback().ty(),
+            TY_PTR_U32
+        );
+        assert_eq!(rvsdg[region].value_results()[0].ty, TY_PTR_U32);
+        assert_eq!(
+            &rvsdg[fallback_value].value_outputs()[0].users,
+            &thin_set![
+                ValueUser::Result(0),
+                ValueUser::Input {
+                    consumer: store,
+                    input: 1,
+                },
+            ],
+        );
+        assert_eq!(
+            rvsdg[store].expect_op_store().value_input(),
+            &ValueInput::output(TY_PTR_U32, fallback_value, 0),
+        );
+        assert_eq!(
+            rvsdg[store].expect_op_store().state().unwrap().origin,
+            StateOrigin::Argument
+        );
+        assert_eq!(*rvsdg[region].state_result(), StateOrigin::Node(store));
+
+        assert!(!rvsdg.is_live_node(load));
+    }
+
+    #[test]
+    fn test_emulate_mixed_fallback_nested_load() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let payload_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![StructField {
+                offset: 0,
+                ty: TY_U32,
+                io_binding: None,
+            }],
+        }));
+        let payload_ptr_ty = module.ty.register(TypeKind::Ptr(payload_ty));
+        let real_pointer = rvsdg.add_op_alloca(region, payload_ty);
+        let fallback_pointer = rvsdg.add_const_fallback(region, payload_ptr_ty);
+
+        let pointer_switch = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(TY_PREDICATE, 1),
+                ValueInput::output(payload_ptr_ty, real_pointer, 0),
+                ValueInput::output(payload_ptr_ty, fallback_pointer, 0),
+            ],
+            vec![ValueOutput::new(payload_ptr_ty)],
+            None,
+        );
+
+        let real_branch = rvsdg.add_switch_branch(pointer_switch);
+        rvsdg.reconnect_region_result(real_branch, 0, ValueOrigin::Argument(1));
+
+        let fallback_branch = rvsdg.add_switch_branch(pointer_switch);
+        let fallback_switch = rvsdg.add_switch(
+            fallback_branch,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(payload_ptr_ty, 2),
+                ValueInput::argument(payload_ptr_ty, 2),
+            ],
+            vec![ValueOutput::new(payload_ptr_ty)],
+            None,
+        );
+
+        let fallback_switch_branch_0 = rvsdg.add_switch_branch(fallback_switch);
+        rvsdg.reconnect_region_result(fallback_switch_branch_0, 0, ValueOrigin::Argument(0));
+
+        let fallback_switch_branch_1 = rvsdg.add_switch_branch(fallback_switch);
+        rvsdg.reconnect_region_result(fallback_switch_branch_1, 0, ValueOrigin::Argument(1));
+
+        rvsdg.reconnect_region_result(
+            fallback_branch,
+            0,
+            ValueOrigin::Output {
+                producer: fallback_switch,
+                output: 0,
+            },
+        );
+
+        let field_ptr = rvsdg.add_op_field_ptr(
+            region,
+            ValueInput::output(payload_ptr_ty, pointer_switch, 0),
+            0,
+        );
+        let load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(TY_PTR_U32, field_ptr, 0),
+            StateOrigin::Argument,
+        );
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load,
+                output: 0,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+        emulation_context.emulate_op_load(&mut rvsdg, load);
+
+        let mut dead_value_eliminator = DeadValueEliminator::new();
+        dead_value_eliminator.process_region(&mut rvsdg, region);
+
+        let ValueOrigin::Output {
+            producer: emulation_switch,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("the function result should connect to the emulation switch");
+        };
+        let emulation_data = rvsdg[emulation_switch].expect_switch();
+
+        assert_eq!(
+            emulation_data.value_inputs(),
+            &[
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(payload_ptr_ty, real_pointer, 0),
+            ],
+        );
+        assert_eq!(emulation_data.branches().len(), 2);
+
+        let emulated_real_branch = emulation_data.branches()[0];
+        let ValueOrigin::Output {
+            producer: emulated_load,
+            output: 0,
+        } = rvsdg[emulated_real_branch].value_results()[0].origin
+        else {
+            panic!("the real branch should return its load");
+        };
+        let ValueOrigin::Output {
+            producer: emulated_field_ptr,
+            output: 0,
+        } = rvsdg[emulated_load].expect_op_load().ptr_input().origin
+        else {
+            panic!("the real load should use a reconstructed field pointer");
+        };
+        assert_eq!(
+            rvsdg[emulated_field_ptr].expect_op_field_ptr().ptr_input(),
+            &ValueInput::argument(payload_ptr_ty, 0),
+        );
+        assert_eq!(
+            rvsdg[emulated_field_ptr]
+                .expect_op_field_ptr()
+                .field_index(),
+            0
+        );
+        assert_eq!(
+            rvsdg[emulated_real_branch].state_result(),
+            &StateOrigin::Node(emulated_load),
+        );
+
+        let emulated_fallback_branch = emulation_data.branches()[1];
+        let ValueOrigin::Output {
+            producer: fallback_value,
+            output: 0,
+        } = rvsdg[emulated_fallback_branch].value_results()[0].origin
+        else {
+            panic!("the fallback branch should return a fallback value");
+        };
+        assert!(rvsdg[fallback_value].is_const_fallback());
+        assert_eq!(rvsdg[fallback_value].expect_const_fallback().ty(), TY_U32);
+        assert_eq!(
+            rvsdg[emulated_fallback_branch].state_result(),
+            &StateOrigin::Argument,
+        );
+    }
+
+    #[test]
+    fn test_emulate_all_fallback_store() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_U32,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let array_ty = module.ty.register(TypeKind::Array {
+            element_ty: TY_U32,
+            count: 2,
+            stride: 4,
+        });
+        let array_ptr_ty = module.ty.register(TypeKind::Ptr(array_ty));
+
+        let state_storage = rvsdg.add_op_alloca(region, TY_U32);
+        let initial_state_value = rvsdg.add_const_u32(region, 7);
+        let preceding_store = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, state_storage, 0),
+            ValueInput::output(TY_U32, initial_state_value, 0),
+            StateOrigin::Argument,
+        );
+
+        let fallback_pointer = rvsdg.add_const_fallback(region, array_ptr_ty);
+        let pointer_switch = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(TY_PREDICATE, 1),
+                ValueInput::output(array_ptr_ty, fallback_pointer, 0),
+            ],
+            vec![ValueOutput::new(array_ptr_ty)],
+            None,
+        );
+
+        let outer_branch_0 = rvsdg.add_switch_branch(pointer_switch);
+        let inner_switch = rvsdg.add_switch(
+            outer_branch_0,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(array_ptr_ty, 1),
+            ],
+            vec![ValueOutput::new(array_ptr_ty)],
+            None,
+        );
+
+        let inner_branch_0 = rvsdg.add_switch_branch(inner_switch);
+        rvsdg.reconnect_region_result(inner_branch_0, 0, ValueOrigin::Argument(0));
+
+        let inner_branch_1 = rvsdg.add_switch_branch(inner_switch);
+        rvsdg.reconnect_region_result(inner_branch_1, 0, ValueOrigin::Argument(0));
+
+        rvsdg.reconnect_region_result(
+            outer_branch_0,
+            0,
+            ValueOrigin::Output {
+                producer: inner_switch,
+                output: 0,
+            },
+        );
+
+        let outer_branch_1 = rvsdg.add_switch_branch(pointer_switch);
+        rvsdg.reconnect_region_result(outer_branch_1, 0, ValueOrigin::Argument(1));
+
+        let element_pointer = rvsdg.add_op_element_ptr(
+            region,
+            ValueInput::output(array_ptr_ty, pointer_switch, 0),
+            ValueInput::argument(TY_U32, 2),
+        );
+        let stored_value = rvsdg.add_const_u32(region, 99);
+        let fallback_store = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, element_pointer, 0),
+            ValueInput::output(TY_U32, stored_value, 0),
+            StateOrigin::Node(preceding_store),
+        );
+        let following_load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(TY_PTR_U32, state_storage, 0),
+            StateOrigin::Node(fallback_store),
+        );
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: following_load,
+                output: 0,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+
+        emulation_context.emulate_op_store(&mut rvsdg, fallback_store);
+
+        assert!(!rvsdg.is_live_node(fallback_store));
+        assert_eq!(
+            rvsdg[following_load]
+                .expect_op_load()
+                .state()
+                .unwrap()
+                .origin,
+            StateOrigin::Node(preceding_store),
+        );
+        assert_eq!(
+            *rvsdg[region].state_result(),
+            StateOrigin::Node(following_load),
+        );
+    }
+
+    #[test]
+    fn test_emulate_mixed_fallback_nested_store() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_PREDICATE,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: TY_U32,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let payload_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![StructField {
+                offset: 0,
+                ty: TY_U32,
+                io_binding: None,
+            }],
+        }));
+        let payload_ptr_ty = module.ty.register(TypeKind::Ptr(payload_ty));
+        let real_pointer = rvsdg.add_op_alloca(region, payload_ty);
+        let fallback_pointer = rvsdg.add_const_fallback(region, payload_ptr_ty);
+
+        let state_storage = rvsdg.add_op_alloca(region, TY_U32);
+        let initial_state_value = rvsdg.add_const_u32(region, 7);
+        let preceding_store = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, state_storage, 0),
+            ValueInput::output(TY_U32, initial_state_value, 0),
+            StateOrigin::Argument,
+        );
+
+        let pointer_switch = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(TY_PREDICATE, 1),
+                ValueInput::output(payload_ptr_ty, real_pointer, 0),
+                ValueInput::output(payload_ptr_ty, fallback_pointer, 0),
+            ],
+            vec![ValueOutput::new(payload_ptr_ty)],
+            None,
+        );
+
+        let real_branch = rvsdg.add_switch_branch(pointer_switch);
+        rvsdg.reconnect_region_result(real_branch, 0, ValueOrigin::Argument(1));
+
+        let fallback_branch = rvsdg.add_switch_branch(pointer_switch);
+        let fallback_switch = rvsdg.add_switch(
+            fallback_branch,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::argument(payload_ptr_ty, 2),
+                ValueInput::argument(payload_ptr_ty, 2),
+            ],
+            vec![ValueOutput::new(payload_ptr_ty)],
+            None,
+        );
+
+        let fallback_switch_branch_0 = rvsdg.add_switch_branch(fallback_switch);
+        rvsdg.reconnect_region_result(fallback_switch_branch_0, 0, ValueOrigin::Argument(0));
+
+        let fallback_switch_branch_1 = rvsdg.add_switch_branch(fallback_switch);
+        rvsdg.reconnect_region_result(fallback_switch_branch_1, 0, ValueOrigin::Argument(1));
+
+        rvsdg.reconnect_region_result(
+            fallback_branch,
+            0,
+            ValueOrigin::Output {
+                producer: fallback_switch,
+                output: 0,
+            },
+        );
+
+        let field_pointer = rvsdg.add_op_field_ptr(
+            region,
+            ValueInput::output(payload_ptr_ty, pointer_switch, 0),
+            0,
+        );
+        let fallback_store = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, field_pointer, 0),
+            ValueInput::argument(TY_U32, 2),
+            StateOrigin::Node(preceding_store),
+        );
+        let following_load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(TY_PTR_U32, state_storage, 0),
+            StateOrigin::Node(fallback_store),
+        );
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: following_load,
+                output: 0,
+            },
+        );
+
+        let mut emulation_context = EmulationContext::new();
+        emulation_context.emulate_op_store(&mut rvsdg, fallback_store);
+
+        let mut dead_value_eliminator = DeadValueEliminator::new();
+        dead_value_eliminator.process_region(&mut rvsdg, region);
+
+        assert_eq!(
+            *rvsdg[region].state_result(),
+            StateOrigin::Node(following_load),
+        );
+
+        let StateOrigin::Node(emulation_switch) = rvsdg[following_load]
+            .expect_op_load()
+            .state()
+            .unwrap()
+            .origin
+        else {
+            panic!("the following load should follow the emulation switch");
+        };
+        let emulation_data = rvsdg[emulation_switch].expect_switch();
+
+        assert_eq!(
+            rvsdg[emulation_switch].state().unwrap().origin,
+            StateOrigin::Node(preceding_store),
+        );
+        assert_eq!(
+            rvsdg[preceding_store]
+                .expect_op_store()
+                .state()
+                .unwrap()
+                .origin,
+            StateOrigin::Argument,
+        );
+
+        assert_eq!(
+            emulation_data.value_inputs(),
+            &[
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(payload_ptr_ty, real_pointer, 0),
+                ValueInput::argument(TY_U32, 2),
+            ],
+        );
+        assert_eq!(emulation_data.branches().len(), 2);
+
+        let emulated_real_branch = emulation_data.branches()[0];
+        let StateOrigin::Node(emulated_real_store) = *rvsdg[emulated_real_branch].state_result()
+        else {
+            panic!("the real branch should contain a store");
+        };
+        let store_data = rvsdg[emulated_real_store].expect_op_store();
+        assert_eq!(store_data.state().unwrap().origin, StateOrigin::Argument);
+
+        let ValueOrigin::Output {
+            producer: emulated_field_pointer,
+            output: 0,
+        } = store_data.ptr_input().origin
+        else {
+            panic!("the real store should use the reconstructed field pointer");
+        };
+        assert_eq!(
+            rvsdg[emulated_field_pointer]
+                .expect_op_field_ptr()
+                .ptr_input(),
+            &ValueInput::argument(payload_ptr_ty, 0),
+        );
+        assert_eq!(
+            rvsdg[emulated_field_pointer]
+                .expect_op_field_ptr()
+                .field_index(),
+            0,
+        );
+        assert_eq!(store_data.value_input(), &ValueInput::argument(TY_U32, 1));
+
+        let emulated_fallback_branch = emulation_data.branches()[1];
+        assert_eq!(
+            rvsdg[emulated_fallback_branch].state_result(),
+            &StateOrigin::Argument,
+            "there should not be a store in the fallback branch"
+        );
     }
 }
