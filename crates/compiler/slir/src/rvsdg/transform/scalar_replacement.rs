@@ -14,7 +14,7 @@
 //! struct/array/enum; the elements of an array may be structs/arrays/enums; the variants of an enum
 //! are currently always structs. If the splitting of an alloca or constant results in new "part"
 //! alloca nodes or constants that are also of aggregate types, then we may split these "part" nodes
-//! recursively. We don't do this all at once; rather, scalar-replacement uses a queue system and
+//! recursively. We don't do this all at once; rather, scalar-replacement uses a candidate queue and
 //! "part" nodes for aggregate types will be pushed onto the end of the queue to await their turn.
 //!
 //! # Optimization and legalization
@@ -178,6 +178,7 @@
 //! using `unsafe` code (e.g., `slice::get_unchecked`).
 
 use std::collections::VecDeque;
+use std::mem;
 use std::ops::Deref;
 
 use internment::Intern;
@@ -1916,53 +1917,26 @@ impl Replacer<'_, '_, '_> {
 
 pub struct AggregateReplacementContext {
     analyzer: JobAnalyzer,
-    queue: VecDeque<Job>,
     candidates: VecDeque<Job>,
+    deferred_candidates: VecDeque<Job>,
 }
 
 impl AggregateReplacementContext {
     pub fn new() -> Self {
         AggregateReplacementContext {
             analyzer: JobAnalyzer::new(),
-            queue: VecDeque::new(),
             candidates: VecDeque::new(),
+            deferred_candidates: VecDeque::new(),
         }
     }
 
     pub fn for_region(&mut self, rvsdg: &Rvsdg, region: Region) -> RegionReplacementContext<'_> {
-        self.queue.clear();
         self.candidates.clear();
+        self.deferred_candidates.clear();
 
         collect_candidate_jobs(rvsdg, &mut self.candidates, region);
 
         RegionReplacementContext { cx: self }
-    }
-
-    fn try_enqueue_candidates(&mut self, rvsdg: &Rvsdg, start: usize) {
-        let mut i = start;
-
-        while i < self.candidates.len() {
-            let job = self.candidates[i];
-
-            match self.analyzer.analyze_job(rvsdg, job) {
-                AnalysisResult::Replace => {
-                    self.queue.push_back(job);
-                    self.candidates.swap_remove_back(i);
-
-                    // Note that we don't increment `i` here, because we just moved another yet
-                    // unprocessed candidate into the `i`th position, which we want to process on
-                    // the next iteration.
-                }
-                AnalysisResult::NeedsPromotionPass => i += 1,
-                AnalysisResult::Ignore => {
-                    self.candidates.swap_remove_back(i);
-
-                    // Note that we don't increment `i` here, because we just moved another yet
-                    // unprocessed candidate into the `i`th position, which we want to process on
-                    // the next iteration.
-                }
-            }
-        }
     }
 }
 
@@ -1972,39 +1946,40 @@ pub struct RegionReplacementContext<'a> {
 
 impl RegionReplacementContext<'_> {
     pub fn replace(&mut self, module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
-        self.cx.try_enqueue_candidates(rvsdg, 0);
+        let ty_registry = rvsdg.ty().clone();
 
-        if self.cx.queue.is_empty() {
-            false
-        } else {
-            let ty_registry = rvsdg.ty().clone();
+        let mut did_replace = false;
 
-            while let Some(job) = self.cx.queue.pop_front() {
-                let prior_candidate_count = self.cx.candidates.len();
+        while let Some(job) = self.cx.candidates.pop_front() {
+            match self.cx.analyzer.analyze_job(rvsdg, job) {
+                AnalysisResult::Replace => {
+                    let mut replacer = Replacer {
+                        module,
+                        rvsdg,
+                        candidate_queue: &mut self.cx.candidates,
+                        ty: ty_registry.clone(),
+                    };
 
-                let mut replacer = Replacer {
-                    module,
-                    rvsdg,
-                    candidate_queue: &mut self.cx.candidates,
-                    ty: ty_registry.clone(),
-                };
-
-                match job {
-                    Job::Alloca(node) => replacer.replace_alloca(node),
-                    Job::ConstantDependency { fn_node, dep_index } => {
-                        replacer.replace_constant_dependency(fn_node, dep_index)
+                    match job {
+                        Job::Alloca(node) => replacer.replace_alloca(node),
+                        Job::ConstantDependency { fn_node, dep_index } => {
+                            replacer.replace_constant_dependency(fn_node, dep_index)
+                        }
+                        Job::ConstFallback(node) => replacer.replace_const_fallback(node),
                     }
-                    Job::ConstFallback(node) => replacer.replace_const_fallback(node),
+
+                    did_replace = true;
                 }
-
-                // Attempt to add any newly added candidates to the end of the queue *during* this
-                // current replacement iteration. This helps minimize the number of
-                // promotion/legalization passes we'll have to run.
-                self.cx.try_enqueue_candidates(rvsdg, prior_candidate_count);
+                AnalysisResult::NeedsPromotionPass => {
+                    self.cx.deferred_candidates.push_back(job);
+                }
+                AnalysisResult::Ignore => {}
             }
-
-            true
         }
+
+        mem::swap(&mut self.cx.candidates, &mut self.cx.deferred_candidates);
+
+        did_replace
     }
 }
 
