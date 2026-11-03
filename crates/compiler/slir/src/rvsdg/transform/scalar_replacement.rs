@@ -209,6 +209,20 @@ pub enum Job {
     ConstFallback(Node),
 }
 
+struct Candidate {
+    job: Job,
+    last_blocker: Option<Node>,
+}
+
+impl From<Job> for Candidate {
+    fn from(job: Job) -> Self {
+        Self {
+            job,
+            last_blocker: None,
+        }
+    }
+}
+
 /// Whether the given type must be split for reasons of legalization.
 ///
 /// Currently, types that contain pointers must be split as our primary target (WGSL) does not
@@ -259,7 +273,7 @@ fn fallback_ty_is_candidate(ty_registry: &TypeRegistry, ty: Type) -> bool {
 /// this requires further analysis.
 struct CandidateCollector<'a, 'b> {
     rvsdg: &'a Rvsdg,
-    candidates: &'b mut VecDeque<Job>,
+    candidates: &'b mut VecDeque<Candidate>,
 }
 
 impl CandidateCollector<'_, '_> {
@@ -271,10 +285,13 @@ impl CandidateCollector<'_, '_> {
                 if let ValueOrigin::Output { producer, .. } = dependency.origin {
                     if let NodeKind::Constant(op) = self.rvsdg[producer].kind() {
                         if ty_is_candidate(&self.rvsdg.ty(), op.output().ty) {
-                            self.candidates.push_back(Job::ConstantDependency {
-                                fn_node: owner,
-                                dep_index: i as u32,
-                            });
+                            self.candidates.push_back(
+                                Job::ConstantDependency {
+                                    fn_node: owner,
+                                    dep_index: i as u32,
+                                }
+                                .into(),
+                            );
                         }
                     }
                 }
@@ -290,12 +307,12 @@ impl CandidateCollector<'_, '_> {
         match self.rvsdg[node].kind() {
             NodeKind::Simple(SimpleNode::OpAlloca(op)) => {
                 if ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
-                    self.candidates.push_back(Job::Alloca(node));
+                    self.candidates.push_back(Job::Alloca(node).into());
                 }
             }
             NodeKind::Simple(SimpleNode::ConstFallback(op)) => {
                 if fallback_ty_is_candidate(&self.rvsdg.ty(), op.ty()) {
-                    self.candidates.push_back(Job::ConstFallback(node));
+                    self.candidates.push_back(Job::ConstFallback(node).into());
                 }
             }
             NodeKind::Switch(n) => {
@@ -309,7 +326,7 @@ impl CandidateCollector<'_, '_> {
     }
 }
 
-fn collect_candidate_jobs(rvsdg: &Rvsdg, candidates: &mut VecDeque<Job>, region: Region) {
+fn collect_candidate_jobs(rvsdg: &Rvsdg, candidates: &mut VecDeque<Candidate>, region: Region) {
     CandidateCollector { rvsdg, candidates }.visit_region(region);
 }
 
@@ -317,11 +334,13 @@ fn collect_candidate_jobs(rvsdg: &Rvsdg, candidates: &mut VecDeque<Job>, region:
 pub enum AnalysisResult {
     Replace,
     NeedsPromotionPass,
+    BlockedOnReaggregation(Node),
     Ignore,
 }
 
 /// Analyzes whether an [OpAlloca] or constant dependency of an aggregate value can be replaced
-/// by its parts now, after memory promotion, or should be ignored entirely and never replaced.
+/// by its parts now, after memory promotion or reaggregation completion, or should be ignored
+/// entirely and never replaced.
 ///
 /// # Escape analysis
 ///
@@ -342,11 +361,18 @@ pub enum AnalysisResult {
 /// as the "pointer" input to an [OpStore], if it is used as the "value" input to an [OpStore]
 /// we cannot. However, such [OpStore] nodes may be "promoted" away by a
 /// [memory_promotion_and_legalization] pass, so the alloca or constant may be retried later.
+///
+/// # Saved reaggregation parts
+///
+/// A [Reaggregation] saves one input per part until another replacement consumes it. Splitting a
+/// saved part prematurely would invalidate that representation, even after a load. Such candidates
+/// wait for the reaggregation to be consumed; input zero is the original value, not a saved part.
 struct JobAnalyzer {
     visited: FxHashSet<(Region, ValueUser)>,
     was_loaded: bool,
     has_nonlocal_use: bool,
     is_stored_value: bool,
+    blocking_reaggregation_node: Option<Node>,
 }
 
 impl JobAnalyzer {
@@ -356,6 +382,7 @@ impl JobAnalyzer {
             was_loaded: false,
             has_nonlocal_use: false,
             is_stored_value: false,
+            blocking_reaggregation_node: None,
         }
     }
 
@@ -365,6 +392,7 @@ impl JobAnalyzer {
         self.has_nonlocal_use = false;
         self.is_stored_value = false;
         self.was_loaded = false;
+        self.blocking_reaggregation_node = None;
 
         // Perform the analysis
         match job {
@@ -392,6 +420,8 @@ impl JobAnalyzer {
             AnalysisResult::Ignore
         } else if self.is_stored_value {
             AnalysisResult::NeedsPromotionPass
+        } else if let Some(node) = self.blocking_reaggregation_node {
+            AnalysisResult::BlockedOnReaggregation(node)
         } else {
             AnalysisResult::Replace
         }
@@ -439,6 +469,13 @@ impl ValueFlowVisitor for JobAnalyzer {
                 // after memory promotion.
                 visit::value_flow::visit_value_input(self, rvsdg, node, input);
             }
+            Simple(Reaggregation(_)) if input > 0 => {
+                // Keep the first witness so unchanged graphs consistently report the same blocker.
+                self.blocking_reaggregation_node.get_or_insert(node);
+
+                // Promotion dependencies and non-local uses still take precedence over a retry.
+                visit::value_flow::visit_value_input(self, rvsdg, node, input);
+            }
             Simple(OpStore(_))
             | Simple(OpExtractField(_))
             | Simple(OpExtractElement(_))
@@ -469,7 +506,7 @@ impl ValueFlowVisitor for JobAnalyzer {
 struct Replacer<'a, 'b, 'c> {
     module: &'a mut Module,
     rvsdg: &'b mut Rvsdg,
-    candidate_queue: &'c mut VecDeque<Job>,
+    candidate_queue: &'c mut VecDeque<Candidate>,
     ty: TypeRegistry,
 }
 
@@ -510,7 +547,7 @@ impl Replacer<'_, '_, '_> {
                 // Enum replacement is handled separately
                 replace_enum_alloca(&mut self.rvsdg, node, |node, ty| {
                     if ty_is_candidate(&self.ty, ty) {
-                        self.candidate_queue.push_back(Job::Alloca(node));
+                        self.candidate_queue.push_back(Job::Alloca(node).into());
                     }
                 });
 
@@ -536,7 +573,8 @@ impl Replacer<'_, '_, '_> {
                     });
 
                     if element_is_candidate {
-                        self.candidate_queue.push_back(Job::Alloca(element_node));
+                        self.candidate_queue
+                            .push_back(Job::Alloca(element_node).into());
                     }
                 }
             }
@@ -555,7 +593,8 @@ impl Replacer<'_, '_, '_> {
                     });
 
                     if ty_is_candidate(&self.ty, field_ty) {
-                        self.candidate_queue.push_back(Job::Alloca(field_node));
+                        self.candidate_queue
+                            .push_back(Job::Alloca(field_node).into());
                     }
                 }
             }
@@ -609,10 +648,13 @@ impl Replacer<'_, '_, '_> {
                     split_inputs.push(ValueInput::argument(field_ptr_ty, field_dep_index));
 
                     if self.ty.kind(field.ty).is_aggregate() {
-                        self.candidate_queue.push_back(Job::ConstantDependency {
-                            fn_node,
-                            dep_index: field_dep_index,
-                        });
+                        self.candidate_queue.push_back(
+                            Job::ConstantDependency {
+                                fn_node,
+                                dep_index: field_dep_index,
+                            }
+                            .into(),
+                        );
                     }
                 }
             }
@@ -638,10 +680,13 @@ impl Replacer<'_, '_, '_> {
                     split_inputs.push(ValueInput::argument(element_ptr_ty, element_dep_index));
 
                     if self.ty.kind(*element_ty).is_aggregate() {
-                        self.candidate_queue.push_back(Job::ConstantDependency {
-                            fn_node,
-                            dep_index: element_dep_index,
-                        });
+                        self.candidate_queue.push_back(
+                            Job::ConstantDependency {
+                                fn_node,
+                                dep_index: element_dep_index,
+                            }
+                            .into(),
+                        );
                     }
                 }
             }
@@ -657,13 +702,15 @@ impl Replacer<'_, '_, '_> {
                     |replacement: ConstEnumReplacement| match replacement.kind {
                         ConstEnumReplacementKind::ConstDependency(dep_index) => {
                             if ty_is_candidate(&self.ty, replacement.ty) {
-                                self.candidate_queue
-                                    .push_back(Job::ConstantDependency { fn_node, dep_index });
+                                self.candidate_queue.push_back(
+                                    Job::ConstantDependency { fn_node, dep_index }.into(),
+                                );
                             }
                         }
                         ConstEnumReplacementKind::ConstFallback(node) => {
                             if fallback_ty_is_candidate(&self.ty, replacement.ty) {
-                                self.candidate_queue.push_back(Job::ConstFallback(node));
+                                self.candidate_queue
+                                    .push_back(Job::ConstFallback(node).into());
                             }
                         }
                     },
@@ -681,7 +728,8 @@ impl Replacer<'_, '_, '_> {
         let node = self.rvsdg.add_const_fallback(region, ty);
 
         if fallback_ty_is_candidate(&self.ty, ty) {
-            self.candidate_queue.push_back(Job::ConstFallback(node));
+            self.candidate_queue
+                .push_back(Job::ConstFallback(node).into());
         }
 
         ValueInput::output(ty, node, 0)
@@ -726,7 +774,7 @@ impl Replacer<'_, '_, '_> {
                 replace_enum_const_fallback(self.rvsdg, node, |variant_node, variant_ty| {
                     if fallback_ty_is_candidate(&self.ty, variant_ty) {
                         self.candidate_queue
-                            .push_back(Job::ConstFallback(variant_node));
+                            .push_back(Job::ConstFallback(variant_node).into());
                     }
                 });
 
@@ -1917,8 +1965,8 @@ impl Replacer<'_, '_, '_> {
 
 pub struct AggregateReplacementContext {
     analyzer: JobAnalyzer,
-    candidates: VecDeque<Job>,
-    deferred_candidates: VecDeque<Job>,
+    candidates: VecDeque<Candidate>,
+    deferred_candidates: VecDeque<Candidate>,
 }
 
 impl AggregateReplacementContext {
@@ -1950,7 +1998,9 @@ impl RegionReplacementContext<'_> {
 
         let mut did_replace = false;
 
-        while let Some(job) = self.cx.candidates.pop_front() {
+        while let Some(mut candidate) = self.cx.candidates.pop_front() {
+            let job = candidate.job;
+
             match self.cx.analyzer.analyze_job(rvsdg, job) {
                 AnalysisResult::Replace => {
                     let mut replacer = Replacer {
@@ -1971,7 +2021,22 @@ impl RegionReplacementContext<'_> {
                     did_replace = true;
                 }
                 AnalysisResult::NeedsPromotionPass => {
-                    self.cx.deferred_candidates.push_back(job);
+                    self.cx.deferred_candidates.push_back(job.into());
+                }
+                AnalysisResult::BlockedOnReaggregation(node) => {
+                    // If the candidate is blocked because analysis reached a "part" input on a
+                    // reaggregation node, then we retry at the end of the candidate queue, because
+                    // later replacement jobs may dissolve the reaggregation node. However, we only
+                    // do this if the candidate was not already moved to the back of the queue for
+                    // blocking on the same reaggregation node; in that case we defer the candidate
+                    // until a later invocation.
+
+                    if candidate.last_blocker == Some(node) {
+                        self.cx.deferred_candidates.push_back(job.into());
+                    } else {
+                        candidate.last_blocker = Some(node);
+                        self.cx.candidates.push_back(candidate);
+                    }
                 }
                 AnalysisResult::Ignore => {}
             }
