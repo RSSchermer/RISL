@@ -358,9 +358,10 @@ pub enum AnalysisResult {
 /// # Stored-value analysis
 ///
 /// While we can replace cases where a pointer to an alloca or a copy of an aggregate is used
-/// as the "pointer" input to an [OpStore], if it is used as the "value" input to an [OpStore]
-/// we cannot. However, such [OpStore] nodes may be "promoted" away by a
-/// [memory_promotion_and_legalization] pass, so the alloca or constant may be retried later.
+/// as the "pointer" input to an [OpStore], storing a pointer to an aggregate as a whole value
+/// cannot be split into stores of its parts. Such pointer-valued [OpStore] nodes may be "promoted"
+/// away by a [memory_promotion_and_legalization] pass, so the alloca or constant may be retried
+/// later.
 ///
 /// # Saved reaggregation parts
 ///
@@ -369,7 +370,6 @@ pub enum AnalysisResult {
 /// wait for the reaggregation to be consumed; input zero is the original value, not a saved part.
 struct JobAnalyzer {
     visited: FxHashSet<(Region, ValueUser)>,
-    was_loaded: bool,
     has_nonlocal_use: bool,
     is_stored_value: bool,
     blocking_reaggregation_node: Option<Node>,
@@ -379,7 +379,6 @@ impl JobAnalyzer {
     fn new() -> Self {
         Self {
             visited: FxHashSet::default(),
-            was_loaded: false,
             has_nonlocal_use: false,
             is_stored_value: false,
             blocking_reaggregation_node: None,
@@ -391,7 +390,6 @@ impl JobAnalyzer {
         self.visited.clear();
         self.has_nonlocal_use = false;
         self.is_stored_value = false;
-        self.was_loaded = false;
         self.blocking_reaggregation_node = None;
 
         // Perform the analysis
@@ -404,13 +402,6 @@ impl JobAnalyzer {
                 self.visit_region_argument(rvsdg, region, dep_index);
             }
             Job::ConstFallback(node) => {
-                let ty = rvsdg[node].expect_const_fallback().ty();
-
-                // Aggregate fallbacks already represent contents, so treat them as loaded to allow
-                // per-part stores. Storing a pointer fallback itself must wait for promotion, since
-                // pointers to its parts cannot replace the single stored pointer.
-                self.was_loaded = !rvsdg.ty().kind(ty).is_ptr();
-
                 self.visit_value_output(rvsdg, node, 0);
             }
         }
@@ -454,14 +445,17 @@ impl ValueFlowVisitor for JobAnalyzer {
             Simple(OpCall(_)) => {
                 self.has_nonlocal_use = true;
             }
-            Simple(OpLoad(_)) => {
-                // Do propagate the search past an OpLoad for non-local use analysis, but once the
-                // value has been loaded, the value should no longer affect stored-value analysis.
-                self.was_loaded = true;
+            Simple(OpStore(op)) if input == 1 && rvsdg.ty().kind(op.value_input().ty).is_ptr() => {
+                // We've reached the "value input" of a store op, and the value is still a
+                // pointer-type, meaning it has not been loaded yet. We'll defer splitting until the
+                // alloca that provides the store op's "pointer input" is promoted. Note that we
+                // know the pointer input does not originate from a global value, since we're trying
+                // to store a pointer-type value into it, and we don't allow pointer-type values in
+                // globals. Also, since we don't allow recursive types, there can be no promotion
+                // dependency cycle between this current value and the value we're trying to store
+                // it to. Therefore, if we keep iteratively trying to promote, then split, then
+                // promote, etc., this obstruction should eventually be guaranteed to disappear.
 
-                visit::value_flow::visit_value_input(self, rvsdg, node, input);
-            }
-            Simple(OpStore(_)) if input == 1 && !self.was_loaded => {
                 self.is_stored_value = true;
 
                 // We do continue searching for non-local uses, as non-local use will cause an
@@ -491,6 +485,7 @@ impl ValueFlowVisitor for JobAnalyzer {
             }
             Switch(_)
             | Loop(_)
+            | Simple(OpLoad(_))
             | Simple(OpOffsetSlice(_))
             | Simple(ValueProxy(_))
             | Simple(Reaggregation(_)) => {
