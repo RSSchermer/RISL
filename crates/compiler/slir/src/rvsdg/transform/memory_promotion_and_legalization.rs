@@ -40,18 +40,20 @@ enum PointerTrace {
 
     /// Trace's root is an aggregate value.
     ///
-    /// We always consider struct and array types aggregate. However, vector and matrix may be
-    /// treated as if they are "scalar" values. This depends on whether the pointer is ever stored
-    /// to/loaded from via an element-projected pointer; if it is only ever stored to/loaded from
-    /// whole, then it is treated as a scalar. A particular trace will be classified as aggregate if
-    /// it reaches an [OpElementPtr] or an [OpFieldPtr] node.
+    /// We always consider struct, enum, and array types aggregate. However, vector and matrix may
+    /// be treated as if they are "scalar" values. This depends on whether the pointer is ever
+    /// stored to/loaded from via an element-projected pointer; if it is only ever stored to/loaded
+    /// from whole, then it is treated as a scalar. A particular trace will be classified as
+    /// aggregate if it reaches an [OpElementPtr] or an [OpFieldPtr] node.
     Aggregate,
 
-    /// The trace reaches the output of an [OpLoad], [OpExtractField], or [OpExtractElement] node.
+    /// The trace reaches the output of an [OpLoad], [OpExtractField], [OpExtractElement], or an
+    /// unresolved enum projection node.
     ///
     /// We make no attempt to trace pointer values through memory stores and loads or aggregate
     /// extractions; we instead assume that the pointer could have originated from any alloca,
-    /// binding, or constant with a compatible type.
+    /// binding, or constant with a compatible type. Enum projections must wait for scalar
+    /// replacement, and cannot yet be reconstructed for variable-pointer emulation.
     Blocked,
 }
 
@@ -74,7 +76,8 @@ struct PointerAnalyzer {
     ///
     /// This is because we make no attempt to trace pointer values through memory stores and loads
     /// or aggregate extractions; we instead assume that the pointer could have originated from any
-    /// alloca with a compatible type.
+    /// alloca with a compatible type. Unresolved enum projections likewise need another round of
+    /// scalar replacement before their accesses can be promoted.
     ///
     /// Note that we are guaranteed to be able to promote such allocas during some later round, due
     /// to two top-level constraints on RISL:
@@ -220,8 +223,8 @@ impl PointerAnalyzer {
                 // A switch output is always "variable", unless the trace is "blocked" on one or
                 // more branches. In the first case, mem-ops using the pointer will be candidates
                 // for variable-pointer-emulation this round; in the later case, the emulation of
-                // mem-ops that use the pointer will have to be deferred to a later round, after the
-                // blocking load has itself been promoted.
+                // mem-ops that use the pointer must wait for promotion or scalar replacement to
+                // resolve the blocker.
 
                 let mut any_blocked = false;
 
@@ -296,10 +299,10 @@ impl PointerAnalyzer {
 
                 if matches!(
                     &*rvsdg.ty().kind(ty),
-                    TypeKind::Struct(_) | TypeKind::Array { .. }
+                    TypeKind::Struct(_) | TypeKind::Enum(_) | TypeKind::Array { .. }
                 ) {
-                    // We never promote mem-ops on alloca that hold struct or array values; these
-                    // need to be split into scalar-like values by a scalar-replacement pass first.
+                    // We never promote mem-ops on alloca that hold struct, enum, or array values;
+                    // these need to be split into scalar-like values by scalar replacement first.
                     // Note that we do allow vector and matrix types to behave as "scalar-like" and
                     // thus as promotable. This requires that they are only ever loaded from or
                     // stored to "whole", never via an element-projected pointer. The tracing logic
@@ -330,19 +333,25 @@ impl PointerAnalyzer {
                 // See also comment on the `blocked_types` field.
 
                 let output_ty = rvsdg[node].value_outputs()[output as usize].ty;
-
-                let TypeKind::Ptr(pointee_ty) = *rvsdg.ty().kind(output_ty) else {
-                    panic!("expected to be tracing a pointer value");
-                };
+                let pointee_ty = rvsdg.ty().kind(output_ty).expect_ptr();
 
                 self.blocked_types.insert(pointee_ty);
 
                 PointerTrace::Blocked
             }
-            Simple(ConstFallback(_)) => PointerTrace::ConstFallback,
             Simple(OpVariantPtr(_) | OpDiscriminantPtr(_)) => {
-                panic!("enum pointer ops should have been eliminated by enum-replacement");
+                // The pointer trace leads back to an enum value. We don't attempt to promote enum
+                // values here, instead we rely on later rounds of the memory-transform to replace
+                // them with their "parts" first (see enum_replacement.rs).
+
+                let input_ty = rvsdg[node].value_inputs()[0].ty;
+                let enum_ty = rvsdg.ty().kind(input_ty).expect_ptr();
+
+                self.blocked_types.insert(enum_ty);
+
+                PointerTrace::Blocked
             }
+            Simple(ConstFallback(_)) => PointerTrace::ConstFallback,
             _ => unreachable!("node kind cannot output a pointer"),
         }
     }
@@ -373,8 +382,8 @@ impl WorkCollector<'_> {
         // mem-ops on that alloca are promotable this round. During analysis, we blacklist allocas
         // that we know to be a root for mem-ops that cannot be promoted yet for other reasons (the
         // trace was classified as "variable" or "aggregate"). We've also tracked a list of
-        // "blocked types" for traces that were blocked by a load or aggregate extraction, so that
-        // no root could be determined. We therefore conservatively also exclude all allocas that
+        // "blocked types" for traces blocked by a load, extraction, or unresolved enum projection,
+        // where no root could be determined. We conservatively also exclude all allocas that
         // store a type that matches a type in the blocked_types list. This is still not quite enough
         // to guarantee we exclude all allocas that cannot yet be completely promoted: since we don't
         // trace beyond the blocking node we cannot know if the pointer-value was refined from a
@@ -382,10 +391,10 @@ impl WorkCollector<'_> {
         // therefore also conservatively exclude all allocas that store an aggregate type if there
         // is even a single type in the blocked_types set.
         //
-        // Blocking loads need promotion, and blocking extractions may need scalar replacement,
-        // before such excluded allocas can be unlocked in a later round. Since blocking already
-        // requires another round, this conservative exclusion mechanism should not have a major
-        // performance impact.
+        // Blocking loads need promotion, and blocking extractions/projections need scalar
+        // replacement, before such excluded allocas can be unlocked in a later round. Since
+        // blocking already requires another round, this conservative exclusion mechanism should
+        // not have a major performance impact.
         for (candidate, alloca) in self.promotion_candidates.iter() {
             if !self.analyzer.alloca_blacklist.contains(alloca) {
                 let ty = rvsdg[*alloca].expect_op_alloca().ty();
@@ -393,6 +402,7 @@ impl WorkCollector<'_> {
                 let is_aggregate_ty = matches!(
                     &*rvsdg.ty().kind(ty),
                     TypeKind::Struct(_)
+                        | TypeKind::Enum(_)
                         | TypeKind::Array { .. }
                         | TypeKind::Slice { .. }
                         | TypeKind::Vector(_)
@@ -657,6 +667,15 @@ impl MemoryPromoterLegalizer {
                     Loop(_) => self.visit_loop(rvsdg, node),
                     Simple(OpLoad(_)) => self.visit_op_load(rvsdg, node),
                     Simple(OpStore(_)) => self.visit_op_store(rvsdg, node),
+                    Simple(OpGetDiscriminant(_) | OpSetDiscriminant(_)) => {
+                        // We don't handle the promotion of enum discriminant loads and stores here.
+                        // Instead, we rely on a later round of the memory-transform first replacing
+                        // the enum (see the enum_replacement.rs) and generating regular load and
+                        // store ops on the value representing the discriminant. Promotion can then
+                        // process those regular loads and stores.
+
+                        self.state_origin = (current_region, StateOrigin::Node(node));
+                    }
                     _ => unreachable!("node kind cannot be part of the state chain"),
                 }
 
