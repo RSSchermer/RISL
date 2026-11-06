@@ -1,1 +1,15 @@
+mod advance_back_by;
+mod advance_by;
+mod count;
+mod find;
+mod fold;
+mod last;
 mod next;
+mod next_back;
+mod nth;
+mod nth_back;
+mod rfind;
+mod rfold;
+mod size_hint;
+mod try_fold;
+mod try_rfold;
