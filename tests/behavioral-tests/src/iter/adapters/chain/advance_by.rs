@@ -27,9 +27,11 @@ test_runner! {
     result: Results,
     shader: {
         let mut iter = A.iter().chain(B.iter());
+        let mut i = 0;
 
-        if *PRECONSUME != 0 {
+        while i < *PRECONSUME {
             iter.next();
+            i += 1;
         }
 
         let res = iter.advance_by(*N as usize);
@@ -105,6 +107,20 @@ async fn run() -> Result<(), Box<dyn Error>> {
         Results {
             rem: 0,
             next_val: 6,
+        }
+    );
+    assert_eq!(
+        runner.run(a, b, 0, 5).await?,
+        Results {
+            rem: 0,
+            next_val: 6,
+        }
+    );
+    assert_eq!(
+        runner.run(a, b, 2, 9).await?,
+        Results {
+            rem: 2,
+            next_val: NONE,
         }
     );
 

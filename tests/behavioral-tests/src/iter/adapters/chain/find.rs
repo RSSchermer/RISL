@@ -34,9 +34,11 @@ test_runner! {
     result: Results,
     shader: {
         let mut iter = A.iter().chain(B.iter());
+        let mut i = 0;
 
-        for _ in 0..*PRECONSUME {
+        while i < *PRECONSUME {
             iter.next();
+            i += 1;
         }
 
         let value = match iter.find(|value| value.key == *TARGET) {
