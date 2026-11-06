@@ -205,13 +205,21 @@ impl TyAndLayout {
     /// If the type is a new-type struct that wraps a scalar or scalar-pair value, unpacks the
     /// layout to the underlying scalar or scalar-pair value.
     pub fn unpack_immediate_or_scalar_pair(mut self) -> TyAndLayout {
-        if matches!(
+        while matches!(
             self.layout.abi,
             ValueAbi::Scalar(_) | ValueAbi::ScalarPair(..)
-        ) {
-            if self.ty.kind().is_struct() {
-                self = self.field(0);
+        ) && self.ty.kind().is_struct()
+        {
+            let mut non_zst_fields: SmallVec<[Self; 2]> = (0..self.layout.fields.count())
+                .map(|i| self.field(i))
+                .filter(|field| field.layout.size.bytes() != 0)
+                .collect();
+
+            if non_zst_fields.len() != 1 {
+                break;
             }
+
+            self = non_zst_fields.pop().unwrap();
         }
 
         self
