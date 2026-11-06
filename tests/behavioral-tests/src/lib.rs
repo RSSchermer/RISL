@@ -15,6 +15,7 @@ mod condition_partial_initialization;
 mod enum_constant_copy_merge;
 mod enum_result;
 mod iter;
+mod nested_mergable_control_flow;
 mod num;
 mod ops;
 mod slice;
