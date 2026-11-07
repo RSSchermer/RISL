@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::path::{Path, PathBuf};
 
 use ar::{GnuBuilder, Header};
 use rustc_span::def_id::LocalModDefId;
@@ -7,6 +7,7 @@ use slir::cfg::Cfg;
 use slir::rvsdg::Rvsdg;
 use slir::scf::Scf;
 use slir::smi::ShaderModuleInterface;
+use tempfile::NamedTempFile;
 
 use crate::context::RislContext;
 
@@ -29,7 +30,8 @@ pub struct SlirArtifactBuilderConfig {
 }
 
 pub struct SlirArtifactBuilder {
-    inner: GnuBuilder<File>,
+    inner: GnuBuilder<NamedTempFile>,
+    filename: PathBuf,
     module_identifier: Vec<u8>,
     cfg_initial_identifier: Vec<u8>,
     cfg_structurized_identifier: Option<Vec<u8>>,
@@ -42,17 +44,27 @@ pub struct SlirArtifactBuilder {
 
 impl SlirArtifactBuilder {
     pub fn new(cx: &RislContext, config: SlirArtifactBuilderConfig) -> Self {
+        let filename = cx.shader_artifact_file_path(config.module_id.to_local_def_id());
+
+        Self::new_at_path(&filename, config)
+    }
+
+    fn new_at_path(filename: &Path, config: SlirArtifactBuilderConfig) -> Self {
         let SlirArtifactBuilderConfig {
-            module_id,
             include_cfg_structurized,
             include_rvsdg_initial,
             include_rvsdg_transformed,
             include_wgsl,
             include_smi,
+            ..
         } = config;
 
-        let filename = cx.shader_artifact_file_path(module_id.to_local_def_id());
-        let file = File::create(filename).expect("failed to create slir artifact file");
+        let directory = filename
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let file = NamedTempFile::new_in(directory)
+            .expect("failed to create temporary slir artifact file");
 
         let module_identifier = MODULE_IDENTIFIER.as_bytes().to_vec();
         let cfg_initial_identifier = CFG_INITIAL_IDENTIFIER.as_bytes().to_vec();
@@ -96,6 +108,7 @@ impl SlirArtifactBuilder {
 
         SlirArtifactBuilder {
             inner,
+            filename: filename.to_path_buf(),
             module_identifier,
             cfg_initial_identifier,
             cfg_structurized_identifier,
@@ -212,5 +225,11 @@ impl SlirArtifactBuilder {
                 encoding.as_slice(),
             )
             .expect("failed to append SLIR module to SLIR artifact archive");
+
+        self.inner
+            .into_inner()
+            .expect("failed to finish SLIR artifact archive")
+            .persist(self.filename)
+            .expect("failed to publish SLIR artifact archive");
     }
 }
