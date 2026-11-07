@@ -31,7 +31,7 @@ pub mod redundant_state_link_elimination;
 pub mod region_replication;
 pub mod scalar_replacement;
 pub mod store_coalescing;
-mod switch_branch_pruning;
+pub mod switch_branch_pruning;
 pub mod switch_fallback_unification;
 pub mod switch_merging;
 pub mod switchify_pred_to_case;
@@ -78,8 +78,6 @@ pub fn transform(module: &mut Module, rvsdg: &mut Rvsdg) {
     optimize_entry_points(module, rvsdg);
 
     fallback_value_replacement::transform_entry_points(module, rvsdg);
-
-    rvsdg.dump_to_file("final_transformed.dump").unwrap();
 }
 
 fn optimize_entry_points(module: &mut Module, rvsdg: &mut Rvsdg) {
