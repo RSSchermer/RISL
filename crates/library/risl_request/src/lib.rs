@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs::File;
+use std::io::BufReader;
 use std::path::PathBuf;
 
 use base64::Engine;
@@ -63,16 +64,18 @@ fn risl_shader_request_lookup() -> PathBuf {
 }
 
 fn resolve_artifact(request_id: &str) -> syn::Result<File> {
-    let mut lookup_file = File::open(risl_shader_request_lookup()).map_err(|_| {
+    let lookup_file = File::open(risl_shader_request_lookup()).map_err(|_| {
         syn::Error::new(
             Span::call_site(),
             "could not open RISL request info; are you building this with the RISL compiler?",
         )
     })?;
 
-    let lookup: HashMap<String, OsString> =
-        bincode::serde::decode_from_std_read(&mut lookup_file, bincode::config::standard())
-            .unwrap();
+    let lookup: HashMap<String, OsString> = bincode::serde::decode_from_std_read(
+        &mut BufReader::new(lookup_file),
+        bincode::config::standard(),
+    )
+    .expect("failed to decode RISL request look-up");
 
     let artifact_path = lookup.get(request_id).ok_or_else(|| {
         syn::Error::new(
