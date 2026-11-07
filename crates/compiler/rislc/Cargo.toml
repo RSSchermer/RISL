@@ -19,14 +19,17 @@ arrayvec = { workspace = true }
 bincode = { workspace = true, features = ["serde", "std"] }
 bit-set = { workspace = true }
 bit-vec = { workspace = true }
+crossbeam-channel = { workspace = true }
 either = { workspace = true }
 indexmap = { workspace = true }
 index_vec = { workspace = true }
 itertools = { workspace = true }
+jobserver = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 slir = { workspace = true }
 smallvec = { workspace = true }
+tempfile = { workspace = true }
 tracing = "0.1.37"
 #
 #[target.'cfg(unix)'.dependencies]

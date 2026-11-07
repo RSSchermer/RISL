@@ -23,6 +23,7 @@ use rustc_span::def_id::{CrateNum, LOCAL_CRATE};
 use crate::codegen::codegen_shader_modules;
 use crate::context::RislContext;
 use crate::core_shim::ShimDefLookup;
+use crate::task_execution::ExecutionContext;
 use crate::{abi, monomorphize};
 
 /// The header used in an `rlib` archive for the crate's "free items" SLIR-CFG module.
@@ -46,7 +47,7 @@ pub const ATTRIBUTE_NAMESPACE: &'static str = "rislc";
 /// The name of the subdirectory into which the RISLs pass' output artifacts are stored.
 pub const RISL_OUTPUT_SUB_DIR: &'static str = "risl";
 
-pub fn run(args: Vec<String>) {
+pub fn run(args: Vec<String>, ecx: &ExecutionContext) {
     // RISL uses a two-pass compilation process.
     //
     // The first pass is the special RISL-pass. This pass registers a special RISL tool (see the
@@ -94,7 +95,7 @@ pub fn run(args: Vec<String>) {
         adjust_extern_args(&mut risl_args);
 
         // Run the first "RISL" pass
-        run_compiler(&risl_args, &mut RislPassCallbacks);
+        run_compiler(&risl_args, &mut RislPassCallbacks { ecx });
     }
 
     // TODO: we don't want to run the second pass if there were errors in the first pass.
@@ -270,9 +271,11 @@ impl Callbacks for RustPassCallbacks {
     }
 }
 
-struct RislPassCallbacks;
+struct RislPassCallbacks<'a> {
+    ecx: &'a ExecutionContext,
+}
 
-impl Callbacks for RislPassCallbacks {
+impl Callbacks for RislPassCallbacks<'_> {
     fn config(&mut self, config: &mut interface::Config) {
         // Don't print anything during the RISL pass, we'd end up double-printing in the second
         // pass.
@@ -367,7 +370,7 @@ impl Callbacks for RislPassCallbacks {
         _compiler: &interface::Compiler,
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
-        compile_risl(tcx);
+        compile_risl(tcx, self.ecx);
 
         Compilation::Stop
     }
@@ -600,7 +603,7 @@ fn create_shader_request_lookup(cx: &RislContext) {
         .unwrap();
 }
 
-fn compile_risl(tcx: TyCtxt) {
+fn compile_risl(tcx: TyCtxt, ecx: &ExecutionContext) {
     let cx = RislContext::new(tcx);
 
     if cx.hir_ext().is_empty() {
@@ -608,7 +611,7 @@ fn compile_risl(tcx: TyCtxt) {
         return;
     }
 
-    let lib_module = codegen_shader_modules(&cx);
+    let lib_module = codegen_shader_modules(&cx, ecx);
     let smam = cx.local_smam();
     let shim_lookup = cx
         .current_crate_is_core_shim_crate()

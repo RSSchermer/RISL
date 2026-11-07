@@ -42,6 +42,7 @@ mod hir_ext_build;
 mod monomorphize;
 mod slir_build;
 mod stable_cg;
+mod task_execution;
 
 use std::process;
 use std::process::ExitCode;
@@ -53,6 +54,8 @@ use rustc_session::config::ErrorOutputType;
 rustc_fluent_macro::fluent_messages! { "../messages.ftl" }
 
 pub fn run() -> ExitCode {
+    // SAFETY: connect to inherited jobserver descriptors before initializing rustc.
+    let ecx = unsafe { task_execution::ExecutionContext::from_env() };
     let early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
 
     init_rustc_env_logger(&early_dcx);
@@ -60,7 +63,7 @@ pub fn run() -> ExitCode {
     let args = args::raw_args(&early_dcx).into_iter().skip(1).collect();
 
     let exit_code = catch_with_exit_code(|| {
-        compiler::run(args);
+        compiler::run(args, &ecx);
     });
 
     process::exit(exit_code)
