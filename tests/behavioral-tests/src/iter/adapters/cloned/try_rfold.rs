@@ -37,8 +37,10 @@ test_runner! {
         }
 
         let mut calls = 0;
+
         let result: Result<u32, u32> = iter.try_rfold(9, |acc, value| {
             let value = acc * 10 + value.value;
+
             calls += 1;
 
             if calls == *BREAK_AT {
