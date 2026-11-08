@@ -31,8 +31,12 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::SliceIterEnd => define_slice_iter_end(instance, cx),
             RislIntrinsic::SliceIterSetEnd => define_slice_iter_set_end(instance, cx),
             RislIntrinsic::SliceIterClone => define_slice_iter_clone(instance, cx),
-            RislIntrinsic::ChainARef => define_chain_field_ref(instance, cx, 0),
-            RislIntrinsic::ChainBRef => define_chain_field_ref(instance, cx, 1),
+            RislIntrinsic::ChainARef | RislIntrinsic::CycleOrigRef => {
+                define_iterator_field_ref(instance, cx, 0)
+            }
+            RislIntrinsic::ChainBRef | RislIntrinsic::CycleIterRef => {
+                define_iterator_field_ref(instance, cx, 1)
+            }
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
@@ -100,6 +104,8 @@ pub enum RislIntrinsic {
     SliceIterClone,
     ChainARef,
     ChainBRef,
+    CycleOrigRef,
+    CycleIterRef,
     MemResourceAsRef,
     NonZeroNew,
     NonZeroNewUnchecked,
@@ -171,6 +177,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(slice_iter_clone)]" => RislIntrinsic::SliceIterClone,
         "#[rislc::intrinsic(chain_a_ref)]" => RislIntrinsic::ChainARef,
         "#[rislc::intrinsic(chain_b_ref)]" => RislIntrinsic::ChainBRef,
+        "#[rislc::intrinsic(cycle_orig_ref)]" => RislIntrinsic::CycleOrigRef,
+        "#[rislc::intrinsic(cycle_iter_ref)]" => RislIntrinsic::CycleIterRef,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
@@ -1082,7 +1090,7 @@ fn define_slice_iter_clone(instance: Instance, cx: &CodegenContext) {
     cfg.set_terminator(bb, Terminator::return_void());
 }
 
-fn define_chain_field_ref(instance: Instance, cx: &CodegenContext, field: u32) {
+fn define_iterator_field_ref(instance: Instance, cx: &CodegenContext, field: u32) {
     let function = cx.get_fn(&instance);
 
     let mut cfg = cx.cfg.borrow_mut();
