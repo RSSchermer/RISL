@@ -56,6 +56,9 @@ gen_intrinsic!(chain_b_ref: fn chain_b_mut<A, B>(iter: &mut core::iter::Chain<A,
 gen_intrinsic!(cycle_orig_ref: fn cycle_orig_ref<I>(iter: &core::iter::Cycle<I>) -> &I);
 gen_intrinsic!(cycle_iter_ref: fn cycle_iter_mut<I>(iter: &mut core::iter::Cycle<I>) -> &mut I);
 
+gen_intrinsic!(enumerate_iter_ref: fn enumerate_iter_mut<I>(iter: &mut core::iter::Enumerate<I>) -> &mut I);
+gen_intrinsic!(enumerate_count_ref: fn enumerate_count_mut<I>(iter: &mut core::iter::Enumerate<I>) -> &mut usize);
+
 gen_intrinsic!(non_zero_new: fn non_zero_new<T: ZeroablePrimitive>(n: T) -> Option<NonZero<T>>);
 gen_intrinsic!(non_zero_new_unchecked: fn non_zero_new_unchecked<T: ZeroablePrimitive>(n: T) -> NonZero<T>);
 gen_intrinsic!(non_zero_get: fn non_zero_get<T: ZeroablePrimitive>(n: NonZero<T>) -> T);

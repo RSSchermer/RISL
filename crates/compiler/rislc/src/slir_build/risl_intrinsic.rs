@@ -31,12 +31,12 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             RislIntrinsic::SliceIterEnd => define_slice_iter_end(instance, cx),
             RislIntrinsic::SliceIterSetEnd => define_slice_iter_set_end(instance, cx),
             RislIntrinsic::SliceIterClone => define_slice_iter_clone(instance, cx),
-            RislIntrinsic::ChainARef | RislIntrinsic::CycleOrigRef => {
-                define_iterator_field_ref(instance, cx, 0)
-            }
-            RislIntrinsic::ChainBRef | RislIntrinsic::CycleIterRef => {
-                define_iterator_field_ref(instance, cx, 1)
-            }
+            RislIntrinsic::ChainARef
+            | RislIntrinsic::CycleOrigRef
+            | RislIntrinsic::EnumerateIterRef => define_iterator_field_ref(instance, cx, 0),
+            RislIntrinsic::ChainBRef
+            | RislIntrinsic::CycleIterRef
+            | RislIntrinsic::EnumerateCountRef => define_iterator_field_ref(instance, cx, 1),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
@@ -106,6 +106,8 @@ pub enum RislIntrinsic {
     ChainBRef,
     CycleOrigRef,
     CycleIterRef,
+    EnumerateIterRef,
+    EnumerateCountRef,
     MemResourceAsRef,
     NonZeroNew,
     NonZeroNewUnchecked,
@@ -179,6 +181,8 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(chain_b_ref)]" => RislIntrinsic::ChainBRef,
         "#[rislc::intrinsic(cycle_orig_ref)]" => RislIntrinsic::CycleOrigRef,
         "#[rislc::intrinsic(cycle_iter_ref)]" => RislIntrinsic::CycleIterRef,
+        "#[rislc::intrinsic(enumerate_iter_ref)]" => RislIntrinsic::EnumerateIterRef,
+        "#[rislc::intrinsic(enumerate_count_ref)]" => RislIntrinsic::EnumerateCountRef,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
