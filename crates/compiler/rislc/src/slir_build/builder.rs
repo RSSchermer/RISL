@@ -20,8 +20,9 @@ use crate::slir_build::context::CodegenContext as Cx;
 use crate::slir_build::ty::Type;
 use crate::slir_build::value::Value;
 use crate::stable_cg::traits::{
-    AbiBuilderMethods, ArgAbiBuilderMethods, BackendTypes, BuilderMethods, ConstCodegenMethods,
-    IntrinsicCallBuilderMethods, LayoutTypeCodegenMethods, StaticBuilderMethods,
+    AbiBuilderMethods, ArgAbiBuilderMethods, BackendTypes, BaseTypeCodegenMethods, BuilderMethods,
+    ConstCodegenMethods, IntrinsicCallBuilderMethods, LayoutTypeCodegenMethods,
+    StaticBuilderMethods,
 };
 use crate::stable_cg::{
     AtomicOrdering, AtomicRmwBinOp, IntPredicate, OperandRef, OperandValue, PlaceRef, PlaceValue,
@@ -567,28 +568,112 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
         todo!()
     }
 
+    fn checked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value) {
+        let value = self.add(lhs, rhs);
+        let lhs_changed = self.bit_xor(lhs, value);
+        let rhs_changed = self.bit_xor(rhs, value);
+        let sign_changed = self.bit_and(lhs_changed, rhs_changed);
+        let zero = self.const_uint(self.val_ty(value), 0);
+        let overflow = self.icmp(IntPredicate::IntSLT, sign_changed, zero);
+
+        (value, overflow)
+    }
+
+    fn checked_uadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value) {
+        let value = self.add(lhs, rhs);
+        let overflow = self.icmp(IntPredicate::IntULT, value, lhs);
+
+        (value, overflow)
+    }
+
+    fn checked_ssub(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value) {
+        let value = self.sub(lhs, rhs);
+        let operands_differ = self.bit_xor(lhs, rhs);
+        let lhs_changed = self.bit_xor(lhs, value);
+        let sign_changed = self.bit_and(operands_differ, lhs_changed);
+        let zero = self.const_uint(self.val_ty(value), 0);
+        let overflow = self.icmp(IntPredicate::IntSLT, sign_changed, zero);
+
+        (value, overflow)
+    }
+
+    fn checked_usub(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value) {
+        let value = self.sub(lhs, rhs);
+        let overflow = self.icmp(IntPredicate::IntULT, lhs, rhs);
+
+        (value, overflow)
+    }
+
+    fn checked_smul(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value) {
+        let value = self.mul(lhs, rhs);
+        let ty = self.val_ty(value);
+        let unsigned_ty = slir::ty::TY_U32.into();
+        let shift = self.const_uint(ty, self.int_width(ty) - 1);
+        let lhs_sign = self.shr(lhs, shift);
+        let rhs_sign = self.shr(rhs, shift);
+
+        // Unsigned magnitudes can represent abs(MIN) without requiring a wider integer.
+        let lhs_magnitude = self.bit_xor(lhs, lhs_sign);
+        let lhs_magnitude = self.sub(lhs_magnitude, lhs_sign);
+        let lhs_magnitude = self.intcast(lhs_magnitude, unsigned_ty, false);
+        let rhs_magnitude = self.bit_xor(rhs, rhs_sign);
+        let rhs_magnitude = self.sub(rhs_magnitude, rhs_sign);
+        let rhs_magnitude = self.intcast(rhs_magnitude, unsigned_ty, false);
+
+        // A negative product may have magnitude MAX + 1; a positive one may only reach MAX.
+        let sign = self.bit_xor(lhs_sign, rhs_sign);
+        let max = self.const_uint_big(ty, (1u128 << (self.int_width(ty) - 1)) - 1);
+        let limit = self.sub(max, sign);
+        let limit = self.intcast(limit, unsigned_ty, false);
+        let zero = self.const_uint(unsigned_ty, 0);
+        let is_zero = self.icmp(IntPredicate::IntEQ, rhs_magnitude, zero);
+        let is_zero = self.intcast(is_zero, unsigned_ty, false);
+        // Replace a zero divisor with one; multiplication by zero remains non-overflowing.
+        let divisor = self.bit_or(rhs_magnitude, is_zero);
+        let threshold = self.udiv(limit, divisor);
+        let overflow = self.icmp(IntPredicate::IntUGT, lhs_magnitude, threshold);
+
+        (value, overflow)
+    }
+
+    fn checked_umul(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value) {
+        let value = self.mul(lhs, rhs);
+        let ty = self.val_ty(value);
+        let zero = self.const_uint(ty, 0);
+        let is_zero = self.icmp(IntPredicate::IntEQ, rhs, zero);
+        let is_zero = self.intcast(is_zero, ty, false);
+        // Replace a zero divisor with one; the resulting maximum threshold also correctly makes
+        // multiplication by zero non-overflowing.
+        let divisor = self.bit_or(rhs, is_zero);
+        let max = self.const_uint_big(ty, u128::MAX >> (128 - self.int_width(ty)));
+        let threshold = self.udiv(max, divisor);
+        let overflow = self.icmp(IntPredicate::IntUGT, lhs, threshold);
+
+        (value, overflow)
+    }
+
     fn unchecked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        self.add(lhs, rhs)
     }
 
     fn unchecked_uadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        self.add(lhs, rhs)
     }
 
     fn unchecked_ssub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        self.sub(lhs, rhs)
     }
 
     fn unchecked_usub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        self.sub(lhs, rhs)
     }
 
     fn unchecked_smul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        self.mul(lhs, rhs)
     }
 
     fn unchecked_umul(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value {
-        todo!()
+        self.mul(lhs, rhs)
     }
 
     fn from_immediate(&mut self, val: Self::Value) -> Self::Value {

@@ -1,9 +1,9 @@
 use rustc_middle::bug;
 use rustc_public::abi::{ArgAbi, FnAbi, PassMode, ValueAbi};
-use rustc_public::mir;
 use rustc_public::mir::mono::{Instance, InstanceKind};
 use rustc_public::mir::{BasicBlockIdx, SwitchTargets, TerminatorKind};
 use rustc_public::ty::{Abi, IntrinsicDef, RigidTy, Ty, TyKind};
+use rustc_public::{CrateDef, mir};
 use smallvec::SmallVec;
 use tracing::debug;
 
@@ -270,11 +270,17 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         // The arguments we'll be passing. Plus one to account for outptr, if used.
         let arg_count = fn_abi.args.len() + is_indirect_ret as usize;
 
-        let instance = if instance.kind == InstanceKind::Intrinsic {
-            todo!()
-        } else {
-            instance
-        };
+        if instance.kind == InstanceKind::Intrinsic {
+            return self.codegen_call_intrinsic_terminator(
+                bx,
+                &instance,
+                &fn_abi,
+                args,
+                destination,
+                target,
+                mergeable_succ,
+            );
+        }
 
         let mut llargs = Vec::with_capacity(arg_count);
         let destination = target.as_ref().map(|&target| {
@@ -350,6 +356,119 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             Some(&instance),
             mergeable_succ,
         )
+    }
+
+    fn codegen_call_intrinsic_terminator(
+        &mut self,
+        bx: &mut Bx,
+        instance: &Instance,
+        fn_abi: &FnAbi,
+        args: &[mir::Operand],
+        destination: &mir::Place,
+        target: Option<mir::BasicBlockIdx>,
+        mergeable_succ: bool,
+    ) -> MergingSucc {
+        let (def, _) = instance.ty().kind().fn_def().unwrap();
+
+        if def.name().ends_with("::cold_path") {
+            return funclet_br(
+                self,
+                bx,
+                target.expect("cold_path must return"),
+                mergeable_succ,
+            );
+        }
+
+        if def.name().ends_with("::saturating_add")
+            && matches!(fn_abi.ret.ty.kind(), TyKind::RigidTy(RigidTy::Uint(_)))
+        {
+            let lhs = self.codegen_operand(bx, &args[0]).immediate();
+            let rhs = self.codegen_operand(bx, &args[1]).immediate();
+            let sum = bx.add(lhs, rhs);
+            let overflow = bx.icmp(IntPredicate::IntULT, sum, lhs);
+            let ty = bx.val_ty(sum);
+            let overflow = bx.intcast(overflow, ty, false);
+            let mask = bx.sub(bx.const_uint(ty, 0), overflow);
+            let value = bx.bit_or(sum, mask);
+            let target = target.expect("saturating_add must return");
+            let dest = self.make_return_dest(
+                bx,
+                destination,
+                &fn_abi.ret,
+                &mut Vec::new(),
+                None,
+                Some(target),
+            );
+
+            self.store_return(bx, dest, &fn_abi.ret, value);
+
+            return funclet_br(self, bx, target, mergeable_succ);
+        }
+
+        if def.name().ends_with("::saturating_sub")
+            && matches!(fn_abi.ret.ty.kind(), TyKind::RigidTy(RigidTy::Uint(_)))
+        {
+            let lhs = self.codegen_operand(bx, &args[0]).immediate();
+            let rhs = self.codegen_operand(bx, &args[1]).immediate();
+            let difference = bx.sub(lhs, rhs);
+            let underflow = bx.icmp(IntPredicate::IntULT, lhs, rhs);
+            let ty = bx.val_ty(difference);
+            let underflow = bx.intcast(underflow, ty, false);
+            let mask = bx.sub(underflow, bx.const_uint(ty, 1));
+            let value = bx.bit_and(difference, mask);
+            let target = target.expect("saturating_sub must return");
+            let dest = self.make_return_dest(
+                bx,
+                destination,
+                &fn_abi.ret,
+                &mut Vec::new(),
+                None,
+                Some(target),
+            );
+
+            self.store_return(bx, dest, &fn_abi.ret, value);
+
+            return funclet_br(self, bx, target, mergeable_succ);
+        }
+
+        if matches!(fn_abi.ret.ty.kind(), TyKind::RigidTy(RigidTy::Int(_)))
+            && (def.name().ends_with("::saturating_add")
+                || def.name().ends_with("::saturating_sub"))
+        {
+            let lhs = self.codegen_operand(bx, &args[0]).immediate();
+            let rhs = self.codegen_operand(bx, &args[1]).immediate();
+            let (value, overflow) = if def.name().ends_with("::saturating_add") {
+                bx.checked_sadd(lhs, rhs)
+            } else {
+                bx.checked_ssub(lhs, rhs)
+            };
+            let ty = bx.val_ty(value);
+            let shift = bx.const_uint(ty, bx.int_width(ty) - 1);
+            let sign = bx.shr(lhs, shift);
+            let max = bx.const_uint_big(ty, (1u128 << (bx.int_width(ty) - 1)) - 1);
+            // On overflow, a negative lhs saturates at MIN; a nonnegative lhs at MAX.
+            let limit = bx.bit_xor(max, sign);
+            let overflow = bx.intcast(overflow, ty, false);
+            let mask = bx.sub(bx.const_uint(ty, 0), overflow);
+            let adjustment = bx.bit_xor(value, limit);
+            let adjustment = bx.bit_and(adjustment, mask);
+            let value = bx.bit_xor(value, adjustment);
+            let target = target.expect("saturating arithmetic must return");
+            let dest = self.make_return_dest(
+                bx,
+                destination,
+                &fn_abi.ret,
+                &mut Vec::new(),
+                None,
+                Some(target),
+            );
+
+            self.store_return(bx, dest, &fn_abi.ret, value);
+
+            return funclet_br(self, bx, target, mergeable_succ);
+        }
+
+        todo!("intrinsic {} in {}", instance.name(), self.instance.name())
     }
 
     pub(crate) fn codegen_block(&mut self, mut bb: mir::BasicBlockIdx) {

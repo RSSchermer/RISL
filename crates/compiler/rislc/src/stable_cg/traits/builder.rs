@@ -125,6 +125,18 @@ pub trait BuilderMethods<'a>:
     /// must be interpreted as unsigned and can be assumed to be less than the size of the left
     /// operand.
     fn shr(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
+    /// Returns the wrapping sum and whether signed addition overflowed.
+    fn checked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value);
+    /// Returns the wrapping sum and whether unsigned addition overflowed.
+    fn checked_uadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value);
+    /// Returns the wrapping difference and whether signed subtraction overflowed.
+    fn checked_ssub(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value);
+    /// Returns the wrapping difference and whether unsigned subtraction overflowed.
+    fn checked_usub(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value);
+    /// Returns the wrapping product and whether signed multiplication overflowed.
+    fn checked_smul(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value);
+    /// Returns the wrapping product and whether unsigned multiplication overflowed.
+    fn checked_umul(&mut self, lhs: Self::Value, rhs: Self::Value) -> (Self::Value, Self::Value);
     fn unchecked_sadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
     fn unchecked_uadd(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;
     fn unchecked_ssub(&mut self, lhs: Self::Value, rhs: Self::Value) -> Self::Value;

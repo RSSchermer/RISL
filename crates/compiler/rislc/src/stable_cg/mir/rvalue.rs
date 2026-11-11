@@ -551,7 +551,11 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                 }
             }
 
-            mir::Rvalue::BinaryOp(op, lhs, rhs) | mir::Rvalue::CheckedBinaryOp(op, lhs, rhs) => {
+            mir::Rvalue::CheckedBinaryOp(op, lhs, rhs) => {
+                self.codegen_checked_binary_op(bx, *op, lhs, rhs)
+            }
+
+            mir::Rvalue::BinaryOp(op, lhs, rhs) => {
                 let lhs = self.codegen_operand(bx, lhs);
                 let rhs = self.codegen_operand(bx, rhs);
 
@@ -746,6 +750,42 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
         OperandRef {
             val,
             layout: TyAndLayout::expect_from_ty(ptr_ty),
+        }
+    }
+
+    fn codegen_checked_binary_op(
+        &mut self,
+        bx: &mut Bx,
+        op: mir::BinOp,
+        lhs: &mir::Operand,
+        rhs: &mir::Operand,
+    ) -> OperandRef<Bx::Value> {
+        let lhs = self.codegen_operand(bx, lhs);
+        let rhs = self.codegen_operand(bx, rhs);
+
+        let input_ty = lhs.layout.ty;
+        let is_signed = match input_ty.kind() {
+            TyKind::RigidTy(RigidTy::Int(_)) => true,
+            TyKind::RigidTy(RigidTy::Uint(_)) => false,
+            _ => bug!("checked arithmetic is only supported for integers"),
+        };
+        let lhs_val = lhs.immediate();
+        let rhs_val = rhs.immediate();
+        let ty = Ty::new_tuple(&[input_ty, Ty::bool_ty()]);
+
+        let (value, overflow) = match (op, is_signed) {
+            (mir::BinOp::Add, true) => bx.checked_sadd(lhs_val, rhs_val),
+            (mir::BinOp::Add, false) => bx.checked_uadd(lhs_val, rhs_val),
+            (mir::BinOp::Sub, true) => bx.checked_ssub(lhs_val, rhs_val),
+            (mir::BinOp::Sub, false) => bx.checked_usub(lhs_val, rhs_val),
+            (mir::BinOp::Mul, true) => bx.checked_smul(lhs_val, rhs_val),
+            (mir::BinOp::Mul, false) => bx.checked_umul(lhs_val, rhs_val),
+            _ => bug!("unsupported checked binary operation {op:?}"),
+        };
+
+        OperandRef {
+            val: OperandValue::Pair(value, overflow),
+            layout: TyAndLayout::expect_from_ty(ty),
         }
     }
 
