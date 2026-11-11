@@ -31,4 +31,6 @@ mod f32_tanh;
 mod f32_to_degrees;
 mod f32_to_radians;
 mod f32_trunc;
+mod i32;
 mod non_zero;
+mod u32;
