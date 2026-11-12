@@ -9,6 +9,7 @@ publish = false
 doctest = false
 
 [features]
+test_adt_niche_enum_aggregates = []
 test_adt_struct_ref_array_field_dynamic_index_loop = []
 test_adt_struct_single_nested_scalar_field = []
 test_adt_struct_single_nested_slice_field = []

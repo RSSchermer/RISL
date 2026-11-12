@@ -140,7 +140,22 @@ pub fn provide(providers: &mut Providers) {
             }
         }
 
-        (rustc_interface::DEFAULT_QUERY_PROVIDERS.layout_of)(tcx, query)
+        let mut layout = (rustc_interface::DEFAULT_QUERY_PROVIDERS.layout_of)(tcx, query)?;
+
+        // SLIR keeps multi-variant enums explicit, even when rustc can encode them in a scalar
+        // niche. Do not let enclosing structs and tuples inherit that scalar representation.
+        if matches!(layout.layout.variants(), Variants::Multiple { .. })
+            && matches!(
+                layout.backend_repr,
+                BackendRepr::Scalar(_) | BackendRepr::ScalarPair(..)
+            )
+        {
+            let mut data = layout.layout.0.0.clone();
+            data.backend_repr = BackendRepr::Memory { sized: true };
+            layout.layout = tcx.mk_layout(data);
+        }
+
+        Ok(layout)
     }
 
     providers.layout_of = layout_of;
