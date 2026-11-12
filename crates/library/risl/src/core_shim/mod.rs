@@ -8,4 +8,5 @@ pub mod cmp;
 pub mod iter;
 pub mod num;
 pub mod ops;
+pub mod option;
 pub mod slice;

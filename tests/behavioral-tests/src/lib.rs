@@ -18,6 +18,7 @@ mod iter;
 mod nested_mergable_control_flow;
 mod num;
 mod ops;
+mod option;
 mod slice;
 mod switch_int;
 mod variable_pointer;

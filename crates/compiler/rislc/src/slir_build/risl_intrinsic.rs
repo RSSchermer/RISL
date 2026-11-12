@@ -38,6 +38,7 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             | RislIntrinsic::CycleIterRef
             | RislIntrinsic::EnumerateCountRef => define_iterator_field_ref(instance, cx, 1),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
+            RislIntrinsic::OptionUnwrapUnchecked => define_option_unwrap_unchecked(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
             RislIntrinsic::NonZeroNewUnchecked => define_non_zero_new_unchecked(instance, cx),
             RislIntrinsic::NonZeroGet => define_non_zero_get(instance, cx),
@@ -109,6 +110,7 @@ pub enum RislIntrinsic {
     EnumerateIterRef,
     EnumerateCountRef,
     MemResourceAsRef,
+    OptionUnwrapUnchecked,
     NonZeroNew,
     NonZeroNewUnchecked,
     NonZeroGet,
@@ -184,6 +186,7 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(enumerate_iter_ref)]" => RislIntrinsic::EnumerateIterRef,
         "#[rislc::intrinsic(enumerate_count_ref)]" => RislIntrinsic::EnumerateCountRef,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
+        "#[rislc::intrinsic(option_unwrap_unchecked)]" => RislIntrinsic::OptionUnwrapUnchecked,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
         "#[rislc::intrinsic(non_zero_new_unchecked)]" => RislIntrinsic::NonZeroNewUnchecked,
         "#[rislc::intrinsic(non_zero_get)]" => RislIntrinsic::NonZeroGet,
@@ -1154,6 +1157,45 @@ fn define_mem_resource_as_ref(instance: Instance, cx: &CodegenContext) {
         // The mem resource contains a sized type. In this case we simply return the pointer
         // argument.
         cfg.set_terminator(bb, Terminator::return_value(ptr_arg.into()));
+    }
+}
+
+fn define_option_unwrap_unchecked(instance: Instance, cx: &CodegenContext) {
+    let function = cx.get_fn(&instance);
+    let fn_abi = instance
+        .fn_abi()
+        .expect("should have a known ABI during codegen");
+
+    let mut cfg = cx.cfg.borrow_mut();
+    let body = cfg
+        .get_function_body(function)
+        .expect("function should have been predefined");
+    let bb = body.entry_block();
+
+    if matches!(fn_abi.ret.mode, PassMode::Ignore) {
+        cfg.set_terminator(bb, Terminator::return_void());
+
+        return;
+    }
+
+    // Multi-variant enums are always passed indirectly by RISL's ABI.
+    assert!(matches!(fn_abi.args[0].mode, PassMode::Indirect { .. }));
+
+    let indirect_ret = matches!(fn_abi.ret.mode, PassMode::Indirect { .. });
+    let option_ptr = body.argument_values()[usize::from(indirect_ret)];
+    let ret_ptr = indirect_ret.then(|| body.argument_values()[0]);
+
+    // The caller guarantees `Some` (variant `1`); under that condition this should be safe.
+    let (_, some_ptr) =
+        cfg.add_stmt_op_variant_ptr(bb, BlockPosition::Append, option_ptr.into(), 1);
+    let (_, value_ptr) = cfg.add_stmt_op_field_ptr(bb, BlockPosition::Append, some_ptr.into(), 0);
+    let (_, value) = cfg.add_stmt_op_load(bb, BlockPosition::Append, value_ptr.into());
+
+    if let Some(ret_ptr) = ret_ptr {
+        cfg.add_stmt_op_store(bb, BlockPosition::Append, ret_ptr.into(), value.into());
+        cfg.set_terminator(bb, Terminator::return_void());
+    } else {
+        cfg.set_terminator(bb, Terminator::return_value(value.into()));
     }
 }
 
