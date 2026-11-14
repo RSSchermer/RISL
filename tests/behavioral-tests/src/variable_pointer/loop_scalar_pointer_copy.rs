@@ -59,7 +59,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             .await?,
         10
     );
-    // Known load-emulation bug: this currently returns 10 instead of 20.
+    // Load emulation must follow the normalized pointer, not the invariant initial target.
     assert_eq!(
         runner
             .run(

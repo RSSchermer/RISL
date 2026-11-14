@@ -174,11 +174,10 @@ impl EmulationContext {
     /// sub-graph that does not use variable pointers.
     pub fn emulate_op_load(&mut self, rvsdg: &mut Rvsdg, op_load: Node) {
         let region = rvsdg[op_load].region();
+        let info = self.resolve_reconstruction_info(rvsdg, op_load);
         let data = rvsdg[op_load].expect_op_load();
         let output_ty = data.value_output().ty;
         let state_origin = data.state().unwrap().origin;
-        let ptr_origin = data.ptr_input().origin;
-        let info = self.resolve_reconstruction_info(rvsdg, region, ptr_origin);
 
         let gen_op_load = |rvsdg: &mut Rvsdg,
                            region: Region,
@@ -226,11 +225,10 @@ impl EmulationContext {
     /// sub-graph that does not use variable pointers.
     pub fn emulate_op_store(&mut self, rvsdg: &mut Rvsdg, op_store: Node) {
         let outer_region = rvsdg[op_store].region();
+        let info = self.resolve_reconstruction_info(rvsdg, op_store);
         let data = rvsdg[op_store].expect_op_store();
         let state_origin = data.state().unwrap().origin;
-        let ptr_origin = data.ptr_input().origin;
         let value_input = *data.value_input();
-        let info = self.resolve_reconstruction_info(rvsdg, outer_region, ptr_origin);
 
         let gen_op_store = |rvsdg: &mut Rvsdg,
                             region: Region,
@@ -261,12 +259,16 @@ impl EmulationContext {
     fn resolve_reconstruction_info(
         &mut self,
         rvsdg: &mut Rvsdg,
-        region: Region,
-        origin: ValueOrigin,
+        mem_op: Node,
     ) -> PointerReconstructionInfo {
         use PointerReconstructionError::*;
 
+        let region = rvsdg[mem_op].region();
+
         loop {
+            // Loop normalization may reconnect the pointer input, so reread it on each retry.
+            let origin = rvsdg[mem_op].value_inputs()[0].origin;
+
             match self
                 .reconstruction_context
                 .resolve_reconstruction_info(rvsdg, region, origin)
