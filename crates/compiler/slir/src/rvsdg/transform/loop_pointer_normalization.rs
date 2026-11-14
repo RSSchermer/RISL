@@ -64,19 +64,19 @@
 //! If the argument represents a loop-invariant pointer value, then we add a new shape to a set of
 //! possible shapes. If the argument represents a dependency on another variable pointer-type
 //! loop-value, then we first (recursively) perform the same reverse value-flow analysis on that
-//! loop-value's result. How we treat the variable pointer dependency depends on whether we find a
-//! dependency cycle:
+//! loop-value's result.
 //!
-//! - If there is no dependency cycle, we first generate the shape selectors for the dependency. We
-//!   then treat the dependency similarly to how we treat a loop-invariant dependency, except in
-//!   that we use the output of the shape selectors as the base pointer for the shape, rather than
-//!   the original pointer-type loop-value.
-//! - If there is a dependency cycle, then we combine all shapes for all loop-values that are part
-//!   of the cycle into a single set, such that we assign each shape a consistent index across all
-//!   loop-values that are part of the cycle. Note we still create separate shape selectors and
-//!   separate shape index loop-values (and access parameter loop-values) for each loop-value in the
-//!   cycle. We'll refer to all loop-values that are part of the same dependency cycle as a
-//!   "dependency group".
+//! Only genuine dependency cycles share an encoding: their loop-values form a "dependency group".
+//! Each member still has its own shape index and access parameters. Between groups, we flatten
+//! shapes in dependency order: replace a variable root with each of the dependency's possible
+//! shapes, appending the dependent's access chain. Initial pointer values are represented by
+//! separate invariant loop-values. Consequently, every flattened shape is rooted at an invariant
+//! pointer (or fallback), never at another changing pointer's shape selector.
+//!
+//! Copying between groups translates the dependency's current shape index into the dependent's
+//! shape set and captures its access parameters, followed by any newly applied dynamic indices.
+//! This captures a snapshot rather than observing the dependency's next-iteration state. It also
+//! handles dependencies with different pointer types without normalizing them in a separate pass.
 //!
 //! The shape selectors we generate are not parameterized only by the shape index; if a shape is
 //! refined with dynamic index values, then these index values also need to be passed into the
@@ -101,11 +101,11 @@
 //! parameters used by the shape. How we decide the shape index depends on whether the shape's
 //! originating loop-argument is part of the same dependency group as the current loop-value:
 //!
-//! - If the originating loop-argument is not part of the same dependency group, then we set a
-//!   constant shape index that depends on the position of the shape in the current dependency
-//!   group's shape set. If the shape uses any dynamic index values, then we pass these out as the
-//!   access parameters, in the order they are used to refine the shape. Note that multiple leaves
-//!   may to the same shape.
+//! - For an invariant originating loop-argument (or fallback), we set a constant shape index and
+//!   pass any dynamic indices as access parameters.
+//! - For a variable originating loop-argument outside the dependency group, we switch on its
+//!   current shape index. Each branch emits the index of the composed shape in the destination
+//!   group, and forwards the source shape's parameters followed by the leaf's dynamic indices.
 //! - If the originating loop-argument is part of the same dependency group, then we set the shape
 //!   index to the shape index loop-value that we've created earlier for the depended-upon
 //!   pointer-type loop-value. We likewise set all access parameter loop-values to the corresponding
@@ -283,6 +283,14 @@ impl PointerShape {
             .filter(|access| matches!(access, Access::DynamicElement(..)))
             .count()
     }
+
+    fn refined(&self, access_chain: &[Access]) -> Self {
+        let mut shape = self.clone();
+
+        shape.access_chain.extend_from_slice(access_chain);
+
+        shape
+    }
 }
 
 struct LoopValueInfo {
@@ -383,6 +391,12 @@ impl NormalizerInternal {
             }
         }
 
+        let mut flattened = FxHashSet::default();
+
+        for group in 0..self.dep_groups.len() {
+            self.flatten_group_shapes(group, &mut flattened);
+        }
+
         // Create the new loop-values we use for cross-iteration pointer encoding. For each
         // variable pointer-type loop-value we'll create one new loop-value to store the shape
         // index. Additionally, if the shape-set for the loop-value contains shapes that use
@@ -392,13 +406,13 @@ impl NormalizerInternal {
         // used in the shape that uses the most dynamic index values; there can be only one shape
         // that is active for a given iteration, so the shape index value already disambiguates how
         // these dynamic index values are used.
-        for (loop_value, info) in &mut self.loop_value_info {
+        for info in self.loop_value_info.values_mut() {
             let dep_group_index = info.dep_group.expect("should have been initialized above");
             let dep_group = &self.dep_groups[dep_group_index];
             let initial_shape_index = dep_group
                 .shapes
                 .get_index_of(&PointerShape {
-                    root: PointerShapeRoot::LoopValue(*loop_value),
+                    root: PointerShapeRoot::LoopValue(info.initial_loop_value),
                     root_ptr_ty: info.ty,
                     access_chain: vec![],
                 })
@@ -427,22 +441,13 @@ impl NormalizerInternal {
             info.access_param_loop_values = access_params_start..access_params_end;
         }
 
-        // Create a sequence of shape-selector construction that ensures that shape selectors that
-        // depend on shape selectors for other loop-values are constructed in order.
-        let mut shape_selector_construction_sequence = IndexSet::new();
-        for loop_value in self.loop_value_info.keys() {
-            self.sequence_shape_selector_construction(
-                *loop_value,
-                &mut shape_selector_construction_sequence,
-            );
-        }
+        let jobs = self.loop_value_info.keys().copied().collect::<Vec<_>>();
 
-        for loop_value in shape_selector_construction_sequence {
-            self.construct_shape_selectors(rvsdg, loop_value);
+        for loop_value in &jobs {
+            self.construct_shape_selectors(rvsdg, *loop_value);
         }
 
         // Construct the shape encoders
-        let jobs = self.loop_value_info.keys().copied().collect::<Vec<_>>();
         for loop_value in jobs {
             self.construct_shape_encoder(rvsdg, loop_value);
         }
@@ -622,90 +627,61 @@ impl NormalizerInternal {
         self.dep_groups = dep_groups;
     }
 
-    fn sequence_shape_selector_construction(&self, loop_value: u32, sequence: &mut IndexSet<u32>) {
-        if sequence.contains(&loop_value) {
+    fn flatten_group_shapes(&mut self, group: usize, flattened: &mut FxHashSet<usize>) {
+        if flattened.contains(&group) {
             return;
         }
 
-        let dep_group_index = self.loop_value_info[&loop_value]
-            .dep_group
-            .expect("should have been initialized before calling this function");
-        let dep_group = &self.dep_groups[dep_group_index];
+        let mut shapes = IndexSet::new();
 
-        // Ensure that any dependencies that require shape-selectors and are not part of the same
-        // circular dependency group are sequenced before the current loop-value. This is because
-        // for a dependency that is not part of the same dependency group, we want to use its shape
-        // selector's output as an input to the current loop-value's shape selector.
-        for shape in &dep_group.shapes {
-            let Some(shape_loop_value) = shape.root.loop_value() else {
-                continue;
-            };
-            let requires_shape_selector = self.loop_value_info.contains_key(&shape_loop_value);
-            let same_dep_group = dep_group.loop_values.contains(&shape_loop_value);
+        for mut shape in self.dep_groups[group].shapes.clone() {
+            if let Some(root) = shape.root.loop_value()
+                && let Some(info) = self.loop_value_info.get(&root)
+            {
+                let dependency_group = info.dep_group.unwrap();
 
-            if shape_loop_value != loop_value && requires_shape_selector && !same_dep_group {
-                self.sequence_shape_selector_construction(shape_loop_value, sequence);
+                if dependency_group == group {
+                    // Cyclic dependencies cannot refine a pointer, as this would result in
+                    // recursive type refinement (and we don't allow recursive types).
+                    assert!(shape.access_chain.is_empty());
+
+                    shape.root = PointerShapeRoot::LoopValue(info.initial_loop_value);
+
+                    shapes.insert(shape);
+                } else {
+                    self.flatten_group_shapes(dependency_group, flattened);
+
+                    for dependency_shape in &self.dep_groups[dependency_group].shapes {
+                        shapes.insert(dependency_shape.refined(&shape.access_chain));
+                    }
+                }
+            } else {
+                shapes.insert(shape);
             }
         }
 
-        sequence.insert(loop_value);
+        self.dep_groups[group].param_count =
+            shapes.iter().map(PointerShape::param_count).max().unwrap();
+        self.dep_groups[group].shapes = shapes;
+
+        flattened.insert(group);
     }
 
     fn construct_shape_selectors(&mut self, rvsdg: &mut Rvsdg, loop_value: u32) {
-        let dep_group_index = self.loop_value_info[&loop_value]
-            .dep_group
-            .expect("should have been initialized before calling this function");
-        let dep_group = &self.dep_groups[dep_group_index];
-
         // Construct the shape-selector inside the loop-region to represent the variable pointer
         // value in the current iteration.
         let loop_region = rvsdg[self.loop_node].expect_loop().loop_region();
         let inner_selector =
-            self.construct_shape_selector(rvsdg, loop_value, loop_region, |loop_value| {
-                if let Some(info) = self.loop_value_info.get(&loop_value) {
-                    if !dep_group.loop_values.contains(&loop_value) {
-                        let (inner_selector, _) = info.shape_selectors.expect(
-                            "construction sequencing should ensure this was initialized this earlier",
-                        );
-
-                        ValueOrigin::Output {
-                            producer: inner_selector,
-                            output: 0,
-                        }
-                    } else {
-                        ValueOrigin::Argument(info.initial_loop_value)
-                    }
-                } else {
-                    ValueOrigin::Argument(loop_value)
-                }
-            });
+            self.construct_shape_selector(rvsdg, loop_value, loop_region, ValueOrigin::Argument);
 
         // Construct the shape-selector in the outer region to represent the variable pointer value
         // after the final iteration.
         let outer_region = rvsdg[self.loop_node].region();
         let outer_selector =
             self.construct_shape_selector(rvsdg, loop_value, outer_region, |loop_value| {
-                if let Some(info) = self.loop_value_info.get(&loop_value) {
-                    if !dep_group.loop_values.contains(&loop_value) {
-                        let (_, outer_selector) = info.shape_selectors.expect(
-                            "construction sequencing should ensure this initialized this earlier",
-                        );
-
-                        ValueOrigin::Output {
-                            producer: outer_selector,
-                            output: 0,
-                        }
-                    } else {
-                        ValueOrigin::Output {
-                            producer: self.loop_node,
-                            output: info.initial_loop_value,
-                        }
-                    }
-                } else {
-                    ValueOrigin::Output {
-                        producer: self.loop_node,
-                        output: loop_value,
-                    }
+                ValueOrigin::Output {
+                    producer: self.loop_node,
+                    output: loop_value,
                 }
             });
 
@@ -864,30 +840,18 @@ impl NormalizerInternal {
             let root = PointerShapeRoot::from_leaf_node(rvsdg, leaf);
 
             if let PointerShapeRoot::LoopValue(dep_value) = root
-                && dep_group.loop_values.contains(&dep_value)
+                && let Some(dep_info) = self.loop_value_info.get(&dep_value)
             {
-                // The dependency is part of the same dependency cycle as the current loop-value.
-                // We set the serialization of the loop-value for the next iteration, to the
-                // serialization of the dependency for the current iteration. Note that this also
-                // works if the dependency is the current loop-value itself.
-
-                let dep_info = &self.loop_value_info[&dep_value];
-
                 input_set.insert(ValueOrigin::Argument(dep_info.shape_index_loop_value));
 
                 for access_param in dep_info.access_param_loop_values.clone() {
                     input_set.insert(ValueOrigin::Argument(access_param));
                 }
-            } else {
-                // The dependency is not a circular dependency. We'll need to forward the
-                // runtime-dynamic index values to the next iteration. Note that we don't need the
-                // base pointer value to be available, as we'll use a constant `u32` value to
-                // represent it via its shape index.
+            }
 
-                for access in &leaf.access_chain {
-                    if let Access::DynamicElement(origin) = access {
-                        input_set.insert(*origin);
-                    }
+            for access in &leaf.access_chain {
+                if let Access::DynamicElement(origin) = access {
+                    input_set.insert(*origin);
                 }
             }
         });
@@ -896,6 +860,7 @@ impl NormalizerInternal {
 
         let mut builder = ShapeEncoderBuilder {
             dep_group,
+            dep_groups: &self.dep_groups,
             loop_value_info: &self.loop_value_info,
             rvsdg,
             outer_region: loop_region,
@@ -920,6 +885,7 @@ impl NormalizerInternal {
 
 struct ShapeEncoderBuilder<'a> {
     dep_group: &'a DepGroup,
+    dep_groups: &'a [DepGroup],
     loop_value_info: &'a FxHashMap<u32, LoopValueInfo>,
     rvsdg: &'a mut Rvsdg,
     outer_region: Region,
@@ -1043,10 +1009,8 @@ impl ShapeEncoderBuilder<'_> {
         let root = PointerShapeRoot::from_leaf_node(self.rvsdg, node);
 
         if let PointerShapeRoot::LoopValue(loop_value) = root
-            && self.dep_group.loop_values.contains(&loop_value)
+            && let Some(loop_value_info) = self.loop_value_info.get(&loop_value)
         {
-            let loop_value_info = &self.loop_value_info[&loop_value];
-
             let mut outputs = Vec::new();
 
             let shape_origin = resolve_origin(ValueOrigin::Argument(
@@ -1059,7 +1023,21 @@ impl ShapeEncoderBuilder<'_> {
                 outputs.push(resolve_origin(ValueOrigin::Argument(access_param)));
             }
 
-            outputs
+            if self.dep_group.loop_values.contains(&loop_value) {
+                assert!(node.access_chain.is_empty());
+
+                outputs
+            } else {
+                let source_group = loop_value_info.dep_group.unwrap();
+
+                for access in &node.access_chain {
+                    if let Access::DynamicElement(origin) = access {
+                        outputs.push(resolve_origin(*origin));
+                    }
+                }
+
+                self.translate_dependency_shape(region, source_group, &node.access_chain, &outputs)
+            }
         } else {
             let shape_index = self
                 .dep_group
@@ -1083,6 +1061,101 @@ impl ShapeEncoderBuilder<'_> {
 
             outputs
         }
+    }
+
+    fn translate_dependency_shape(
+        &mut self,
+        region: Region,
+        source_group: usize,
+        access_chain: &[Access],
+        source_encoding: &[ValueOrigin],
+    ) -> Vec<ValueOrigin> {
+        let source_group = &self.dep_groups[source_group];
+        let cases = (0..source_group.shapes.len() - 1).map(|i| BranchCase::from(i as u32));
+        let selector = self.rvsdg.add_op_case_to_branch_selector(
+            region,
+            ValueInput {
+                ty: TY_U32,
+                origin: source_encoding[0],
+            },
+            Int::U32,
+            cases,
+        );
+        let mut inputs = vec![ValueInput::output(TY_PREDICATE, selector, 0)];
+
+        inputs.extend(source_encoding[1..].iter().map(|origin| ValueInput {
+            ty: TY_U32,
+            origin: *origin,
+        }));
+
+        let switch = self.rvsdg.add_switch(
+            region,
+            inputs,
+            vec![ValueOutput::new(TY_U32); self.output_count],
+            None,
+        );
+
+        for shape in &source_group.shapes {
+            let branch = self.rvsdg.add_switch_branch(switch);
+            let refined_shape = shape.refined(access_chain);
+            let shape_index = self
+                .dep_group
+                .shapes
+                .get_index_of(&refined_shape)
+                .expect("flattening should register every composed shape");
+            let index = self.rvsdg.add_const_u32(branch, shape_index as u32);
+
+            self.rvsdg.reconnect_region_result(
+                branch,
+                0,
+                ValueOrigin::Output {
+                    producer: index,
+                    output: 0,
+                },
+            );
+
+            // Source shapes use only a prefix of their group's access parameters. Append the
+            // refinement's indices after that prefix.
+            let params =
+                (0..shape.param_count()).chain(source_group.param_count..source_encoding.len() - 1);
+            let mut result = 1;
+
+            for param in params {
+                self.rvsdg.reconnect_region_result(
+                    branch,
+                    result,
+                    ValueOrigin::Argument(param as u32),
+                );
+
+                result += 1;
+            }
+
+            // The switch node as a whole needs to define enough outputs for the branch with the
+            // largest number of access parameters, but not all shapes may need an equal number of
+            // access parameters. If the current branch covers a shape with fewer than the max
+            // parameters, we'll connect the remaining branch results to fallback values.
+            while (result as usize) < self.output_count {
+                let fallback = self.rvsdg.add_const_fallback(branch, TY_U32);
+
+                self.rvsdg.reconnect_region_result(
+                    branch,
+                    result,
+                    ValueOrigin::Output {
+                        producer: fallback,
+                        output: 0,
+                    },
+                );
+
+                result += 1;
+            }
+        }
+
+        (0..self.output_count)
+            .map(|output| ValueOrigin::Output {
+                producer: switch,
+                output: output as u32,
+            })
+            .collect()
     }
 }
 
@@ -1126,7 +1199,7 @@ fn search_vertex(
 
             vertices[index].update_low_link(vertices[dep_index].low_link);
         } else if vertices[dep_index].on_stack {
-            vertices[index].update_low_link(vertices[dep_index].low_link);
+            vertices[index].update_low_link(vertices[dep_index].visit_index.unwrap());
         }
     }
 
@@ -2359,5 +2432,386 @@ mod tests {
 
         // We trust the shape selector after the outer loop is correct if the shape selector inside
         // the outer loop is correct, as other tests already verify this.
+    }
+
+    #[test]
+    fn normalize_acyclic_pointer_copy_captures_dependency_state() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+        let a = rvsdg.add_op_alloca(region, TY_U32);
+        let b = rvsdg.add_op_alloca(region, TY_U32);
+        let c = rvsdg.add_op_alloca(region, TY_U32);
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(TY_PTR_U32, a, 0),
+                ValueInput::output(TY_PTR_U32, b, 0),
+                ValueInput::output(TY_PTR_U32, c, 0),
+            ],
+            Some(StateOrigin::Argument),
+        );
+
+        let inner_stored_value = rvsdg.add_const_u32(loop_region, 42);
+        let inner_store_a = rvsdg.add_op_store(
+            loop_region,
+            ValueInput::argument(TY_PTR_U32, 0),
+            ValueInput::output(TY_U32, inner_stored_value, 0),
+            StateOrigin::Argument,
+        );
+        let inner_store_b = rvsdg.add_op_store(
+            loop_region,
+            ValueInput::argument(TY_PTR_U32, 1),
+            ValueInput::output(TY_U32, inner_stored_value, 0),
+            StateOrigin::Argument,
+        );
+
+        let reentry = rvsdg.add_const_bool(loop_region, false);
+
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: reentry,
+                output: 0,
+            },
+        );
+        // `a` is replaced by `b`, `b` is replaced by `c`, `c` is loop-invariant.
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(1));
+        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(2));
+        rvsdg.reconnect_region_result(loop_region, 3, ValueOrigin::Argument(2));
+
+        let outer_stored_value = rvsdg.add_const_u32(region, 42);
+        let outer_store_a = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, loop_node, 0),
+            ValueInput::output(TY_U32, outer_stored_value, 0),
+            StateOrigin::Node(loop_node),
+        );
+        let outer_store_b = rvsdg.add_op_store(
+            region,
+            ValueInput::output(TY_PTR_U32, loop_node, 1),
+            ValueInput::output(TY_U32, outer_stored_value, 0),
+            StateOrigin::Node(loop_node),
+        );
+
+        let mut normalizer = VariableLoopPointerNormalizer::new();
+
+        normalizer.normalize_loop_value(&mut rvsdg, loop_node, 0);
+
+        let loop_data = rvsdg[loop_node].expect_loop();
+
+        // Three original pointers, two invariant initial copies, and two shape indices.
+        assert_eq!(loop_data.value_inputs().len(), 7);
+        assert_eq!(loop_data.value_inputs()[3], loop_data.value_inputs()[0]);
+        assert_eq!(loop_data.value_inputs()[4], loop_data.value_inputs()[1]);
+
+        // All pointer loop-values should have become loop-invariant.
+        assert_eq!(
+            rvsdg[loop_region].value_results()[1].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[loop_region].value_results()[2].origin,
+            ValueOrigin::Argument(1)
+        );
+        assert_eq!(
+            rvsdg[loop_region].value_results()[3].origin,
+            ValueOrigin::Argument(2)
+        );
+        assert_eq!(
+            rvsdg[loop_region].value_results()[4].origin,
+            ValueOrigin::Argument(3)
+        );
+        assert_eq!(
+            rvsdg[loop_region].value_results()[5].origin,
+            ValueOrigin::Argument(4)
+        );
+
+        // `a` can select c, initial b, or initial a; `b` can only select c or initial b.
+        let ValueOrigin::Output {
+            producer: initial_shape_a,
+            output: 0,
+        } = loop_data.value_inputs()[5].origin
+        else {
+            panic!("a's shape index should be initialized by a constant")
+        };
+        let ValueOrigin::Output {
+            producer: initial_shape_b,
+            output: 0,
+        } = loop_data.value_inputs()[6].origin
+        else {
+            panic!("b's shape index should be initialized by a constant")
+        };
+
+        assert_eq!(rvsdg[initial_shape_a].expect_const_u32().value(), 2);
+        assert_eq!(rvsdg[initial_shape_b].expect_const_u32().value(), 1);
+
+        // The inner selector for `a` uses its current shape index and invariant roots.
+        let ValueOrigin::Output {
+            producer: inner_selector_a,
+            output: 0,
+        } = rvsdg[inner_store_a].expect_op_store().value_inputs()[0].origin
+        else {
+            panic!("the inner store to a should use the shape-selector output")
+        };
+        let inner_selector_a_data = rvsdg[inner_selector_a].expect_switch();
+        let ValueOrigin::Output {
+            producer: inner_branch_selector_a,
+            output: 0,
+        } = inner_selector_a_data.value_inputs()[0].origin
+        else {
+            panic!("a's inner shape selector should be driven by a branch selector")
+        };
+        let inner_branch_selector_a_data =
+            rvsdg[inner_branch_selector_a].expect_op_case_to_branch_selector();
+
+        assert_eq!(
+            *inner_branch_selector_a_data.value_input(),
+            ValueInput::argument(TY_U32, 5)
+        );
+        assert_eq!(
+            inner_branch_selector_a_data.cases(),
+            [BranchCase::from(0u32), BranchCase::from(1u32)]
+        );
+        assert_eq!(
+            &inner_selector_a_data.value_inputs()[1..],
+            [
+                ValueInput::argument(TY_PTR_U32, 2),
+                ValueInput::argument(TY_PTR_U32, 4),
+                ValueInput::argument(TY_PTR_U32, 3),
+            ]
+        );
+        assert_eq!(inner_selector_a_data.branches().len(), 3);
+        assert_eq!(inner_selector_a_data.value_outputs()[0].ty, TY_PTR_U32);
+        assert_eq!(
+            rvsdg[inner_selector_a_data.branches()[0]].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[inner_selector_a_data.branches()[1]].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+        assert_eq!(
+            rvsdg[inner_selector_a_data.branches()[2]].value_results()[0].origin,
+            ValueOrigin::Argument(2)
+        );
+
+        // The outer selector for `a` uses the final shape index and invariant loop outputs.
+        let ValueOrigin::Output {
+            producer: outer_selector_a,
+            output: 0,
+        } = rvsdg[outer_store_a].expect_op_store().value_inputs()[0].origin
+        else {
+            panic!("the outer store to a should use the shape-selector output")
+        };
+        let outer_selector_a_data = rvsdg[outer_selector_a].expect_switch();
+        let ValueOrigin::Output {
+            producer: outer_branch_selector_a,
+            output: 0,
+        } = outer_selector_a_data.value_inputs()[0].origin
+        else {
+            panic!("a's outer shape selector should be driven by a branch selector")
+        };
+        let outer_branch_selector_a_data =
+            rvsdg[outer_branch_selector_a].expect_op_case_to_branch_selector();
+
+        assert_eq!(
+            *outer_branch_selector_a_data.value_input(),
+            ValueInput::output(TY_U32, loop_node, 5)
+        );
+        assert_eq!(
+            outer_branch_selector_a_data.cases(),
+            [BranchCase::from(0u32), BranchCase::from(1u32)]
+        );
+        assert_eq!(
+            &outer_selector_a_data.value_inputs()[1..],
+            [
+                ValueInput::output(TY_PTR_U32, loop_node, 2),
+                ValueInput::output(TY_PTR_U32, loop_node, 4),
+                ValueInput::output(TY_PTR_U32, loop_node, 3),
+            ]
+        );
+        assert_eq!(outer_selector_a_data.branches().len(), 3);
+        assert_eq!(outer_selector_a_data.value_outputs()[0].ty, TY_PTR_U32);
+        assert_eq!(
+            rvsdg[outer_selector_a_data.branches()[0]].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[outer_selector_a_data.branches()[1]].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+        assert_eq!(
+            rvsdg[outer_selector_a_data.branches()[2]].value_results()[0].origin,
+            ValueOrigin::Argument(2)
+        );
+
+        // The inner selector for `b` uses its own current shape index and two roots.
+        let ValueOrigin::Output {
+            producer: inner_selector_b,
+            output: 0,
+        } = rvsdg[inner_store_b].expect_op_store().value_inputs()[0].origin
+        else {
+            panic!("the inner store to b should use the shape-selector output")
+        };
+        let inner_selector_b_data = rvsdg[inner_selector_b].expect_switch();
+        let ValueOrigin::Output {
+            producer: inner_branch_selector_b,
+            output: 0,
+        } = inner_selector_b_data.value_inputs()[0].origin
+        else {
+            panic!("b's inner shape selector should be driven by a branch selector")
+        };
+        let inner_branch_selector_b_data =
+            rvsdg[inner_branch_selector_b].expect_op_case_to_branch_selector();
+
+        assert_eq!(
+            *inner_branch_selector_b_data.value_input(),
+            ValueInput::argument(TY_U32, 6)
+        );
+        assert_eq!(
+            inner_branch_selector_b_data.cases(),
+            [BranchCase::from(0u32)]
+        );
+        assert_eq!(
+            &inner_selector_b_data.value_inputs()[1..],
+            [
+                ValueInput::argument(TY_PTR_U32, 2),
+                ValueInput::argument(TY_PTR_U32, 4),
+            ]
+        );
+        assert_eq!(inner_selector_b_data.branches().len(), 2);
+        assert_eq!(inner_selector_b_data.value_outputs()[0].ty, TY_PTR_U32);
+        assert_eq!(
+            rvsdg[inner_selector_b_data.branches()[0]].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[inner_selector_b_data.branches()[1]].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+
+        // The outer selector for `b` uses its own final shape index and loop outputs.
+        let ValueOrigin::Output {
+            producer: outer_selector_b,
+            output: 0,
+        } = rvsdg[outer_store_b].expect_op_store().value_inputs()[0].origin
+        else {
+            panic!("the outer store to b should use the shape-selector output")
+        };
+        let outer_selector_b_data = rvsdg[outer_selector_b].expect_switch();
+        let ValueOrigin::Output {
+            producer: outer_branch_selector_b,
+            output: 0,
+        } = outer_selector_b_data.value_inputs()[0].origin
+        else {
+            panic!("b's outer shape selector should be driven by a branch selector")
+        };
+        let outer_branch_selector_b_data =
+            rvsdg[outer_branch_selector_b].expect_op_case_to_branch_selector();
+
+        assert_eq!(
+            *outer_branch_selector_b_data.value_input(),
+            ValueInput::output(TY_U32, loop_node, 6)
+        );
+        assert_eq!(
+            outer_branch_selector_b_data.cases(),
+            [BranchCase::from(0u32)]
+        );
+        assert_eq!(
+            &outer_selector_b_data.value_inputs()[1..],
+            [
+                ValueInput::output(TY_PTR_U32, loop_node, 2),
+                ValueInput::output(TY_PTR_U32, loop_node, 4),
+            ]
+        );
+        assert_eq!(outer_selector_b_data.branches().len(), 2);
+        assert_eq!(outer_selector_b_data.value_outputs()[0].ty, TY_PTR_U32);
+        assert_eq!(
+            rvsdg[outer_selector_b_data.branches()[0]].value_results()[0].origin,
+            ValueOrigin::Argument(0)
+        );
+        assert_eq!(
+            rvsdg[outer_selector_b_data.branches()[1]].value_results()[0].origin,
+            ValueOrigin::Argument(1)
+        );
+
+        // The shape encoder for `a`.
+        let ValueOrigin::Output {
+            producer: encoder,
+            output: 0,
+        } = rvsdg[loop_region].value_results()[6].origin
+        else {
+            panic!("expected a shape translation switch");
+        };
+        let encoder_data = rvsdg[encoder].expect_switch();
+
+        assert_eq!(encoder_data.value_inputs().len(), 1);
+        assert_eq!(encoder_data.value_outputs().len(), 1);
+        assert_eq!(encoder_data.value_outputs()[0].ty, TY_U32);
+        assert_eq!(encoder_data.branches().len(), 2);
+
+        let ValueOrigin::Output {
+            producer: selector,
+            output: 0,
+        } = encoder_data.value_inputs()[0].origin
+        else {
+            panic!("expected a shape index selector");
+        };
+        let selector_data = rvsdg[selector].expect_op_case_to_branch_selector();
+
+        assert_eq!(
+            *selector_data.value_input(),
+            ValueInput::argument(TY_U32, 6)
+        );
+        assert_eq!(selector_data.cases(), [BranchCase::from(0u32)]);
+
+        let ValueOrigin::Output {
+            producer: translated_shape_c,
+            output: 0,
+        } = rvsdg[encoder_data.branches()[0]].value_results()[0].origin
+        else {
+            panic!("expected a constant translated shape index for c");
+        };
+        assert_eq!(rvsdg[translated_shape_c].expect_const_u32().value(), 0);
+
+        let ValueOrigin::Output {
+            producer: translated_shape_initial_b,
+            output: 0,
+        } = rvsdg[encoder_data.branches()[1]].value_results()[0].origin
+        else {
+            panic!("expected a constant translated shape index for initial b");
+        };
+        assert_eq!(
+            rvsdg[translated_shape_initial_b].expect_const_u32().value(),
+            1
+        );
+
+        // The shape encoder for `b` (just a constant, since `b` is always set to `c`).
+        let ValueOrigin::Output {
+            producer: b_next_shape,
+            output: 0,
+        } = rvsdg[loop_region].value_results()[7].origin
+        else {
+            panic!("b's next shape index should be a constant")
+        };
+
+        assert_eq!(rvsdg[b_next_shape].expect_const_u32().value(), 0);
     }
 }
