@@ -6,6 +6,7 @@ pub mod chain;
 pub mod cycle;
 pub mod enumerate;
 pub mod filter;
+pub mod flat_map;
 
 // The body of this shim is identical to the body of the regular Rust `core` version. We still have
 // to shim this function, because of MIR optimizations performed by rustc when compiling core/std.
