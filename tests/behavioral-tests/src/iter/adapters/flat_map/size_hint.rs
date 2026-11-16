@@ -98,7 +98,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             mapper_calls: 2,
         }
     );
-    // Advancing to both the front and back inner discovers sums the guaranteed items.
+    // Advancing to both the front and back inner sums the guaranteed items.
     assert_eq!(
         runner.run(a, b, 1, 1).await?,
         Results {
