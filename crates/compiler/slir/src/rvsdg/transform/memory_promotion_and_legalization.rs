@@ -322,13 +322,14 @@ impl PointerAnalyzer {
                     PointerTrace::Alloca(node)
                 }
             }
-            Simple(OpLoad(_) | OpExtractField(_) | OpExtractElement(_)) => {
-                // We won't try to trace a pointer value through mem-ops or aggregate extractions.
-                // The alloca holding an aggregate is not the root of a pointer extracted from it.
-                // Dependent mem-ops must wait until promotion or scalar replacement exposes that
-                // root. Since we don't know which OpAlloca (if any) the pointer originates from,
-                // we block all allocas with matching pointee types this round: an alloca can only
-                // be promoted if *all* mem-ops to/from it can be promoted in the same round.
+            Simple(OpLoad(_) | OpExtractField(_) | OpExtractElement(_) | Reaggregation(_)) => {
+                // We won't try to trace a pointer value through mem-ops, aggregate extractions,
+                // or pending reaggregations. The alloca holding an aggregate is not the root of a
+                // pointer extracted from it. Dependent mem-ops must wait until promotion or scalar
+                // replacement exposes that root. Since we don't know which OpAlloca (if any) the
+                // pointer originates from, we block all allocas with matching pointee types this
+                // round: an alloca can only be promoted if *all* mem-ops to/from it can be promoted
+                // in the same round.
                 //
                 // See also comment on the `blocked_types` field.
 
