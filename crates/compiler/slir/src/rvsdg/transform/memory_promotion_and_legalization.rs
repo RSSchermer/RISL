@@ -938,8 +938,10 @@ impl MemoryPromoterLegalizer {
         while let Some(owner) = self.owner_stack.pop() {
             // Ensure the value is available to the region(s) inside the `owner`.
 
-            let outer_region = rvsdg[owner].region();
-            let ty = rvsdg.value_origin_ty(outer_region, origin);
+            // Use the alloca's stored type when creating region inputs. The current `origin` may
+            // have a different, coercible type (e.g. an array pointer), which later stored values
+            // need not share.
+            let ty = rvsdg[op_alloca].expect_op_alloca().ty();
 
             origin = match rvsdg[owner].kind() {
                 NodeKind::Switch(_) => {
@@ -2824,6 +2826,129 @@ mod tests {
             &thin_set![ValueUser::Result(0)],
             "the first branch of the emulation node should connect the store-value-1 argument to \
             the region result"
+        );
+    }
+
+    #[test]
+    fn test_promote_array_pointer_coerced_to_slice_inside_loop() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+        let array_ty = module.ty.register(TypeKind::Array {
+            element_ty: TY_U32,
+            count: 5,
+            stride: 4,
+        });
+        let slice_ty = module.ty.register(TypeKind::Slice {
+            element_ty: TY_U32,
+            stride: 4,
+        });
+        let ptr_array_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let ptr_slice_ty = module.ty.register(TypeKind::Ptr(slice_ty));
+        let ptr_ptr_slice_ty = module.ty.register(TypeKind::Ptr(ptr_slice_ty));
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![
+                    FnArg {
+                        ty: ptr_array_ty,
+                        shader_io_binding: None,
+                    },
+                    FnArg {
+                        ty: ptr_slice_ty,
+                        shader_io_binding: None,
+                    },
+                ],
+                ret_ty: Some(ptr_slice_ty),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let alloca = rvsdg.add_op_alloca(region, ptr_slice_ty);
+        let initial_store = rvsdg.add_op_store(
+            region,
+            ValueInput::output(ptr_ptr_slice_ty, alloca, 0),
+            ValueInput::argument(ptr_slice_ty, 0),
+            StateOrigin::Argument,
+        );
+        let (loop_node, loop_region) = rvsdg.add_loop(
+            region,
+            vec![
+                ValueInput::output(ptr_ptr_slice_ty, alloca, 0),
+                ValueInput::argument(ptr_slice_ty, 1),
+            ],
+            Some(StateOrigin::Node(initial_store)),
+        );
+        let load = rvsdg.add_op_load(
+            loop_region,
+            ValueInput::argument(ptr_ptr_slice_ty, 0),
+            StateOrigin::Argument,
+        );
+        let store = rvsdg.add_op_store(
+            loop_region,
+            ValueInput::argument(ptr_ptr_slice_ty, 0),
+            ValueInput::argument(ptr_slice_ty, 1),
+            StateOrigin::Node(load),
+        );
+        let stop = rvsdg.add_const_bool(loop_region, false);
+
+        rvsdg.reconnect_region_result(
+            loop_region,
+            0,
+            ValueOrigin::Output {
+                producer: stop,
+                output: 0,
+            },
+        );
+        rvsdg.reconnect_region_result(loop_region, 1, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(loop_region, 2, ValueOrigin::Argument(1));
+
+        let final_load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(ptr_ptr_slice_ty, alloca, 0),
+            StateOrigin::Node(loop_node),
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: final_load,
+                output: 0,
+            },
+        );
+
+        let mut promoter_legalizer = MemoryPromoterLegalizer::new();
+
+        promoter_legalizer.promote_and_legalize(&mut rvsdg, region);
+
+        assert!(!rvsdg.is_live_node(initial_store));
+        assert!(!rvsdg.is_live_node(load));
+        assert!(!rvsdg.is_live_node(store));
+        assert!(!rvsdg.is_live_node(final_load));
+
+        assert_eq!(
+            rvsdg[loop_node].value_inputs()[2],
+            ValueInput::argument(ptr_slice_ty, 0),
+            "the new loop input must use the stored slice type, not the initial array pointer type"
+        );
+        assert_eq!(rvsdg[loop_region].value_arguments()[2].ty, ptr_slice_ty);
+        assert_eq!(
+            rvsdg[loop_region].value_results()[3],
+            ValueInput::argument(ptr_slice_ty, 1),
+            "the backedge must accept a slice pointer stored later in the loop"
+        );
+        assert_eq!(
+            rvsdg[region].value_results()[0],
+            ValueInput::output(ptr_slice_ty, loop_node, 2)
         );
     }
 }
