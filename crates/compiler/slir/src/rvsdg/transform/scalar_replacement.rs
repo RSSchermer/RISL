@@ -185,6 +185,7 @@ use internment::Intern;
 use rustc_hash::FxHashSet;
 
 use crate::rvsdg::analyse::element_index::ElementIndex;
+use crate::rvsdg::analyse::value_resolution::{ResolvedValue, resolve_value};
 use crate::rvsdg::transform::enum_replacement::{
     ConstEnumReplacement, ConstEnumReplacementKind, replace_enum_alloca,
     replace_enum_const_fallback, replace_enum_constant_dependency,
@@ -1473,10 +1474,10 @@ impl Replacer<'_, '_, '_> {
         let node_data = self.rvsdg[node].expect_switch();
 
         // We'll only split the output if all branches are ready, that is, all corresponding results
-        // receive their input from a Reaggregation node. We'll combine that with resolving the part
-        // count (the maximum number of parts across all Reaggregation nodes), which saves us
-        // having to iterate over the branches again later. The `part_count` below being `Some`
-        // afterward indicates that we're ready to proceed with the split.
+        // receive their input from a Reaggregation node or a fallback value. We'll combine that
+        // with resolving the part count (the maximum number of parts across all Reaggregation
+        // nodes), which saves us having to iterate over the branches again later. The `part_count`
+        // below being `Some` afterward indicates that we're ready to proceed with the split.
         let mut part_count = Some(0);
         for branch in node_data.branches() {
             let result_origin = self.rvsdg[*branch].value_results()[output as usize].origin;
@@ -1488,7 +1489,7 @@ impl Replacer<'_, '_, '_> {
                 && let Simple(Reaggregation(n)) = self.rvsdg[producer].kind()
             {
                 part_count = Some(usize::max(part_count.unwrap_or(0), n.parts().len()));
-            } else {
+            } else if resolve_value(self.rvsdg, *branch, result_origin) != ResolvedValue::Fallback {
                 part_count = None;
 
                 break;
@@ -1533,6 +1534,23 @@ impl Replacer<'_, '_, '_> {
             for branch in 0..branch_count {
                 let branch = self.rvsdg[node].expect_switch().branches()[branch];
                 let result_origin = self.rvsdg[branch].value_results()[output as usize].origin;
+
+                // Fallback slice pointers have no array length to split. Once the other branches
+                // determine the part count, each of their parts can be a fallback of the part type.
+                if resolve_value(self.rvsdg, branch, result_origin) == ResolvedValue::Fallback {
+                    for part_result in part_result_start..part_result_end {
+                        let input = self.add_fallback_part(branch, part_ty);
+
+                        self.rvsdg.reconnect_region_result(
+                            branch,
+                            part_result as u32,
+                            input.origin,
+                        );
+                    }
+
+                    continue;
+                }
+
                 let ValueOrigin::Output {
                     producer: reaggregation_node,
                     output: 0,
@@ -3716,5 +3734,141 @@ mod tests {
 
         assert!(!rvsdg.is_live_node(fallback));
         assert!(!rvsdg.is_live_node(discriminant));
+    }
+
+    #[test]
+    fn test_scalar_replace_slice_switch_with_fallback_branch() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: module.name,
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_PREDICATE,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_PTR_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let array_ty = module.ty.register(TypeKind::Array {
+            element_ty: TY_PTR_U32,
+            count: 2,
+            stride: 8,
+        });
+        let slice_ty = module.ty.register(TypeKind::Slice {
+            element_ty: TY_PTR_U32,
+            stride: 8,
+        });
+        let ptr_array_ty = module.ty.register(TypeKind::Ptr(array_ty));
+        let ptr_slice_ty = module.ty.register(TypeKind::Ptr(slice_ty));
+        let ptr_ptr_u32_ty = module.ty.register(TypeKind::Ptr(TY_PTR_U32));
+
+        let alloca = rvsdg.add_op_alloca(region, array_ty);
+        let fallback = rvsdg.add_const_fallback(region, ptr_slice_ty);
+        let switch = rvsdg.add_switch(
+            region,
+            vec![
+                ValueInput::argument(TY_PREDICATE, 0),
+                ValueInput::output(ptr_array_ty, alloca, 0),
+                ValueInput::output(ptr_slice_ty, fallback, 0),
+            ],
+            vec![ValueOutput::new(ptr_slice_ty)],
+            None,
+        );
+        let real_branch = rvsdg.add_switch_branch(switch);
+        let fallback_branch = rvsdg.add_switch_branch(switch);
+
+        rvsdg.reconnect_region_result(real_branch, 0, ValueOrigin::Argument(0));
+        rvsdg.reconnect_region_result(fallback_branch, 0, ValueOrigin::Argument(1));
+
+        let index = rvsdg.add_const_u32(region, 1);
+        let element = rvsdg.add_op_element_ptr(
+            region,
+            ValueInput::output(ptr_slice_ty, switch, 0),
+            ValueInput::output(TY_U32, index, 0),
+        );
+        let load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(ptr_ptr_u32_ty, element, 0),
+            StateOrigin::Argument,
+        );
+
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: load,
+                output: 0,
+            },
+        );
+
+        let mut cx = AggregateReplacementContext::new();
+        let mut rcx = cx.for_region(&rvsdg, region);
+
+        assert!(rcx.replace(&mut module, &mut rvsdg));
+
+        assert_eq!(rvsdg[switch].value_outputs().len(), 3);
+        assert_eq!(
+            *rvsdg[load].expect_op_load().ptr_input(),
+            ValueInput::output(ptr_ptr_u32_ty, switch, 2),
+            "the load should select the split second element rather than the original slice"
+        );
+
+        assert_eq!(
+            rvsdg[real_branch].value_results()[1],
+            ValueInput::argument(ptr_ptr_u32_ty, 2)
+        );
+        assert_eq!(
+            rvsdg[real_branch].value_results()[2],
+            ValueInput::argument(ptr_ptr_u32_ty, 3)
+        );
+
+        let ValueOrigin::Output {
+            producer: first,
+            output: 0,
+        } = rvsdg[switch].value_inputs()[3].origin
+        else {
+            panic!("expected a split alloca pointer")
+        };
+        let ValueOrigin::Output {
+            producer: second,
+            output: 0,
+        } = rvsdg[switch].value_inputs()[4].origin
+        else {
+            panic!("expected a split alloca pointer")
+        };
+
+        assert_eq!(rvsdg[first].expect_op_alloca().ty(), TY_PTR_U32);
+        assert_eq!(rvsdg[second].expect_op_alloca().ty(), TY_PTR_U32);
+        assert_ne!(first, second);
+
+        let ValueOrigin::Output {
+            producer: first,
+            output: 0,
+        } = rvsdg[fallback_branch].value_results()[1].origin
+        else {
+            panic!("expected a fallback pointer")
+        };
+        let ValueOrigin::Output {
+            producer: second,
+            output: 0,
+        } = rvsdg[fallback_branch].value_results()[2].origin
+        else {
+            panic!("expected a fallback pointer")
+        };
+
+        assert_eq!(rvsdg[first].expect_const_fallback().ty(), ptr_ptr_u32_ty);
+        assert_eq!(rvsdg[second].expect_const_fallback().ty(), ptr_ptr_u32_ty);
     }
 }
