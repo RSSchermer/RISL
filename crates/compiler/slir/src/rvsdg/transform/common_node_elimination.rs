@@ -18,6 +18,8 @@ enum SimpleNodeMetadata {
     ConstFallback(Type),
     OpExtractField(u32),
     OpExtractElement,
+    OpExtractDiscriminant,
+    OpExtractVariant(u32),
     OpFieldPtr(u32),
     OpElementPtr,
     OpDiscriminantPtr,
@@ -84,6 +86,10 @@ impl SimpleNodeMetadata {
             SimpleNode::ConstFallback(n) => SimpleNodeMetadata::ConstFallback(n.ty()),
             SimpleNode::OpExtractField(n) => SimpleNodeMetadata::OpExtractField(n.field_index()),
             SimpleNode::OpExtractElement(_) => SimpleNodeMetadata::OpExtractElement,
+            SimpleNode::OpExtractDiscriminant(_) => SimpleNodeMetadata::OpExtractDiscriminant,
+            SimpleNode::OpExtractVariant(n) => {
+                SimpleNodeMetadata::OpExtractVariant(n.variant_index())
+            }
             SimpleNode::OpFieldPtr(n) => SimpleNodeMetadata::OpFieldPtr(n.field_index()),
             SimpleNode::OpElementPtr(_) => SimpleNodeMetadata::OpElementPtr,
             SimpleNode::OpDiscriminantPtr(_) => SimpleNodeMetadata::OpDiscriminantPtr,

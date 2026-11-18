@@ -999,6 +999,10 @@ impl NodeLayout {
                     NodeContent::PlainText(format!("field:{}", op.field_index()).into())
                 }
                 SimpleNode::OpExtractElement(_) => NodeContent::PlainText("element".into()),
+                SimpleNode::OpExtractDiscriminant(_) => NodeContent::PlainText("discr".into()),
+                SimpleNode::OpExtractVariant(op) => {
+                    NodeContent::PlainText(format!("variant:{}", op.variant_index()).into())
+                }
                 SimpleNode::OpCall(op) => {
                     NodeContent::FnCall("call".into(), op.resolve_fn(rvsdg.ty()))
                 }

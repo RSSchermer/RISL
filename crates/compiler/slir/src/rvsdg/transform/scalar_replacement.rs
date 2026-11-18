@@ -474,6 +474,8 @@ impl ValueFlowVisitor for JobAnalyzer {
             Simple(OpStore(_))
             | Simple(OpExtractField(_))
             | Simple(OpExtractElement(_))
+            | Simple(OpExtractDiscriminant(_))
+            | Simple(OpExtractVariant(_))
             | Simple(OpFieldPtr(_))
             | Simple(OpElementPtr(_))
             | Simple(OpVariantPtr(_))

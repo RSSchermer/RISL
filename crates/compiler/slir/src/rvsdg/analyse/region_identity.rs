@@ -235,6 +235,10 @@ impl RegionIdentityChecker {
             (OpStore(n0), OpStore(n1)) => n0.intrinsic() == n1.intrinsic(),
             (OpExtractField(n0), OpExtractField(n1)) => n0.intrinsic() == n1.intrinsic(),
             (OpExtractElement(n0), OpExtractElement(n1)) => n0.intrinsic() == n1.intrinsic(),
+            (OpExtractDiscriminant(n0), OpExtractDiscriminant(n1)) => {
+                n0.intrinsic() == n1.intrinsic()
+            }
+            (OpExtractVariant(n0), OpExtractVariant(n1)) => n0.intrinsic() == n1.intrinsic(),
             (OpFieldPtr(n0), OpFieldPtr(n1)) => n0.intrinsic() == n1.intrinsic(),
             (OpElementPtr(n0), OpElementPtr(n1)) => n0.intrinsic() == n1.intrinsic(),
             (OpDiscriminantPtr(n0), OpDiscriminantPtr(n1)) => n0.intrinsic() == n1.intrinsic(),

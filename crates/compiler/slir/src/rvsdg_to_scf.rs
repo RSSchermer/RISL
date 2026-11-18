@@ -368,6 +368,10 @@ impl<'a, 'b, 'c> RegionVisitor<'a, 'b, 'c> {
                 "all fallback-value nodes should be eliminated from the RVSDG IR before converting \
                 to SCF IR"
             ),
+            OpExtractDiscriminant(_) | OpExtractVariant(_) => panic!(
+                "all enum value extraction nodes should be eliminated from the RVSDG IR before \
+                converting to SCF IR"
+            ),
             _ => {
                 panic!(
                     "node kind `{:?}` not currently supported by SLIR's structured control-flow \

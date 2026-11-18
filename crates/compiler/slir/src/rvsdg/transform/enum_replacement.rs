@@ -8,8 +8,6 @@
 //! our target shader languages. By splitting an enum into its parts, we can then replace uses of
 //! the enum with uses of its parts.
 
-use std::iter;
-
 use internment::Intern;
 
 use crate::rvsdg::{
@@ -486,11 +484,45 @@ impl<'a> EnumReplacer<'a> {
                 self.elide_op_discriminant_ptr(node, discriminant_input)
             }
             Simple(OpVariantPtr(_)) => self.elide_op_variant_ptr(node, variant_inputs),
+            Simple(OpExtractDiscriminant(_)) => {
+                self.elide_op_extract_discriminant(node, discriminant_input)
+            }
+            Simple(OpExtractVariant(_)) => self.elide_op_extract_variant(node, variant_inputs),
             Simple(ValueProxy(_)) => {
                 self.visit_value_proxy(node, discriminant_input, variant_inputs, with_replacements)
             }
             _ => unreachable!("node kind cannot take a pointer to or a copy of an enum as input"),
         }
+    }
+
+    fn elide_op_extract_discriminant(&mut self, node: Node, discriminant_input: ValueInput) {
+        let region = self.rvsdg[node].region();
+        let user_count = self.rvsdg[node].value_outputs()[0].users.len();
+
+        for i in (0..user_count).rev() {
+            let user = self.rvsdg[node].value_outputs()[0].users[i];
+
+            self.rvsdg
+                .reconnect_value_user(region, user, discriminant_input.origin);
+        }
+
+        self.rvsdg.remove_node(node);
+    }
+
+    fn elide_op_extract_variant(&mut self, node: Node, variant_inputs: &[VariantInput]) {
+        let region = self.rvsdg[node].region();
+        let variant_index = self.rvsdg[node].expect_op_extract_variant().variant_index();
+        let new_user_origin = variant_inputs[variant_index as usize].input.origin;
+        let user_count = self.rvsdg[node].value_outputs()[0].users.len();
+
+        for i in (0..user_count).rev() {
+            let user = self.rvsdg[node].value_outputs()[0].users[i];
+
+            self.rvsdg
+                .reconnect_value_user(region, user, new_user_origin);
+        }
+
+        self.rvsdg.remove_node(node);
     }
 
     fn elide_op_discriminant_ptr(&mut self, node: Node, discriminant_input: ValueInput) {
@@ -692,108 +724,93 @@ impl<'a> EnumReplacer<'a> {
             .origin;
         let node_data = node_data.expect_op_store();
         let ptr_input = *node_data.ptr_input();
+        let value_input = *node_data.value_input();
 
-        if input == 0 {
-            // If we reach the OpStore node via its pointer-input, then we defer the splitting
-            // until it gets reached via its value-input later. This is because SLIR does not
-            // expose nodes that allow us to extract the parts of an enum value that is not behind
-            // a pointer.
-            return self.defer_split_op_store(
-                region,
-                node,
-                ptr_input,
+        let (discriminant_ptr, variant_ptrs, discriminant_value, variant_values) = if input == 0 {
+            let (discriminant_value, variant_values) =
+                self.split_op_store_value_input(region, node, value_input);
+
+            (
                 discriminant_input,
-                variant_inputs,
-            );
-        }
+                variant_inputs.to_vec(),
+                discriminant_value,
+                variant_values,
+            )
+        } else {
+            let (discriminant_ptr, variant_ptrs) =
+                self.split_op_store_ptr_input(region, node, ptr_input);
 
-        // We've reached this OpStore via its value-input. In this case we can proceed with actually
-        // splitting the OpStore node.
-
-        let (discriminant_ptr, variant_ptrs) =
-            self.split_op_store_ptr_input(region, node, ptr_input);
+            (
+                discriminant_ptr,
+                variant_ptrs,
+                discriminant_input,
+                variant_inputs.to_vec(),
+            )
+        };
 
         assert_eq!(
             variant_ptrs.len(),
-            variant_inputs.len(),
+            variant_values.len(),
             "split pointer/value arity should match when splitting OpStore"
         );
 
         // Reverse iteration keeps state-chain order intuitive.
-        for (pointer, value) in variant_ptrs.iter().zip(variant_inputs).rev() {
-            // We only add store operations for active variants; storing inactive variants would be
-            // UB.
-            if value.kind == VariantActivity::MaybeActive {
+        for (pointer, value) in variant_ptrs.iter().zip(&variant_values).rev() {
+            // Skip stores for known inactive variants.
+            if pointer.kind == VariantActivity::MaybeActive
+                && value.kind == VariantActivity::MaybeActive
+            {
                 self.rvsdg
                     .add_op_store(region, pointer.input, value.input, state_origin);
             }
         }
 
         self.rvsdg
-            .add_op_store(region, discriminant_ptr, discriminant_input, state_origin);
+            .add_op_store(region, discriminant_ptr, discriminant_value, state_origin);
 
         self.rvsdg.remove_node(node);
     }
 
-    fn defer_split_op_store(
+    fn split_op_store_value_input(
         &mut self,
         region: Region,
-        node: Node,
-        ptr_input: ValueInput,
-        discriminant_input: ValueInput,
-        variant_inputs: &[VariantInput],
-    ) {
-        let synthetic_original_node = self.rvsdg.add_const_fallback(region, ptr_input.ty);
-        let synthetic_original = ValueInput {
-            ty: ptr_input.ty,
-            origin: ValueOrigin::Output {
-                producer: synthetic_original_node,
-                output: 0,
-            },
-        };
-        let value_inputs =
-            iter::once(discriminant_input).chain(variant_inputs.iter().map(|input| input.input));
-        let reaggregation = self
-            .rvsdg
-            .add_reaggregation(region, synthetic_original, value_inputs);
-
-        self.rvsdg.reconnect_value_input(
-            node,
-            0,
-            ValueOrigin::Output {
-                producer: reaggregation,
-                output: 0,
+        store_node: Node,
+        mut value_input: ValueInput,
+    ) -> (ValueInput, Vec<VariantInput>) {
+        // Defensively proxy the value origin, as we don't want to add more users to a user-set that
+        // is potentially being iterated over. We instead add the new users to the new proxy output.
+        let proxy = self.rvsdg.proxy_origin_user(
+            region,
+            value_input.ty,
+            value_input.origin,
+            ValueUser::Input {
+                consumer: store_node,
+                input: 1,
             },
         );
-    }
-
-    fn reaggregation_from_origin(&self, origin: ValueOrigin) -> Option<Node> {
-        let ValueOrigin::Output {
-            producer,
+        value_input.origin = ValueOrigin::Output {
+            producer: proxy,
             output: 0,
-        } = origin
-        else {
-            return None;
         };
 
-        if self.rvsdg[producer].is_reaggregation() {
-            return Some(producer);
+        let discriminant = self.rvsdg.add_op_extract_discriminant(region, value_input);
+        let discr_ty = self.rvsdg[discriminant].value_outputs()[0].ty;
+        let discriminant_input = ValueInput::output(discr_ty, discriminant, 0);
+        let variant_count = self.ty.kind(self.enum_ty).expect_enum().variants.len();
+        let mut variant_inputs = Vec::with_capacity(variant_count);
+
+        for i in 0..variant_count {
+            let variant = self
+                .rvsdg
+                .add_op_extract_variant(region, value_input, i as u32);
+            let variant_ty = self.rvsdg[variant].value_outputs()[0].ty;
+
+            variant_inputs.push(VariantInput::maybe_active(ValueInput::output(
+                variant_ty, variant, 0,
+            )));
         }
 
-        if self.rvsdg[producer].is_value_proxy() {
-            let proxied_origin = self.rvsdg[producer].expect_value_proxy().input().origin;
-
-            if let ValueOrigin::Output {
-                producer: reaggregation,
-                output: 0,
-            } = proxied_origin
-                && self.rvsdg[reaggregation].is_reaggregation()
-            {
-                return Some(reaggregation);
-            }
-        }
-
-        None
+        (discriminant_input, variant_inputs)
     }
 
     fn split_op_store_ptr_input(
@@ -802,36 +819,6 @@ impl<'a> EnumReplacer<'a> {
         store_node: Node,
         mut ptr_input: ValueInput,
     ) -> (ValueInput, Vec<VariantInput>) {
-        if let Some(reaggregation_node) = self.reaggregation_from_origin(ptr_input.origin) {
-            if let ValueOrigin::Output {
-                producer: proxy,
-                output: 0,
-            } = ptr_input.origin
-                && self.rvsdg[proxy].is_value_proxy()
-            {
-                self.rvsdg.dissolve_value_proxy(proxy);
-            }
-
-            let parts = self.rvsdg[reaggregation_node]
-                .expect_reaggregation()
-                .parts()
-                .to_vec();
-            self.rvsdg.dissolve_reaggregation(reaggregation_node);
-
-            let (discriminant_input, variant_inputs) = parts
-                .split_first()
-                .expect("reaggregated enum pointers include a discriminant pointer");
-
-            return (
-                *discriminant_input,
-                variant_inputs
-                    .iter()
-                    .copied()
-                    .map(VariantInput::maybe_active)
-                    .collect(),
-            );
-        }
-
         // Defensively proxy the pointer origin, as we don't want to add more users to a user-set
         // that is potentially being iterated over. We instead add the new users to the new proxy
         // output.

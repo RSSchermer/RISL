@@ -620,6 +620,8 @@ impl NodeData {
         OpElementPtr is_op_element_ptr expect_op_element_ptr "a `element-pointer` operation",
         OpExtractField is_op_extract_field expect_op_extract_field "an `extract-field` operation",
         OpExtractElement is_op_extract_element expect_op_extract_element "an `extract-element` operation",
+        OpExtractDiscriminant is_op_extract_discriminant expect_op_extract_discriminant "an `extract-discriminant` operation",
+        OpExtractVariant is_op_extract_variant expect_op_extract_variant "an `extract-variant` operation",
         OpDiscriminantPtr is_op_discriminant_ptr expect_op_discriminant_ptr "a `discriminant-pointer` operation",
         OpVariantPtr is_op_variant_ptr expect_op_variant_ptr "a `variant-pointer` operation",
         OpGetDiscriminant is_op_get_discriminant expect_op_get_discriminant "a `get-discriminant` operation",
@@ -1331,6 +1333,24 @@ pub type OpExtractElement = IntrinsicNode<intrinsic::OpExtractElement>;
 impl OpExtractElement {
     gen_intrinsic_value_input!(value_input, 0);
     gen_intrinsic_value_input!(index_input, 1);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpExtractDiscriminant = IntrinsicNode<intrinsic::OpExtractDiscriminant>;
+
+impl OpExtractDiscriminant {
+    gen_intrinsic_value_input!(value, 0);
+    gen_intrinsic_value_output!();
+}
+
+pub type OpExtractVariant = IntrinsicNode<intrinsic::OpExtractVariant>;
+
+impl OpExtractVariant {
+    pub fn variant_index(&self) -> u32 {
+        self.intrinsic.variant_index
+    }
+
+    gen_intrinsic_value_input!(value, 0);
     gen_intrinsic_value_output!();
 }
 
@@ -2195,6 +2215,8 @@ gen_simple_node! {
     OpCall,
     ValueProxy,
     Reaggregation,
+    OpExtractDiscriminant,
+    OpExtractVariant,
 }
 
 macro_rules! add_const_methods {
@@ -3341,6 +3363,31 @@ impl Rvsdg {
             region,
             intrinsic::OpExtractElement,
             [value_input, index_input],
+            None,
+        )
+    }
+
+    /// Extracts the logical discriminant from a snapshot enum value.
+    ///
+    /// This pure operation must be eliminated before converting the RVSDG to SCF.
+    pub fn add_op_extract_discriminant(&mut self, region: Region, value: ValueInput) -> Node {
+        self.add_intrinsic_op(region, intrinsic::OpExtractDiscriminant, [value], None)
+    }
+
+    /// Extracts a variant payload from a snapshot enum value by variant index, not discriminant.
+    ///
+    /// An inactive payload is an inert typed fallback value; this operation does not dereference
+    /// variant storage. This pure operation must be eliminated before converting the RVSDG to SCF.
+    pub fn add_op_extract_variant(
+        &mut self,
+        region: Region,
+        value: ValueInput,
+        variant_index: u32,
+    ) -> Node {
+        self.add_intrinsic_op(
+            region,
+            intrinsic::OpExtractVariant { variant_index },
+            [value],
             None,
         )
     }

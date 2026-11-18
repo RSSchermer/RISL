@@ -376,6 +376,10 @@ impl<'a> Renderer<'a> {
             SimpleNode::OpExtractElement(_) => {
                 self.write_node_common(writer, node, "OpExtractElement")
             }
+            SimpleNode::OpExtractDiscriminant(_) => {
+                self.write_node_common(writer, node, "OpExtractDiscriminant")
+            }
+            SimpleNode::OpExtractVariant(n) => self.write_op_extract_variant(writer, node, n),
             SimpleNode::OpFieldPtr(n) => self.write_op_field_ptr(writer, node, n),
             SimpleNode::OpElementPtr(_) => self.write_node_common(writer, node, "OpElementPtr"),
             SimpleNode::OpDiscriminantPtr(_) => {
@@ -535,6 +539,22 @@ impl<'a> Renderer<'a> {
             writer,
             "] OpExtractField{{field_index: {}}}",
             n.field_index()
+        )?;
+        self.write_node_io_signature(writer, node)
+    }
+
+    fn write_op_extract_variant<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        node: Node,
+        n: &slir::rvsdg::OpExtractVariant,
+    ) -> std::io::Result<()> {
+        write!(writer, "[")?;
+        self.write_node_id(writer, node)?;
+        write!(
+            writer,
+            "] OpExtractVariant{{variant_index: {}}}",
+            n.variant_index()
         )?;
         self.write_node_io_signature(writer, node)
     }

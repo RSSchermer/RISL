@@ -322,7 +322,14 @@ impl PointerAnalyzer {
                     PointerTrace::Alloca(node)
                 }
             }
-            Simple(OpLoad(_) | OpExtractField(_) | OpExtractElement(_) | Reaggregation(_)) => {
+            Simple(
+                OpLoad(_)
+                | OpExtractField(_)
+                | OpExtractElement(_)
+                | OpExtractDiscriminant(_)
+                | OpExtractVariant(_)
+                | Reaggregation(_),
+            ) => {
                 // We won't try to trace a pointer value through mem-ops, aggregate extractions,
                 // or pending reaggregations. The alloca holding an aggregate is not the root of a
                 // pointer extracted from it. Dependent mem-ops must wait until promotion or scalar
