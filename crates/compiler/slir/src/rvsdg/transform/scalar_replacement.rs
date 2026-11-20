@@ -182,7 +182,7 @@ use std::mem;
 use std::ops::Deref;
 
 use internment::Intern;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::rvsdg::analyse::element_index::ElementIndex;
 use crate::rvsdg::analyse::value_resolution::{ResolvedValue, resolve_value};
@@ -506,6 +506,7 @@ struct Replacer<'a, 'b, 'c> {
     rvsdg: &'b mut Rvsdg,
     candidate_queue: &'c mut VecDeque<Candidate>,
     ty: TypeRegistry,
+    split_switch_struct_outputs: &'c mut FxHashMap<(Node, u32), u32>,
 }
 
 impl Replacer<'_, '_, '_> {
@@ -1065,10 +1066,16 @@ impl Replacer<'_, '_, '_> {
 
         self.visit_users(node, 0, &split_input);
 
-        // After visiting the users of the original node's output, all users should have been
-        // reconnected to the split nodes and the original node should have no users left; we should
-        // be able to remove the node now.
-        self.rvsdg.remove_node(node);
+        // Original switch connections can still use the load. Leave it for dead-value elimination
+        // once those connections are removed.
+        if self.rvsdg[node]
+            .expect_op_load()
+            .value_output()
+            .users
+            .is_empty()
+        {
+            self.rvsdg.remove_node(node);
+        }
     }
 
     fn split_op_store(&mut self, node: Node, input: u32, split_input: &[ValueInput]) {
@@ -1384,6 +1391,21 @@ impl Replacer<'_, '_, '_> {
         provoking_branch: Region,
         split_input: &[ValueInput],
     ) {
+        // We may have reached and split this output via a different branch earlier. If that is the
+        // case, we don't want to split it again; we use the split-part outputs that were created
+        // earlier.
+        if let Some(&start) = self.split_switch_struct_outputs.get(&(node, output)) {
+            for (part, input) in split_input.iter().enumerate() {
+                self.rvsdg.reconnect_region_result(
+                    provoking_branch,
+                    start + part as u32,
+                    input.origin,
+                );
+            }
+
+            return;
+        }
+
         let node_data = self.rvsdg[node].expect_switch();
         let branch_count = node_data.branches().len();
         let output_ty = node_data.value_outputs()[output as usize].ty;
@@ -1406,6 +1428,9 @@ impl Replacer<'_, '_, '_> {
                 }
             })
             .collect::<Vec<_>>();
+
+        self.split_switch_struct_outputs
+            .insert((node, output), part_result_start as u32);
 
         for branch in 0..branch_count {
             let branch = self.rvsdg[node].expect_switch().branches()[branch];
@@ -1463,6 +1488,13 @@ impl Replacer<'_, '_, '_> {
                         },
                     );
                 }
+            }
+
+            // Release the original aggregate value before recursively splitting its users.
+            // Pointer results must remain connected for offset-slice replacement. Dead-value
+            // elimination will remove unused outputs and their disconnected results later.
+            if !is_ptr {
+                self.rvsdg.disconnect_region_result(branch, output);
             }
         }
 
@@ -1982,6 +2014,8 @@ pub struct AggregateReplacementContext {
     analyzer: JobAnalyzer,
     candidates: VecDeque<Candidate>,
     deferred_candidates: VecDeque<Candidate>,
+    known_fallbacks: FxHashSet<Node>,
+    split_switch_struct_outputs: FxHashMap<(Node, u32), u32>,
 }
 
 impl AggregateReplacementContext {
@@ -1990,24 +2024,68 @@ impl AggregateReplacementContext {
             analyzer: JobAnalyzer::new(),
             candidates: VecDeque::new(),
             deferred_candidates: VecDeque::new(),
+            known_fallbacks: FxHashSet::default(),
+            split_switch_struct_outputs: FxHashMap::default(),
         }
     }
 
     pub fn for_region(&mut self, rvsdg: &Rvsdg, region: Region) -> RegionReplacementContext<'_> {
         self.candidates.clear();
         self.deferred_candidates.clear();
+        self.known_fallbacks.clear();
 
         collect_candidate_jobs(rvsdg, &mut self.candidates, region);
 
-        RegionReplacementContext { cx: self }
+        self.known_fallbacks
+            .extend(self.candidates.iter().filter_map(|candidate| {
+                if let Job::ConstFallback(node) = candidate.job {
+                    Some(node)
+                } else {
+                    None
+                }
+            }));
+
+        RegionReplacementContext { cx: self, region }
     }
 }
 
 pub struct RegionReplacementContext<'a> {
     cx: &'a mut AggregateReplacementContext,
+    region: Region,
 }
 
 impl RegionReplacementContext<'_> {
+    pub fn collect_new_fallbacks(&mut self, rvsdg: &Rvsdg) -> bool {
+        fn collect(rvsdg: &Rvsdg, region: Region, cx: &mut AggregateReplacementContext) -> bool {
+            let mut found = false;
+
+            for node in rvsdg[region].nodes().iter().copied() {
+                match rvsdg[node].kind() {
+                    NodeKind::Simple(SimpleNode::ConstFallback(op))
+                        if fallback_ty_is_candidate(rvsdg.ty(), op.ty())
+                            && cx.known_fallbacks.insert(node) =>
+                    {
+                        cx.candidates.push_back(Job::ConstFallback(node).into());
+                        found = true;
+                    }
+                    NodeKind::Switch(switch) => {
+                        for branch in switch.branches() {
+                            found |= collect(rvsdg, *branch, cx);
+                        }
+                    }
+                    NodeKind::Loop(loop_node) => {
+                        found |= collect(rvsdg, loop_node.loop_region(), cx)
+                    }
+                    _ => (),
+                }
+            }
+
+            found
+        }
+
+        collect(rvsdg, self.region, self.cx)
+    }
+
     pub fn replace(&mut self, module: &mut Module, rvsdg: &mut Rvsdg) -> bool {
         let ty_registry = rvsdg.ty().clone();
 
@@ -2016,13 +2094,20 @@ impl RegionReplacementContext<'_> {
         while let Some(mut candidate) = self.cx.candidates.pop_front() {
             let job = candidate.job;
 
+            if let Job::ConstFallback(node) = job {
+                self.cx.known_fallbacks.insert(node);
+            }
+
             match self.cx.analyzer.analyze_job(rvsdg, job) {
                 AnalysisResult::Replace => {
+                    self.cx.split_switch_struct_outputs.clear();
+
                     let mut replacer = Replacer {
                         module,
                         rvsdg,
                         candidate_queue: &mut self.cx.candidates,
                         ty: ty_registry.clone(),
+                        split_switch_struct_outputs: &mut self.cx.split_switch_struct_outputs,
                     };
 
                     match job {

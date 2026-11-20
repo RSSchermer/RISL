@@ -50,6 +50,10 @@ impl MemoryTransformer {
                 self.promoter_legalizer
                     .promote_and_legalize(rvsdg, body_region);
 
+                // Promotion and pointer emulation can create aggregate fallback values after
+                // the initial candidate collection. Give those values a replacement round too.
+                did_transform |= region_replacement_cx.collect_new_fallbacks(rvsdg);
+
                 iterations += 1;
             } else {
                 break;
