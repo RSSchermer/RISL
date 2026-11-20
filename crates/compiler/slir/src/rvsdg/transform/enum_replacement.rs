@@ -971,7 +971,8 @@ impl<'a> EnumReplacer<'a> {
         );
 
         // Disconnect the original region result for the provoking branch, as its users have been
-        // replaced by the split results
+        // replaced by the split results. A later dead-value-elimination pass will remove the
+        // obsolete output along with all of its placeholder results.
         self.rvsdg.disconnect_region_result(branch, result);
     }
 
@@ -1022,8 +1023,7 @@ impl<'a> EnumReplacer<'a> {
             }
         }
 
-        // First connect all region results that we've created to the unsplit input that the
-        // original result connects to, via [OpGetDiscriminant] nodes or [OpPtrVariantPtr] nodes.
+        // First project the original result's enum value or pointer into the new part results.
         // This also disconnects the original result.
         self.redirect_region_result(loop_region, input as usize + 1, prior_result_count);
 
@@ -1104,43 +1104,20 @@ impl<'a> EnumReplacer<'a> {
         let mut split_variant_args = Vec::with_capacity(variant_inputs.len());
         let mut split_variant_outputs = Vec::with_capacity(variant_inputs.len());
 
-        // Add an input for the discriminant and for each variant and connect them to the proxy via
-        // an OpPtrDiscriminantPtr node for the discriminant input or an OpPtrVariantPtr node for
-        // the variant inputs. Also record an argument mapping in `split_args` and an output mapping
-        // in `split_outputs`.
+        // Project either an enum value or an enum pointer into parts for the new inputs.
+        let (discriminant, variants) = self.project_enum(outer_region, proxy_input);
+        let discr_ty = discriminant.ty;
 
-        let discriminant_node = self
-            .rvsdg
-            .add_op_discriminant_ptr(outer_region, proxy_input);
-        let discr_ptr_ty = self.rvsdg[discriminant_node]
-            .expect_op_discriminant_ptr()
-            .value_output()
-            .ty;
+        self.rvsdg.add_loop_input(owner, discriminant);
 
-        self.rvsdg.add_loop_input(
-            owner,
-            ValueInput::output(discr_ptr_ty, discriminant_node, 0),
-        );
-
-        let split_discriminant_arg = ValueInput::argument(discr_ptr_ty, prior_input_count as u32);
+        let split_discriminant_arg = ValueInput::argument(discr_ty, prior_input_count as u32);
         let split_discriminant_output =
-            ValueInput::output(discr_ptr_ty, owner, prior_input_count as u32);
+            ValueInput::output(discr_ty, owner, prior_input_count as u32);
 
-        let ty_kind = self.ty.kind(self.enum_ty);
-        let variant_count = ty_kind.expect_enum().variants.len();
-
-        for i in 0..variant_count {
+        for (i, variant) in variants.into_iter().enumerate() {
             let input_index = (prior_input_count + 1 + i) as u32;
-            let variant_node = self
-                .rvsdg
-                .add_op_variant_ptr(outer_region, proxy_input, i as u32);
-            let variant_ptr_ty = self.rvsdg[variant_node]
-                .expect_op_variant_ptr()
-                .value_output()
-                .ty;
 
-            self.rvsdg
-                .add_loop_input(owner, ValueInput::output(variant_ptr_ty, variant_node, 0));
+            self.rvsdg.add_loop_input(owner, variant);
 
             let argument_origin = ValueOrigin::Argument(input_index);
             let output_origin = ValueOrigin::Output {
@@ -1176,6 +1153,8 @@ impl<'a> EnumReplacer<'a> {
                 variant_input.input.origin,
             );
         }
+
+        self.rvsdg.disconnect_region_result(region, result);
 
         // Redirect the argument using the argument mapping
         self.redirect_region_argument(
@@ -1248,9 +1227,37 @@ impl<'a> EnumReplacer<'a> {
         }
     }
 
+    fn project_enum(&mut self, region: Region, input: ValueInput) -> (ValueInput, Vec<ValueInput>) {
+        let is_pointer = self.ty.kind(input.ty).is_ptr();
+        let discriminant = if is_pointer {
+            self.rvsdg.add_op_discriminant_ptr(region, input)
+        } else {
+            self.rvsdg.add_op_extract_discriminant(region, input)
+        };
+        let discriminant = ValueInput::output(
+            self.rvsdg[discriminant].value_outputs()[0].ty,
+            discriminant,
+            0,
+        );
+        let variant_count = self.ty.kind(self.enum_ty).expect_enum().variants.len();
+        let variants = (0..variant_count)
+            .map(|index| {
+                let variant = if is_pointer {
+                    self.rvsdg.add_op_variant_ptr(region, input, index as u32)
+                } else {
+                    self.rvsdg
+                        .add_op_extract_variant(region, input, index as u32)
+                };
+
+                ValueInput::output(self.rvsdg[variant].value_outputs()[0].ty, variant, 0)
+            })
+            .collect();
+
+        (discriminant, variants)
+    }
+
     /// Redirects the origin for the `region`'s given `result` to a set of "split" results that
-    /// start at `split_results_start`, via either [OpPtrDiscriminant] for the discriminant or
-    /// [OpPtrVariantPtr] nodes for the variants.
+    /// start at `split_results_start`, using pointer projections or value extractions as needed.
     ///
     /// Leaves the original result connected to the "placeholder" origin.
     pub fn redirect_region_result(
@@ -1260,34 +1267,16 @@ impl<'a> EnumReplacer<'a> {
         split_results_start: usize,
     ) {
         let original_input = self.rvsdg[region].value_results()[original];
-        let discriminant_node = self.rvsdg.add_op_discriminant_ptr(region, original_input);
+        let (discriminant, variants) = self.project_enum(region, original_input);
 
-        self.rvsdg.reconnect_region_result(
-            region,
-            split_results_start as u32,
-            ValueOrigin::Output {
-                producer: discriminant_node,
-                output: 0,
-            },
-        );
+        self.rvsdg
+            .reconnect_region_result(region, split_results_start as u32, discriminant.origin);
 
-        let ty_kind = self.ty.kind(self.enum_ty);
-        let variant_count = ty_kind.expect_enum().variants.len();
-
-        for i in 0..variant_count {
+        for (i, variant) in variants.into_iter().enumerate() {
             let result_index = (split_results_start + 1 + i) as u32;
-            let variant_node = self
-                .rvsdg
-                .add_op_variant_ptr(region, original_input, i as u32);
 
-            self.rvsdg.reconnect_region_result(
-                region,
-                result_index,
-                ValueOrigin::Output {
-                    producer: variant_node,
-                    output: 0,
-                },
-            );
+            self.rvsdg
+                .reconnect_region_result(region, result_index, variant.origin);
         }
 
         self.rvsdg.disconnect_region_result(region, original as u32);
@@ -2036,6 +2025,143 @@ mod tests {
         // This test was added because the "pass-through" of a ptr to an enum of an alloca through
         // a switch node was causing enum-replacement to panic. This test then simply verifies that
         // the fix no longer causes a panic; hence no further assertions.
+    }
+
+    #[test]
+    fn test_enum_replacement_extract_loaded_value() {
+        let mut module = Module::new(Symbol::from_ref("test"));
+        let function = Function {
+            name: Symbol::from_ref("main"),
+            module: module.name,
+        };
+
+        let variant_0_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![
+                StructField {
+                    offset: 4,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+                StructField {
+                    offset: 8,
+                    ty: TY_U32,
+                    io_binding: None,
+                },
+            ],
+        }));
+        let variant_1_ty = module.ty.register(TypeKind::Struct(Struct {
+            fields: vec![StructField {
+                offset: 4,
+                ty: TY_U32,
+                io_binding: None,
+            }],
+        }));
+        let variant_ptr_ty = module.ty.register(TypeKind::Ptr(variant_1_ty));
+        let enum_ty = module.ty.register(TypeKind::Enum(Enum {
+            variants: vec![
+                EnumVariant {
+                    ty: variant_0_ty,
+                    discriminant: 7,
+                },
+                EnumVariant {
+                    ty: variant_1_ty,
+                    discriminant: 42,
+                },
+            ],
+            discriminant_ty: Int::U32,
+            tag_ty: Int::U32.into(),
+            tag_encoding: EnumTagEncoding::Direct,
+            tag_offset: 0,
+        }));
+        let enum_ptr_ty = module.ty.register(TypeKind::Ptr(enum_ty));
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: function.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: variant_ptr_ty,
+                    shader_io_binding: None,
+                }],
+                ret_ty: Some(TY_U32),
+            },
+        );
+
+        let mut rvsdg = Rvsdg::new(module.ty.clone());
+
+        let (_, region) = rvsdg.register_function(&module, function, iter::empty());
+
+        let alloca = rvsdg.add_op_alloca(region, enum_ty);
+        let load = rvsdg.add_op_load(
+            region,
+            ValueInput::output(enum_ptr_ty, alloca, 0),
+            StateOrigin::Argument,
+        );
+        let loaded_value = ValueInput::output(enum_ty, load, 0);
+        let extract_discriminant = rvsdg.add_op_extract_discriminant(region, loaded_value);
+        let extract_variant = rvsdg.add_op_extract_variant(region, loaded_value, 1);
+        let store = rvsdg.add_op_store(
+            region,
+            ValueInput::argument(variant_ptr_ty, 0),
+            ValueInput::output(variant_1_ty, extract_variant, 0),
+            StateOrigin::Node(load),
+        );
+        rvsdg.reconnect_region_result(
+            region,
+            0,
+            ValueOrigin::Output {
+                producer: extract_discriminant,
+                output: 0,
+            },
+        );
+
+        let mut variant_allocas = Vec::new();
+
+        replace_enum_alloca(&mut rvsdg, alloca, |node, ty| {
+            variant_allocas.push((node, ty));
+        });
+
+        assert_eq!(variant_allocas.len(), 2);
+        assert_eq!(variant_allocas[0].1, variant_0_ty);
+        assert_eq!(variant_allocas[1].1, variant_1_ty);
+
+        let ValueOrigin::Output {
+            producer: discriminant_load,
+            output: 0,
+        } = rvsdg[region].value_results()[0].origin
+        else {
+            panic!("the result should connect to the discriminant load");
+        };
+        let discriminant_input = rvsdg[discriminant_load].expect_op_load().ptr_input();
+        assert_eq!(discriminant_input.ty, TY_PTR_U32);
+        let ValueOrigin::Output {
+            producer: discriminant_alloca,
+            output: 0,
+        } = discriminant_input.origin
+        else {
+            panic!("the discriminant load should connect to an alloca");
+        };
+        assert_eq!(rvsdg[discriminant_alloca].expect_op_alloca().ty(), TY_U32);
+
+        let variant_input = rvsdg[store].expect_op_store().value_input();
+        assert_eq!(variant_input.ty, variant_1_ty);
+        let ValueOrigin::Output {
+            producer: variant_load,
+            output: 0,
+        } = variant_input.origin
+        else {
+            panic!("the store should connect to the selected variant load");
+        };
+        assert_eq!(
+            *rvsdg[variant_load].expect_op_load().ptr_input(),
+            ValueInput::output(variant_ptr_ty, variant_allocas[1].0, 0)
+        );
+
+        assert!(!rvsdg.is_live_node(alloca));
+        assert!(!rvsdg.is_live_node(load));
+        assert!(!rvsdg.is_live_node(extract_discriminant));
+        assert!(!rvsdg.is_live_node(extract_variant));
     }
 
     #[test]
