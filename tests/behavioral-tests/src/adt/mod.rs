@@ -1,3 +1,6 @@
+mod enum_copy_optional_cursor_loop;
+mod enum_copy_optional_slice_loop;
+mod enum_copy_reference_loop;
 mod niche_enum_aggregates;
 mod struct_ref_array_field_dynamic_index_loop;
 mod struct_single_nested_scalar_field;

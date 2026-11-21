@@ -9,6 +9,9 @@ publish = false
 doctest = false
 
 [features]
+test_adt_enum_copy_optional_cursor_loop = []
+test_adt_enum_copy_optional_slice_loop = []
+test_adt_enum_copy_reference_loop = []
 test_adt_niche_enum_aggregates = []
 test_adt_struct_ref_array_field_dynamic_index_loop = []
 test_adt_struct_single_nested_scalar_field = []
