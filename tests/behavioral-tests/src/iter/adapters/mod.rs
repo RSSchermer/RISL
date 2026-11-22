@@ -7,4 +7,5 @@ mod filter;
 mod filter_map;
 mod flat_map;
 mod flatten;
+mod fuse;
 mod map;
