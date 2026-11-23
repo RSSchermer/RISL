@@ -432,7 +432,7 @@ impl WgslModuleWriter {
     }
 
     fn write_matrix_ty(&mut self, ty: &ty::Matrix) {
-        let base = match (ty.rows, ty.columns) {
+        let base = match (ty.columns, ty.rows) {
             (VectorSize::Two, VectorSize::Two) => "mat2x2",
             (VectorSize::Two, VectorSize::Three) => "mat2x3",
             (VectorSize::Two, VectorSize::Four) => "mat2x4",
