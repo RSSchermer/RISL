@@ -11,40 +11,38 @@
 //! reachable from the module's entry-points and check for struct types. Then we recursively check
 //! for nested struct types in all struct types we found thus far.
 
-use std::collections::VecDeque;
-
 use rustc_hash::FxHashSet;
 
 use crate::scf::analyze::global_use::GlobalUse;
 use crate::scf::visit::TopDownVisitor;
 use crate::scf::{Scf, Statement, StatementKind, visit};
-use crate::ty::Type;
+use crate::ty::{Type, TypeKind};
 use crate::{Constant, Module, WorkgroupBinding};
 
 struct StructUseAnalyzer {
     used_structs: FxHashSet<Type>,
+    visited: FxHashSet<Type>,
+    queue: Vec<Type>,
 }
 
 impl StructUseAnalyzer {
     fn new() -> Self {
         StructUseAnalyzer {
             used_structs: Default::default(),
+            visited: Default::default(),
+            queue: Vec::new(),
         }
     }
 
     fn collect_from_uniform_bindings(&mut self, module: &Module) {
         for binding in module.uniform_bindings.values() {
-            if module.ty.kind(binding.ty).is_struct() {
-                self.used_structs.insert(binding.ty);
-            }
+            self.queue.push(binding.ty);
         }
     }
 
     fn collect_from_storage_bindings(&mut self, module: &Module) {
         for binding in module.storage_bindings.values() {
-            if module.ty.kind(binding.ty).is_struct() {
-                self.used_structs.insert(binding.ty);
-            }
+            self.queue.push(binding.ty);
         }
     }
 
@@ -56,9 +54,7 @@ impl StructUseAnalyzer {
         for binding in used_bindings {
             let data = &module.workgroup_bindings[binding];
 
-            if module.ty.kind(data.ty).is_struct() {
-                self.used_structs.insert(data.ty);
-            }
+            self.queue.push(data.ty);
         }
     }
 
@@ -70,14 +66,17 @@ impl StructUseAnalyzer {
         for constant in used_constants {
             let data = &module.constants[constant];
 
-            if module.ty.kind(data.ty()).is_struct() {
-                self.used_structs.insert(data.ty());
-            }
+            self.queue.push(data.ty());
         }
     }
 
     fn collect_from_alloca_statements(&mut self, module: &Module, scf: &Scf) {
         for (entry_point, _) in module.entry_points.iter() {
+            let sig = &module.fn_sigs[entry_point];
+
+            self.queue.extend(sig.args.iter().map(|arg| arg.ty));
+            self.queue.extend(sig.ret_ty);
+
             if let Some(body) = scf.get_function_body(entry_point) {
                 self.visit_block(scf, body.block());
             }
@@ -85,18 +84,21 @@ impl StructUseAnalyzer {
     }
 
     fn collect_nested_structs(&mut self, module: &Module) {
-        let mut queue = VecDeque::from_iter(self.used_structs.iter().copied());
+        while let Some(ty) = self.queue.pop() {
+            if !self.visited.insert(ty) {
+                continue;
+            }
 
-        while let Some(ty) = queue.pop_front() {
-            let kind = module.ty.kind(ty);
-            let struct_data = kind.expect_struct();
-
-            for field in &struct_data.fields {
-                if module.ty.kind(field.ty).is_struct() {
-                    if self.used_structs.insert(field.ty) {
-                        queue.push_back(field.ty);
-                    }
+            match &*module.ty.kind(ty) {
+                TypeKind::Struct(data) => {
+                    self.used_structs.insert(ty);
+                    self.queue.extend(data.fields.iter().map(|field| field.ty));
                 }
+                TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => {
+                    self.queue.push(*element_ty);
+                }
+                TypeKind::Ptr(pointee) => self.queue.push(*pointee),
+                _ => {}
             }
         }
     }
@@ -104,10 +106,10 @@ impl StructUseAnalyzer {
 
 impl TopDownVisitor for StructUseAnalyzer {
     fn visit_statement(&mut self, scf: &Scf, statement: Statement) {
-        if let StatementKind::Alloca(alloca) = scf[statement].kind()
-            && scf.ty().kind(alloca.ty()).is_struct()
-        {
-            self.used_structs.insert(alloca.ty());
+        match scf[statement].kind() {
+            StatementKind::Alloca(alloca) => self.queue.push(alloca.ty()),
+            StatementKind::ExprBinding(binding) => self.queue.push(binding.expression().ty()),
+            _ => {}
         }
 
         visit::visit_statement_top_down(self, scf, statement);
