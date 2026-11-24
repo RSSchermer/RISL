@@ -273,46 +273,55 @@ impl_vec_arith!(vec4_u32, u32, (0: u32, 1: u32, 2: u32, 3: u32));
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat2x2_f32))]
 pub struct mat2x2_f32(pub vec2_f32, pub vec2_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat2x3_f32))]
 pub struct mat2x3_f32(pub vec3_f32, pub vec3_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat2x4_f32))]
 pub struct mat2x4_f32(pub vec4_f32, pub vec4_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat3x2_f32))]
 pub struct mat3x2_f32(pub vec2_f32, pub vec2_f32, pub vec2_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat3x3_f32))]
 pub struct mat3x3_f32(pub vec3_f32, pub vec3_f32, pub vec3_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat3x4_f32))]
 pub struct mat3x4_f32(pub vec4_f32, pub vec4_f32, pub vec4_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat4x2_f32))]
 pub struct mat4x2_f32(pub vec2_f32, pub vec2_f32, pub vec2_f32, pub vec2_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat4x3_f32))]
 pub struct mat4x3_f32(pub vec3_f32, pub vec3_f32, pub vec3_f32, pub vec3_f32);
 
 #[gpu]
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[repr(C)]
 #[cfg_attr(rislc, rislc::primitive(mat4x4_f32))]
 pub struct mat4x4_f32(pub vec4_f32, pub vec4_f32, pub vec4_f32, pub vec4_f32);
 
