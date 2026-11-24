@@ -35,6 +35,8 @@ mod tests {
     fn test_render_type_struct() {
         let registry = TypeRegistry::default();
         let struct_ty = registry.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     ty: TY_U32,

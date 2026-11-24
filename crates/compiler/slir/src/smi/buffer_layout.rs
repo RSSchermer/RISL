@@ -199,6 +199,8 @@ mod tests {
         let module = Module::new(Symbol::from_ref(""));
 
         let element_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     offset: 0,
@@ -218,6 +220,8 @@ mod tests {
             stride: 8,
         });
         let ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     offset: 0,
@@ -282,6 +286,8 @@ mod tests {
         let module = Module::new(Symbol::from_ref(""));
 
         let element_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     offset: 0,
@@ -300,6 +306,8 @@ mod tests {
             stride: 8,
         });
         let ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     offset: 0,

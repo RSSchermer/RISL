@@ -323,6 +323,8 @@ mod tests {
         let mut rvsdg = Rvsdg::new(module.ty.clone());
 
         let struct_ty = rvsdg.ty().register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,
@@ -394,6 +396,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, Vec::new());
 
         let struct_ty = rvsdg.ty().register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,
@@ -460,6 +464,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, Vec::new());
 
         let struct_ty = rvsdg.ty().register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,

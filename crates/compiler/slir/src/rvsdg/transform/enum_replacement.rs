@@ -1371,6 +1371,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let variant_0_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,
@@ -1380,6 +1382,8 @@ mod tests {
         let variant_0_ptr_ty = module.ty.register(TypeKind::Ptr(variant_0_ty));
 
         let variant_1_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,
@@ -1942,6 +1946,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let variant_0_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,
@@ -1950,6 +1956,8 @@ mod tests {
         }));
 
         let variant_1_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 0,
                 ty: TY_U32,
@@ -2036,6 +2044,8 @@ mod tests {
         };
 
         let variant_0_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     offset: 4,
@@ -2050,6 +2060,8 @@ mod tests {
             ],
         }));
         let variant_1_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 4,
                 ty: TY_U32,
@@ -2183,6 +2195,8 @@ mod tests {
         );
 
         let inactive_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 8,
                 ty: TY_PTR_U32,
@@ -2191,6 +2205,8 @@ mod tests {
         }));
 
         let active_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![StructField {
                 offset: 4,
                 ty: TY_U32,

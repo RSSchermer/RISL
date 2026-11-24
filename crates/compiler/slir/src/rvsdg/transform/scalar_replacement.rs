@@ -2405,6 +2405,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![
                 crate::ty::StructField {
                     offset: 0,
@@ -2768,6 +2770,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![
                 crate::ty::StructField {
                     offset: 0,
@@ -2880,6 +2884,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![
                 crate::ty::StructField {
                     offset: 0,
@@ -3097,6 +3103,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![
                 crate::ty::StructField {
                     offset: 0,
@@ -3313,6 +3321,8 @@ mod tests {
         let (_, region) = rvsdg.register_function(&module, function, iter::empty());
 
         let ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![
                 crate::ty::StructField {
                     offset: 0,
@@ -3506,6 +3516,8 @@ mod tests {
         };
 
         let variant0_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![crate::ty::StructField {
                 offset: 4,
                 ty: TY_U32,
@@ -3639,6 +3651,8 @@ mod tests {
 
         let ty_u32 = TY_U32;
         let struct_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![
                 crate::ty::StructField {
                     offset: 0,
@@ -3798,6 +3812,8 @@ mod tests {
             stride: 8,
         });
         let struct_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![crate::ty::StructField {
                 offset: 0,
                 ty: array_ty,
@@ -3868,10 +3884,14 @@ mod tests {
             },
         );
 
-        let none_ty = module
-            .ty
-            .register(TypeKind::Struct(crate::ty::Struct { fields: vec![] }));
+        let none_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![],
+            align: None,
+            size: None,
+        }));
         let some_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            align: None,
+            size: None,
             fields: vec![crate::ty::StructField {
                 offset: 4,
                 ty: TY_PTR_U32,
@@ -3985,9 +4005,11 @@ mod tests {
             },
         );
 
-        let variant_ty = module
-            .ty
-            .register(TypeKind::Struct(crate::ty::Struct { fields: vec![] }));
+        let variant_ty = module.ty.register(TypeKind::Struct(crate::ty::Struct {
+            fields: vec![],
+            align: None,
+            size: None,
+        }));
         let enum_ty = module.ty.register(TypeKind::Enum(crate::ty::Enum {
             variants: vec![crate::ty::EnumVariant {
                 ty: variant_ty,

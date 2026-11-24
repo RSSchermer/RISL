@@ -9,7 +9,7 @@ use rustc_public::abi::{
 use rustc_public::mir::alloc::{AllocId, GlobalAlloc};
 use rustc_public::mir::mono::{Instance, StaticDef};
 use rustc_public::rustc_internal::internal;
-use rustc_public::target::{MachineInfo, MachineSize};
+use rustc_public::target::MachineSize;
 use rustc_public::ty::{
     Align, Allocation, FnDef, GenericArgKind, GenericArgs, RigidTy, TyKind, VariantIdx,
 };
@@ -215,7 +215,7 @@ fn unpack_scalar_layout(layout: &TyAndLayout) -> TyAndLayout {
     layout.clone()
 }
 
-fn unpack_scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAndLayout) {
+fn unpack_scalar_pair_layout(layout: &TyAndLayout) -> TyAndLayout {
     if !matches!(layout.layout.abi, ValueAbi::ScalarPair(..)) {
         bug!("expected scalar pair layout");
     }
@@ -234,11 +234,11 @@ fn unpack_scalar_pair_field_layouts(layout: &TyAndLayout) -> (TyAndLayout, TyAnd
             .collect();
 
         if non_zst_fields.len() == 1 {
-            return unpack_scalar_pair_field_layouts(&non_zst_fields[0]);
+            return unpack_scalar_pair_layout(&non_zst_fields[0]);
         }
     }
 
-    layout.for_pair_parts()
+    layout.clone()
 }
 
 #[derive(Clone, Copy)]
@@ -433,7 +433,14 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             },
         ];
 
-        let ty = module.ty.register(slir::ty::Struct { fields }.into());
+        let ty = module.ty.register(
+            slir::ty::Struct {
+                fields,
+                align: None,
+                size: None,
+            }
+            .into(),
+        );
 
         Some(ty)
     }
@@ -496,31 +503,49 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         s1: abi::Scalar,
         layout: &TyAndLayout,
     ) -> slir::ty::Type {
-        let (l0, l1) = unpack_scalar_pair_field_layouts(layout);
+        let pair_layout = unpack_scalar_pair_layout(layout);
+        let (l0, l1) = pair_layout.for_pair_parts();
 
         let t0 = self.resolve_scalar_ty(s0, &l0);
         let t1 = self.resolve_scalar_ty(s1, &l1);
 
-        // My understanding from rustc_codegen_llvm is that there is never any padding between
-        // the values of a scalar pair (as they are never meant to be stored to memory).
+        let FieldsShape::Arbitrary { offsets } = &pair_layout.layout.fields else {
+            bug!("scalar-pair must have struct-like field placement");
+        };
+
+        let mut offsets = offsets
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| pair_layout.field(i).layout.size.bytes() != 0)
+            .map(|(_, offset)| offset.bytes() as u64);
+        // `for_pair_parts` verified exactly two non-ZST fields, so we can safely unwrap.
+        let mut offsets = [offsets.next().unwrap(), offsets.next().unwrap()];
+        offsets.sort_unstable();
+
         let fields = vec![
             slir::ty::StructField {
-                offset: 0,
+                offset: offsets[0],
                 ty: t0,
                 io_binding: None,
             },
             slir::ty::StructField {
-                offset: s0.size(&MachineInfo::target()).bytes() as u64,
+                offset: offsets[1],
                 ty: t1,
                 io_binding: None,
             },
         ];
 
-        let ty = self
-            .module
-            .borrow()
-            .ty
-            .register(slir::ty::Struct { fields }.into());
+        let ty = self.module.borrow().ty.register(
+            slir::ty::Struct {
+                fields,
+                align: Some(layout.layout.abi_align as u64),
+                size: layout
+                    .layout
+                    .is_sized()
+                    .then(|| layout.layout.size.bytes() as u64),
+            }
+            .into(),
+        );
 
         self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
@@ -616,11 +641,14 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
             })
             .collect();
 
-        let ty = self
-            .module
-            .borrow()
-            .ty
-            .register(slir::ty::Struct { fields }.into());
+        let ty = self.module.borrow().ty.register(
+            slir::ty::Struct {
+                fields,
+                align: Some(shape.abi_align as u64),
+                size: shape.is_sized().then(|| shape.size.bytes() as u64),
+            }
+            .into(),
+        );
 
         self.ty_to_slir.borrow_mut().insert(layout.clone(), ty);
 
@@ -855,10 +883,11 @@ impl<'a, 'tcx> PreDefineCodegenMethods for CodegenContext<'a, 'tcx> {
                         bug!("value ABI does not match pass-mode")
                     };
 
-                    let (l0, l1) = unpack_scalar_pair_field_layouts(&TyAndLayout {
+                    let (l0, l1) = unpack_scalar_pair_layout(&TyAndLayout {
                         ty: arg.ty,
                         layout: arg.layout.shape(),
-                    });
+                    })
+                    .for_pair_parts();
 
                     let a_ty = self.resolve_scalar_ty(a, &l0);
                     let b_ty = self.resolve_scalar_ty(b, &l1);

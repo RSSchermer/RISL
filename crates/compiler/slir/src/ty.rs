@@ -228,6 +228,15 @@ impl fmt::Display for Matrix {
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub struct Struct {
     pub fields: Vec<StructField>,
+    /// The ABI alignment.
+    ///
+    /// `None` for synthesized structs.
+    pub align: Option<u64>,
+
+    /// The ABI size.
+    ///
+    /// `None` for structs with a dynamizally sized tail, or for synthesized structs.
+    pub size: Option<u64>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
@@ -1136,12 +1145,20 @@ impl TypeRegistry {
     }
 
     pub fn import(&self, other_reg: &TypeRegistry, ty: Type) -> Type {
+        if ty.registration_id().is_none() {
+            return ty;
+        }
+
         let mut ty_kind = other_reg.kind(ty).deref().clone();
 
         match &mut ty_kind {
             TypeKind::Array {
                 element_ty: base, ..
-            } => {
+            }
+            | TypeKind::Slice {
+                element_ty: base, ..
+            }
+            | TypeKind::Ptr(base) => {
                 *base = self.import(other_reg, *base);
             }
             TypeKind::Struct(struct_data) => {

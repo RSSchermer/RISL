@@ -428,6 +428,8 @@ mod tests {
         let mut module = Module::new(Symbol::from_ref(""));
 
         let entry_point_0_output_ty = module.ty.register(TypeKind::Struct(Struct {
+            align: None,
+            size: None,
             fields: vec![
                 StructField {
                     offset: 0,
