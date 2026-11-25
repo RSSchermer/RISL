@@ -1,0 +1,108 @@
+#![cfg(feature = "test_iter_adapters_inspect_is_empty")]
+
+use std::error::Error;
+
+use behavioral_tests_macros::test_runner;
+use empa::abi;
+use futures::FutureExt;
+use risl::gpu;
+
+const NONE: u32 = u32::MAX;
+
+#[derive(Copy, Clone, abi::Sized, PartialEq, Default, Debug)]
+#[gpu]
+struct Results {
+    initially_empty: u32,
+    finally_empty: u32,
+    next_value: u32,
+    inspected: u32,
+}
+
+test_runner! {
+    name: Runner,
+    inputs: {
+        A: [u32] as Storage<[u32]>,
+        FRONT: u32 as Uniform<u32>,
+        BACK: u32 as Uniform<u32>,
+    },
+    result: Results,
+    shader: {
+        let mut inspected = 0;
+        let mut iter = A.iter().copied().inspect(|value| {
+            inspected = inspected * 10 + *value;
+        });
+        let initially_empty = if iter.is_empty() { 1 } else { 0 };
+
+        let mut i = 0;
+
+        while i < *FRONT {
+            iter.next();
+            i += 1;
+        }
+
+        let mut i = 0;
+
+        while i < *BACK {
+            iter.next_back();
+            i += 1;
+        }
+
+        let finally_empty = if iter.is_empty() { 1 } else { 0 };
+        let next_value = match iter.next() {
+            Some(value) => value,
+            None => NONE,
+        };
+
+        unsafe {
+            *RESULT.as_mut_unchecked() = Results {
+                initially_empty,
+                finally_empty,
+                next_value,
+                inspected,
+            };
+        }
+    },
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
+    let runner = Runner::init().await?;
+    let a: &[u32] = &[1, 2, 3, 4];
+
+    // The initial query leaves the first item untouched and does not inspect it.
+    assert_eq!(
+        runner.run(a, 0, 0).await?,
+        Results {
+            initially_empty: 0,
+            finally_empty: 0,
+            next_value: 1,
+            inspected: 1,
+        }
+    );
+    // Exact exhaustion reports empty.
+    assert_eq!(
+        runner.run(a, 2, 2).await?,
+        Results {
+            initially_empty: 0,
+            finally_empty: 1,
+            next_value: NONE,
+            inspected: 1243,
+        }
+    );
+    // Over-consumption reports empty.
+    assert_eq!(
+        runner.run(a, 5, 5).await?,
+        Results {
+            initially_empty: 0,
+            finally_empty: 1,
+            next_value: NONE,
+            inspected: 1234,
+        }
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test() {
+    pollster::block_on(run().map(|res| res.unwrap()));
+}
