@@ -3,6 +3,7 @@ use rustc_public::abi::{FieldsShape, ValueAbi, VariantsShape};
 use rustc_public::mir;
 use rustc_public::mir::Mutability;
 use rustc_public::ty::{Align, RigidTy, Ty, TyKind, VariantIdx};
+use rustc_public_bridge::IndexedVal;
 use smallvec::SmallVec;
 use tracing::instrument;
 
@@ -233,8 +234,33 @@ impl<'a, V: CodegenObject> PlaceRef<V> {
 
     /// Obtain the actual discriminant of a value.
     #[instrument(level = "trace", skip(bx))]
-    pub fn codegen_get_discr<Bx: BuilderMethods<'a, Value = V>>(&self, bx: &mut Bx) -> V {
-        bx.get_discriminant(self.val.llval)
+    pub fn codegen_get_discr<Bx: BuilderMethods<'a, Value = V>>(
+        &self,
+        bx: &mut Bx,
+        cast_to: Ty,
+    ) -> V {
+        match self.layout.layout.variants {
+            VariantsShape::Empty => bug!("cannot get discriminant on a type without variants"),
+            VariantsShape::Single { index } => {
+                let discriminant = match self.layout.ty.kind() {
+                    TyKind::RigidTy(RigidTy::Adt(def, _)) if def.kind().is_enum() => {
+                        def.discriminant_for_variant(index).val
+                    }
+                    TyKind::RigidTy(RigidTy::Coroutine(def, args)) => {
+                        def.discriminant_for_variant(&args, index).val
+                    }
+                    _ => {
+                        assert_eq!(index, VariantIdx::to_val(0));
+
+                        0
+                    }
+                };
+                let cast_to = bx.immediate_backend_type(&TyAndLayout::expect_from_ty(cast_to));
+
+                bx.const_uint_big(cast_to, discriminant)
+            }
+            VariantsShape::Multiple { .. } => bx.get_discriminant(self.val.llval),
+        }
     }
 
     /// Sets the discriminant for a new value of the given case of the given

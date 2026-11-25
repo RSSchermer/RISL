@@ -631,6 +631,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
             }
 
             mir::Rvalue::Discriminant(place) => {
+                let ty = rvalue.ty(self.mir.locals()).unwrap();
                 let discr = self
                     .codegen_place(
                         bx,
@@ -639,8 +640,7 @@ impl<'a, Bx: BuilderMethods<'a>> FunctionCx<'a, Bx> {
                             projection: &place.projection,
                         },
                     )
-                    .codegen_get_discr(bx);
-                let ty = rvalue.ty(self.mir.locals()).unwrap();
+                    .codegen_get_discr(bx, ty);
 
                 OperandRef {
                     val: OperandValue::Immediate(discr),
