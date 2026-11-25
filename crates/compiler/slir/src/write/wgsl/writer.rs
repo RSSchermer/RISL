@@ -5,9 +5,7 @@ use std::rc::Rc;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::SecondaryMap;
 
-use crate::scf::analyze::global_use::collect_used_global_bindings;
-use crate::scf::analyze::local_binding_use::count_local_binding_use;
-use crate::scf::analyze::struct_use::collect_used_structs;
+use super::abi::{AbiLayouts, MemberKind};
 use crate::scf::{
     Alloca, Block, ExprBinding, Expression, ExpressionKind, GlobalPtr, If, IntrinsicOp,
     LocalBinding, LocalBindingKind, Loop, LoopControl, OpBinary, OpElementPtr, OpExtractElement,
@@ -116,16 +114,17 @@ enum InlineContext {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Context<'a> {
-    module: &'a Module,
-    scf: &'a Scf,
-    local_binding_use_counts: &'a SecondaryMap<LocalBinding, u32>,
-    used_structs: &'a FxHashSet<Type>,
-    used_workgroup_bindings: &'a FxHashSet<WorkgroupBinding>,
-    used_constants: &'a FxHashSet<Constant>,
+pub struct Context<'a> {
+    pub module: &'a Module,
+    pub scf: &'a Scf,
+    pub local_binding_use_counts: &'a SecondaryMap<LocalBinding, u32>,
+    pub used_structs: &'a FxHashSet<Type>,
+    pub used_workgroup_bindings: &'a FxHashSet<WorkgroupBinding>,
+    pub used_constants: &'a FxHashSet<Constant>,
+    pub abi_layouts: &'a AbiLayouts,
 }
 
-struct WgslModuleWriter {
+pub struct WgslModuleWriter {
     w: String,
     struct_id_writer: IdWriter<Type>,
     uniform_binding_id_writer: IdWriter<UniformBinding>,
@@ -138,7 +137,7 @@ struct WgslModuleWriter {
 }
 
 impl WgslModuleWriter {
-    fn new(reserved_names: FxHashSet<String>) -> Self {
+    pub fn new(reserved_names: FxHashSet<String>) -> Self {
         let reserved_names = Rc::new(reserved_names);
 
         Self {
@@ -154,6 +153,18 @@ impl WgslModuleWriter {
         }
     }
 
+    pub fn write(mut self, cx: Context) -> String {
+        self.write_required_language_extensions();
+        self.write_struct_decls(cx);
+        self.write_constant_bindings(cx);
+        self.write_uniform_bindings(cx);
+        self.write_storage_bindings(cx);
+        self.write_workgroup_bindings(cx);
+        self.write_entry_points(cx);
+
+        self.w
+    }
+
     fn write_required_language_extensions(&mut self) {
         // TODO: add 'uniform_buffer_standard_layout' when both naga and tint support it
         self.w.push_str("requires pointer_composite_access;");
@@ -162,8 +173,33 @@ impl WgslModuleWriter {
     }
 
     fn write_struct_decls(&mut self, cx: Context) {
-        for ty in cx.used_structs {
-            self.write_struct_decl(cx, *ty);
+        let mut types: Vec<_> = cx.used_structs.iter().copied().collect();
+        types.sort_by_key(|ty| format!("{ty:?}"));
+        let mut emitted = FxHashSet::default();
+
+        for ty in types {
+            self.write_type_decls(cx, ty, &mut emitted);
+        }
+    }
+
+    fn write_type_decls(&mut self, cx: Context, ty: Type, emitted: &mut FxHashSet<Type>) {
+        if !emitted.insert(ty) {
+            return;
+        }
+
+        match &*cx.module.ty.kind(ty) {
+            TypeKind::Struct(data) => {
+                for field in &data.fields {
+                    self.write_type_decls(cx, field.ty, emitted);
+                }
+
+                self.write_struct_decl(cx, ty);
+            }
+            TypeKind::Array { element_ty, .. } | TypeKind::Slice { element_ty, .. } => {
+                self.write_type_decls(cx, *element_ty, emitted);
+            }
+            TypeKind::Ptr(pointee) => self.write_type_decls(cx, *pointee, emitted),
+            _ => {}
         }
     }
 
@@ -263,16 +299,36 @@ impl WgslModuleWriter {
         self.increment_indent();
         self.write_newline();
 
-        for (index, field) in cx
-            .module
-            .ty
-            .kind(ty)
-            .expect_struct()
-            .fields
-            .iter()
-            .enumerate()
-        {
-            self.write_struct_field(cx, index, field);
+        let kind = cx.module.ty.kind(ty);
+        let data = kind.expect_struct();
+
+        if let Some(struct_layout) = cx.abi_layouts.structs.get(&ty) {
+            for member in &struct_layout.members {
+                // Naga does not always seem to correctly derive a nested struct member's alignment
+                // from its type. For now, always emit an explicit alignment, even when it matches
+                // the member type's natural alignment.
+                write!(&mut self.w, "@align({}) ", member.align).unwrap();
+
+                if let Some(size) = member.size {
+                    if Some(size) != member.type_layout.size {
+                        write!(&mut self.w, "@size({size}) ").unwrap();
+                    }
+                }
+
+                match member.kind {
+                    MemberKind::Padding => {
+                        self.w.push_str("_padding: u32,");
+                        self.write_newline();
+                    }
+                    MemberKind::Data(index) => {
+                        self.write_struct_field(cx, index, &data.fields[index]);
+                    }
+                }
+            }
+        } else {
+            for (index, field) in data.fields.iter().enumerate() {
+                self.write_struct_field(cx, index, field);
+            }
         }
 
         self.decrement_indent();
@@ -281,9 +337,6 @@ impl WgslModuleWriter {
     }
 
     fn write_struct_field(&mut self, cx: Context, index: usize, field: &StructField) {
-        // TODO: field offsets, but only for ABI compatible types (which notably does not
-        // include booleans, as the size does not match; 1 byte CPU-side, 4 bytes GPU-side)
-
         if let Some(io_binding) = &field.io_binding {
             self.write_shader_io_binding(io_binding);
             self.write_newline();
@@ -1443,29 +1496,38 @@ impl ConstantValueWriter<'_, '_> {
 
     fn write_struct_value(&mut self, cx: Context, ty: Type, struct_def: &Struct, offset: usize) {
         self.writer.write_struct_id(ty);
-        self.writer.write_optional_space();
-        self.writer.w.push_str("{");
+        self.writer.w.push_str("(");
         self.writer.increment_indent();
 
-        let last_field_index = struct_def.fields.len() - 1;
+        let kinds: Vec<_> = if let Some(struct_layout) = cx.abi_layouts.structs.get(&ty) {
+            struct_layout
+                .members
+                .iter()
+                .map(|member| member.kind)
+                .collect()
+        } else {
+            (0..struct_def.fields.len()).map(MemberKind::Data).collect()
+        };
 
-        for (index, field) in struct_def.fields.iter().enumerate() {
-            let field_offset = offset + field.offset as usize;
-
+        for kind in kinds {
             self.writer.write_newline();
-            self.writer.write_struct_field_ident(index);
-            self.writer.w.push_str(":");
-            self.writer.write_optional_space();
-            self.write_value(cx, field.ty, field_offset);
 
-            if index != last_field_index {
-                self.writer.w.push_str(",");
+            match kind {
+                MemberKind::Padding => self.writer.write_u32(0),
+                MemberKind::Data(index) => {
+                    let field = &struct_def.fields[index];
+                    let field_offset = offset + field.offset as usize;
+
+                    self.write_value(cx, field.ty, field_offset);
+                }
             }
+
+            self.writer.w.push_str(",");
         }
 
         self.writer.decrement_indent();
         self.writer.write_newline();
-        self.writer.w.push_str("}");
+        self.writer.w.push_str(")");
     }
 }
 
@@ -1525,38 +1587,4 @@ fn op_binary_needs_parens(operator: BinaryOperator, inline_cx: InlineContext) ->
         // operand of a unary expression, then we always need parentheses.
         _ => true,
     }
-}
-
-pub fn write_wgsl(module: &Module, scf: &Scf) -> String {
-    let used_globals = collect_used_global_bindings(module, scf);
-    let used_structs = collect_used_structs(module, scf, &used_globals);
-
-    let local_binding_use_counts = count_local_binding_use(scf);
-
-    let cx = Context {
-        module,
-        scf,
-        local_binding_use_counts: &local_binding_use_counts,
-        used_structs: &used_structs,
-        used_workgroup_bindings: &used_globals.workgroup_bindings,
-        used_constants: &used_globals.constants,
-    };
-
-    let reserved_names = module
-        .entry_points
-        .iter()
-        .map(|(_, e)| e.name.to_string())
-        .collect::<FxHashSet<_>>();
-
-    let mut writer = WgslModuleWriter::new(reserved_names);
-
-    writer.write_required_language_extensions();
-    writer.write_struct_decls(cx);
-    writer.write_constant_bindings(cx);
-    writer.write_uniform_bindings(cx);
-    writer.write_storage_bindings(cx);
-    writer.write_workgroup_bindings(cx);
-    writer.write_entry_points(cx);
-
-    writer.w
 }

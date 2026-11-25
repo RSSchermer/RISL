@@ -1,3 +1,4 @@
+mod abi;
 mod enum_copy_optional_cursor_loop;
 mod enum_copy_optional_slice_loop;
 mod enum_copy_reference_loop;

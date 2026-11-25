@@ -9,6 +9,12 @@ publish = false
 doctest = false
 
 [features]
+test_adt_abi_array_indexing = []
+test_adt_abi_matrix_layout = []
+test_adt_abi_nested_reordering = []
+test_adt_abi_over_alignment = []
+test_adt_abi_struct_array_field_layout = []
+test_adt_abi_vec3_tail_padding = []
 test_adt_enum_copy_optional_cursor_loop = []
 test_adt_enum_copy_optional_slice_loop = []
 test_adt_enum_copy_reference_loop = []
