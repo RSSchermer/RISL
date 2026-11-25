@@ -4,6 +4,7 @@
     maybe_uninit_uninit_array_transpose,
     macro_metavar_expr,
     iter_advance_by,
+    iter_intersperse,
     exact_size_is_empty
 )]
 
