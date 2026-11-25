@@ -136,8 +136,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
         }
     );
 
-    unknown_upper::run().await?;
-
     Ok(())
 }
 
