@@ -10,4 +10,5 @@ mod flatten;
 mod fuse;
 mod inspect;
 mod intersperse;
+mod intersperse_with;
 mod map;
