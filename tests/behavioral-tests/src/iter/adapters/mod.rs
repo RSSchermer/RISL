@@ -12,3 +12,4 @@ mod inspect;
 mod intersperse;
 mod intersperse_with;
 mod map;
+mod map_while;
