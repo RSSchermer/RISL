@@ -32,7 +32,7 @@ fn unwrap_or_zero<E>(value: Tagged<E>) -> u32 {
     match value {
         Tagged::Impossible(_) => 0,
         Tagged::Value(value) => value,
-        Tagged::Other(value) => value ^ u32::MAX,
+        Tagged::Other(value) => !value,
     }
 }
 
@@ -84,13 +84,12 @@ async fn run() -> Result<(), Box<dyn Error>> {
         }
     );
 
-    // OTHER = 1 selects Other (discriminant -11), which XORs the payload with
-    // u32::MAX: 7 becomes 0xfffffff8, or 4_294_967_288.
+    // OTHER = 1 selects Other (discriminant -11), which complements the payload.
     assert_eq!(
         runner.run(7, 1).await?,
         Results {
-            empty_payload: 4_294_967_288,
-            aggregate_payload: 4_294_967_288,
+            empty_payload: !7,
+            aggregate_payload: !7,
         }
     );
 
