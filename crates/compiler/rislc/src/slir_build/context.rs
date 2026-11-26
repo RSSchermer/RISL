@@ -337,6 +337,24 @@ impl<'a, 'tcx> CodegenContext<'a, 'tcx> {
         }
 
         match layout.layout.fields {
+            FieldsShape::Primitive
+                if matches!(layout.layout.variants, VariantsShape::Empty)
+                    && layout.layout.size.bytes() == 0 =>
+            {
+                // Rust uses this layout for `!` and empty enums such as `enum Never {}`. We'll
+                // represent these in SLIR as a fieldless struct.
+                //
+                // Uninhabited aggregates with fields follow normal struct registration below.
+
+                self.module.borrow().ty.register(
+                    slir::ty::Struct {
+                        fields: Vec::new(),
+                        align: Some(layout.layout.abi_align as u64),
+                        size: Some(0),
+                    }
+                    .into(),
+                )
+            }
             FieldsShape::Primitive => bug!("primitive should have been handled earlier"),
             FieldsShape::Union(_) => bug!("union types are not supported by RISL"),
             FieldsShape::Array { count, stride } => self.register_array_ty(count, stride, layout),
