@@ -322,6 +322,24 @@ impl AbstractI32 {
         self.refine(&res.abstract_neg())
     }
 
+    /// Returns the abstract result of bitwise complementing this value.
+    pub fn abstract_bit_not(&self) -> Self {
+        Self::from_intervals(
+            self.0
+                .iter()
+                .map(|interval| !*interval.end()..=!*interval.start()),
+        )
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of bitwise complementing
+    /// this value.
+    ///
+    /// The constraints returned include the prior constraints on the operand, not just the
+    /// additional constraints implied by the result.
+    pub fn abstract_bit_not_inv(&self, res: &Self) -> Self {
+        self.refine(&res.abstract_bit_not())
+    }
+
     /// Returns the abstract result of adding `other` to this value.
     pub fn abstract_add(&self, other: &Self) -> Self {
         Self::from_intervals(self.0.iter().flat_map(|left| {
@@ -1080,6 +1098,80 @@ mod tests {
         assert_eq!(
             AbstractI32::bottom().abstract_neg_inv(&AbstractI32::top()),
             AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_not() {
+        assert_eq!(
+            AbstractI32::from_constant(0).abstract_bit_not(),
+            AbstractI32::from_constant(-1)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(-1).abstract_bit_not(),
+            AbstractI32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MIN).abstract_bit_not(),
+            AbstractI32::from_constant(i32::MAX)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(i32::MAX).abstract_bit_not(),
+            AbstractI32::from_constant(i32::MIN)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(0x5555_5555).abstract_bit_not(),
+            AbstractI32::from_constant(-0x5555_5556)
+        );
+        assert_eq!(
+            AbstractI32::from_constant(-0x5555_5556).abstract_bit_not(),
+            AbstractI32::from_constant(0x5555_5555)
+        );
+
+        let value = AbstractI32::from_intervals([-10..=-8, -2..=2, 8..=10]);
+
+        assert_eq!(
+            value.abstract_bit_not(),
+            AbstractI32::from_intervals([-11..=-9, -3..=1, 7..=9])
+        );
+        assert_eq!(value.abstract_bit_not().abstract_bit_not(), value);
+        assert_eq!(AbstractI32::top().abstract_bit_not(), AbstractI32::top());
+        assert_eq!(
+            AbstractI32::bottom().abstract_bit_not(),
+            AbstractI32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_not_inv() {
+        let value = AbstractI32::from_intervals([-10..=-8, 1..=4]);
+        let res = AbstractI32::from_intervals([-4..=-3, 8..=10]);
+
+        assert_eq!(
+            value.abstract_bit_not_inv(&res),
+            AbstractI32::from_intervals([-10..=-9, 2..=3])
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_bit_not_inv(&res),
+            AbstractI32::from_intervals([-11..=-9, 2..=3])
+        );
+        assert_eq!(
+            AbstractI32::from_intervals([1..=3])
+                .abstract_bit_not_inv(&AbstractI32::from_intervals([1..=3])),
+            AbstractI32::bottom()
+        );
+        assert_eq!(value.abstract_bit_not_inv(&AbstractI32::top()), value);
+        assert_eq!(
+            value.abstract_bit_not_inv(&AbstractI32::bottom()),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::bottom().abstract_bit_not_inv(&res),
+            AbstractI32::bottom()
+        );
+        assert_eq!(
+            AbstractI32::top().abstract_bit_not_inv(&AbstractI32::top()),
+            AbstractI32::top()
         );
     }
 

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::UnaryOperator;
 use crate::intrinsic::{Intrinsic, expect_one_arg};
-use crate::ty::{TY_BOOL, TY_F32, TY_I32, Type, TypeRegistry};
+use crate::ty::{TY_BOOL, TY_F32, TY_I32, TY_U32, Type, TypeRegistry};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct OpUnary {
@@ -31,6 +31,15 @@ impl Intrinsic for OpUnary {
                     return Err(format!(
                         "the `negate` operator expects a argument of type `i32` or `f32`, found \
                         `{}`",
+                        arg.to_string(ty_registry)
+                    ));
+                }
+            }
+            UnaryOperator::BitNot => {
+                if !matches!(arg, TY_I32 | TY_U32) {
+                    return Err(format!(
+                        "the `bitwise not` operator expects an argument of type `i32` or `u32`, \
+                        found `{}`",
                         arg.to_string(ty_registry)
                     ));
                 }

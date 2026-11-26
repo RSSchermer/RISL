@@ -300,6 +300,24 @@ impl AbstractU32 {
         Self::from_intervals(remaining)
     }
 
+    /// Returns the abstract result of bitwise complementing this value.
+    pub fn abstract_bit_not(&self) -> Self {
+        Self::from_intervals(
+            self.0
+                .iter()
+                .map(|interval| !*interval.end()..=!*interval.start()),
+        )
+    }
+
+    /// Returns the operand constraints implied by `res` being the result of bitwise complementing
+    /// this value.
+    ///
+    /// The constraints returned include the prior constraints on the operand, not just the
+    /// additional constraints implied by the result.
+    pub fn abstract_bit_not_inv(&self, res: &Self) -> Self {
+        self.refine(&res.abstract_bit_not())
+    }
+
     /// Returns the abstract result of adding `other` to this value.
     pub fn abstract_add(&self, other: &Self) -> Self {
         Self::from_intervals(self.0.iter().flat_map(|left| {
@@ -1008,6 +1026,87 @@ mod tests {
         assert_eq!(
             wide_value.exclude_cases(&[1u32, 3, 5, 7].map(BranchCase::from)),
             wide_value
+        );
+    }
+
+    #[test]
+    fn abstract_bit_not() {
+        assert_eq!(
+            AbstractU32::from_constant(0).abstract_bit_not(),
+            AbstractU32::from_constant(u32::MAX)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(u32::MAX).abstract_bit_not(),
+            AbstractU32::from_constant(0)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0x7fff_ffff).abstract_bit_not(),
+            AbstractU32::from_constant(0x8000_0000)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0x8000_0000).abstract_bit_not(),
+            AbstractU32::from_constant(0x7fff_ffff)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0x5555_5555).abstract_bit_not(),
+            AbstractU32::from_constant(0xaaaa_aaaa)
+        );
+        assert_eq!(
+            AbstractU32::from_constant(0xaaaa_aaaa).abstract_bit_not(),
+            AbstractU32::from_constant(0x5555_5555)
+        );
+
+        let value = AbstractU32::from_intervals([0..=2, 8..=10, u32::MAX - 4..=u32::MAX]);
+
+        assert_eq!(
+            value.abstract_bit_not(),
+            AbstractU32::from_intervals([
+                0..=4,
+                u32::MAX - 10..=u32::MAX - 8,
+                u32::MAX - 2..=u32::MAX
+            ])
+        );
+        assert_eq!(value.abstract_bit_not().abstract_bit_not(), value);
+        assert_eq!(AbstractU32::top().abstract_bit_not(), AbstractU32::top());
+        assert_eq!(
+            AbstractU32::bottom().abstract_bit_not(),
+            AbstractU32::bottom()
+        );
+    }
+
+    #[test]
+    fn abstract_bit_not_inv() {
+        let value = AbstractU32::from_intervals([1..=5, 10..=15]);
+        let res = AbstractU32::from_intervals([
+            u32::MAX - 12..=u32::MAX - 8,
+            u32::MAX - 3..=u32::MAX - 2,
+        ]);
+
+        assert_eq!(
+            value.abstract_bit_not_inv(&res),
+            AbstractU32::from_intervals([2..=3, 10..=12])
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_bit_not_inv(&res),
+            AbstractU32::from_intervals([2..=3, 8..=12])
+        );
+        assert_eq!(
+            AbstractU32::from_intervals([1..=3])
+                .abstract_bit_not_inv(&AbstractU32::from_intervals([1..=3])),
+            AbstractU32::bottom()
+        );
+        assert_eq!(value.abstract_bit_not_inv(&AbstractU32::top()), value);
+        assert_eq!(
+            value.abstract_bit_not_inv(&AbstractU32::bottom()),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::bottom().abstract_bit_not_inv(&res),
+            AbstractU32::bottom()
+        );
+        assert_eq!(
+            AbstractU32::top().abstract_bit_not_inv(&AbstractU32::top()),
+            AbstractU32::top()
         );
     }
 

@@ -1095,6 +1095,7 @@ impl WgslModuleWriter {
         match op.operator() {
             UnaryOperator::Not => self.w.push_str("!"),
             UnaryOperator::Neg => self.w.push_str("-"),
+            UnaryOperator::BitNot => self.w.push_str("~"),
         };
 
         self.write_local_value(cx, op.operand(), InlineContext::UnOp);

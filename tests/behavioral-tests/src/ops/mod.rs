@@ -2,6 +2,7 @@ mod add;
 mod add_assign;
 mod bit_and;
 mod bit_and_assign;
+mod bit_not;
 mod bit_or;
 mod bit_or_assign;
 mod bit_xor;

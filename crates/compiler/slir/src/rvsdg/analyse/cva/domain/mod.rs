@@ -247,6 +247,8 @@ impl AbstractValue {
             (Self::Bool(value), Not) => value.abstract_not().into(),
             (Self::F32(value), Neg) => value.abstract_neg().into(),
             (Self::I32(value), Neg) => value.abstract_neg().into(),
+            (Self::I32(value), BitNot) => value.abstract_bit_not().into(),
+            (Self::U32(value), BitNot) => value.abstract_bit_not().into(),
             _ => panic!("operator {operator} not supported by value kind"),
         }
     }
@@ -264,6 +266,8 @@ impl AbstractValue {
             (Self::Bool(value), Not, Self::Bool(res)) => value.abstract_not_inv(res).into(),
             (Self::F32(value), Neg, Self::F32(res)) => value.abstract_neg_inv(res).into(),
             (Self::I32(value), Neg, Self::I32(res)) => value.abstract_neg_inv(res).into(),
+            (Self::I32(value), BitNot, Self::I32(res)) => value.abstract_bit_not_inv(res).into(),
+            (Self::U32(value), BitNot, Self::U32(res)) => value.abstract_bit_not_inv(res).into(),
             _ => panic!("operator {operator} not supported by value and result kinds"),
         }
     }

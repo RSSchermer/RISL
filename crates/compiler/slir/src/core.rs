@@ -540,6 +540,7 @@ pub struct ResourceBinding {
 pub enum UnaryOperator {
     Not,
     Neg,
+    BitNot,
 }
 
 impl Display for UnaryOperator {
@@ -547,6 +548,7 @@ impl Display for UnaryOperator {
         match self {
             UnaryOperator::Not => write!(f, "!"),
             UnaryOperator::Neg => write!(f, "-"),
+            UnaryOperator::BitNot => write!(f, "~"),
         }
     }
 }

@@ -463,7 +463,22 @@ impl<'a, 'tcx> BuilderMethods<'a> for Builder<'a, 'tcx> {
     unary_builder_methods! {
         neg => Neg,
         fneg => Neg,
-        not => Not,
+    }
+
+    fn not(&mut self, value: Self::Value) -> Self::Value {
+        let value = value.expect_value();
+        let mut cfg = self.cfg.borrow_mut();
+
+        let operator = if cfg.value_ty(&value) == slir::ty::TY_BOOL {
+            slir::UnaryOperator::Not
+        } else {
+            slir::UnaryOperator::BitNot
+        };
+
+        let (_, result) =
+            cfg.add_stmt_op_unary(self.basic_block, BlockPosition::Append, operator, value);
+
+        result.into()
     }
 
     binary_builder_methods! {
