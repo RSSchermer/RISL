@@ -1,4 +1,5 @@
 #![feature(
+    core_intrinsics,
     stmt_expr_attributes,
     maybe_uninit_array_assume_init,
     maybe_uninit_uninit_array_transpose,
@@ -22,5 +23,6 @@ mod ops;
 mod option;
 mod slice;
 mod switch_int;
+mod unreachable_function_call;
 mod variable_pointer;
 mod while_loop;

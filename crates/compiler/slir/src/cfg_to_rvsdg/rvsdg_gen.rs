@@ -596,7 +596,6 @@ fn build_body(
     rvsdg: &mut Rvsdg,
     input_state_tracker: InputStateTracker,
 ) {
-    eliminate_unreachable_terminators(cfg, function);
     restructure_exit(cfg, function);
 
     let reentry_edges = restructure_loops(cfg, function);
@@ -688,9 +687,25 @@ pub fn cfg_to_rvsdg(module: &mut Module, cfg: &mut Cfg) -> Rvsdg {
     let mut visited = FxHashSet::default();
     let mut item_node = FxHashMap::default();
 
+    let unreachable_functions = eliminate_unreachable_terminators(cfg);
+
+    for (entry_point, _) in module.entry_points.iter() {
+        assert!(
+            !unreachable_functions.contains(&entry_point),
+            "shader entry point `{}` has an unreachable entry block",
+            entry_point.name
+        );
+    }
+
     let item_dependencies = item_dependencies(cfg);
 
     for item in item_dependencies.keys() {
+        if let Item::Function(function) = item {
+            if unreachable_functions.contains(function) {
+                continue;
+            }
+        }
+
         add_item(
             *item,
             module,
@@ -713,6 +728,166 @@ mod tests {
     use crate::cfg::BlockPosition;
     use crate::ty::{TY_DUMMY, TY_PREDICATE, TypeKind};
     use crate::{BinaryOperator, FnArg, FnSig, Function, Symbol};
+
+    #[test]
+    fn test_unreachable_call_elimination() {
+        let mut module = Module::new(Symbol::from_ref("test_module"));
+        let impossible = Function {
+            name: Symbol::from_ref("impossible"),
+            module: module.name,
+        };
+        let indirect = Function {
+            name: Symbol::from_ref("indirect"),
+            module: module.name,
+        };
+        let caller = Function {
+            name: Symbol::from_ref("caller"),
+            module: module.name,
+        };
+        let live = Function {
+            name: Symbol::from_ref("live"),
+            module: module.name,
+        };
+
+        module.fn_sigs.register(
+            impossible,
+            FnSig {
+                name: impossible.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+        module.fn_sigs.register(
+            indirect,
+            FnSig {
+                name: indirect.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+        module.fn_sigs.register(
+            caller,
+            FnSig {
+                name: caller.name,
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_BOOL,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+        module.fn_sigs.register(
+            live,
+            FnSig {
+                name: live.name,
+                ty: module.ty.register(TypeKind::Function(live)),
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let impossible_entry_bb = cfg.register_function(&module, impossible).entry_block();
+        cfg.set_terminator(impossible_entry_bb, Terminator::Unreachable);
+
+        let body = cfg.register_function(&module, indirect);
+        let indirect_entry_bb = body.entry_block();
+        let condition = body.argument_values()[0];
+        let indirect_first_bb = cfg.add_basic_block(indirect);
+        let indirect_second_bb = cfg.add_basic_block(indirect);
+        cfg.set_terminator(
+            indirect_entry_bb,
+            Terminator::branch_bool(condition, indirect_first_bb, indirect_second_bb),
+        );
+        cfg.add_stmt_op_call(
+            indirect_first_bb,
+            BlockPosition::Append,
+            impossible,
+            None,
+            [],
+        );
+        cfg.set_terminator(indirect_first_bb, Terminator::return_void());
+        cfg.add_stmt_op_call(
+            indirect_second_bb,
+            BlockPosition::Append,
+            impossible,
+            None,
+            [],
+        );
+        cfg.set_terminator(indirect_second_bb, Terminator::return_void());
+
+        let body = cfg.register_function(&module, caller);
+        let caller_entry_bb = body.entry_block();
+        let condition = body.argument_values()[0];
+        let caller_bad_bb = cfg.add_basic_block(caller);
+        let caller_good_bb = cfg.add_basic_block(caller);
+        let caller_disconnected_bb = cfg.add_basic_block(caller);
+        cfg.set_terminator(
+            caller_entry_bb,
+            Terminator::branch_bool(condition, caller_bad_bb, caller_good_bb),
+        );
+        cfg.add_stmt_op_call(
+            caller_bad_bb,
+            BlockPosition::Append,
+            indirect,
+            None,
+            [condition.into()],
+        );
+        cfg.set_terminator(
+            caller_bad_bb,
+            Terminator::branch_single(caller_disconnected_bb),
+        );
+        cfg.add_stmt_op_call(caller_good_bb, BlockPosition::Append, live, None, []);
+        cfg.set_terminator(caller_good_bb, Terminator::return_void());
+
+        // This cycle becomes disconnected when `caller_bad_bb` is removed. Its unregistered callee must
+        // never be visited during dependency collection or conversion.
+        cfg.add_stmt_op_call(
+            caller_disconnected_bb,
+            BlockPosition::Append,
+            Function {
+                name: Symbol::from_ref("disconnected_callee"),
+                module: module.name,
+            },
+            None,
+            [],
+        );
+        cfg.set_terminator(
+            caller_disconnected_bb,
+            Terminator::branch_single(caller_disconnected_bb),
+        );
+
+        let live_entry_bb = cfg.register_function(&module, live).entry_block();
+        cfg.set_terminator(live_entry_bb, Terminator::return_void());
+
+        let actual = cfg_to_rvsdg(&mut module, &mut cfg);
+
+        assert!(actual.get_function_node(impossible).is_none());
+        assert!(actual.get_function_node(indirect).is_none());
+        assert!(actual.get_function_node(caller).is_some());
+        assert!(actual.get_function_node(live).is_some());
+        assert!(matches!(
+            cfg[impossible_entry_bb].terminator(),
+            Terminator::Unreachable
+        ));
+        assert!(matches!(
+            cfg[indirect_entry_bb].terminator(),
+            Terminator::Unreachable
+        ));
+        assert!(!cfg[caller].basic_blocks().contains(&caller_bad_bb));
+        assert!(!cfg[caller].basic_blocks().contains(&caller_disconnected_bb));
+        assert!(matches!(
+            &cfg[*cfg[caller_good_bb].statements().first().unwrap()],
+            StatementData::OpCall(call) if call.callee() == live
+        ));
+    }
 
     #[test]
     fn test_single_bb() {

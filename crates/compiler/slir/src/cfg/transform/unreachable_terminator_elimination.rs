@@ -52,6 +52,12 @@
 //!   selector with cases list `[0, 1, 2]`. We therefore convert to the equivalent "case" selector
 //!   and modify the `cases` list as described for [BranchSelector::Case] above.
 //!
+//! This cleanup is repeated across functions. A call to a function for which the entry block's
+//! terminator becomes `Unreachable` makes the calling block's terminator unreachable as well.
+//! Functions for which the entry block's terminator is `Unreachable` are not removed from the CFG.
+//! Instead, [eliminate_unreachable_terminators] returns a set containing all such functions, so
+//! that we may skip them when converting the CFG to an RVSDG.
+//!
 //! [0]: crate::cfg::transform::loop_restructuring
 //! [1]: crate::cfg::transform::branch_restructuring
 //! [2]: crate::cfg::transform::exit_restructuring
@@ -59,113 +65,174 @@
 //! [4]: crate::cfg::Branch::selector
 //! [5]: crate::cfg::Branch::targets
 
+use rustc_hash::FxHashSet;
+
 use crate::cfg::analyze::predecessors::predecessors;
-use crate::cfg::{BranchSelector, Cfg, Terminator};
+use crate::cfg::{BranchSelector, Cfg, StatementData, Terminator};
 use crate::ty::Int;
 use crate::{BranchCase, Function};
 
-pub fn eliminate_unreachable_terminators(cfg: &mut Cfg, function: Function) {
+pub fn eliminate_unreachable_terminators(cfg: &mut Cfg) -> FxHashSet<Function> {
+    let functions: Vec<_> = cfg.registered_functions().collect();
+    let mut unreachable_functions = FxHashSet::default();
+
     loop {
         let mut changed = false;
-        let mut to_remove = Vec::new();
 
-        let body = cfg[function].basic_blocks().clone();
-
-        for &bb in &body {
-            if matches!(cfg[bb].terminator(), Terminator::Unreachable) {
-                to_remove.push(bb);
+        for &function in &functions {
+            if unreachable_functions.contains(&function) {
+                continue;
             }
-        }
 
-        if to_remove.is_empty() {
-            break;
-        }
+            let blocks = cfg[function].basic_blocks().clone();
 
-        let predecessors = predecessors(cfg, function);
+            for bb in blocks {
+                let calls_unreachable = cfg[bb].statements().iter().any(|statement| {
+                    matches!(&cfg[*statement], StatementData::OpCall(call)
+                        if unreachable_functions.contains(&call.callee()))
+                });
 
-        for bb in to_remove {
-            for predecessor in predecessors[bb].iter().copied() {
-                let branch = cfg[predecessor].terminator().expect_branch().clone();
-                let targets = branch.targets().to_vec();
-
-                if targets.len() == 1 {
-                    assert_eq!(targets[0], bb);
-
-                    cfg.set_terminator(predecessor, Terminator::Unreachable);
-                } else if targets.len() == 2 {
-                    let other_target = if targets[0] == bb {
-                        targets[1]
-                    } else {
-                        targets[0]
-                    };
-
-                    cfg.set_terminator(predecessor, Terminator::branch_single(other_target));
-                } else {
-                    let target_index = targets.iter().position(|&t| t == bb).unwrap();
-
-                    let mut new_targets = targets.clone();
-                    new_targets.remove(target_index);
-
-                    match branch.selector().clone() {
-                        BranchSelector::Case {
-                            encoding,
-                            value,
-                            mut cases,
-                        } => {
-                            if target_index < cases.len() {
-                                cases.remove(target_index);
-                            } else {
-                                // It's the last target, remove the last case.
-                                cases.pop();
-                            }
-
-                            cfg.set_terminator(
-                                predecessor,
-                                Terminator::branch_case(encoding, value, cases, new_targets),
-                            );
-                        }
-                        BranchSelector::U32(value) => {
-                            if target_index == new_targets.len() {
-                                // Last target, just remove it.
-                                cfg.set_terminator(
-                                    predecessor,
-                                    Terminator::branch_u32(value, new_targets),
-                                );
-                            } else {
-                                // The unreachable block is not the last target, convert to a Case
-                                // selector.
-
-                                let mut cases: Vec<BranchCase> = (0..targets.len() as u32 - 1)
-                                    .map(BranchCase::from)
-                                    .collect();
-                                cases.remove(target_index);
-
-                                cfg.set_terminator(
-                                    predecessor,
-                                    Terminator::branch_case(Int::U32, value, cases, new_targets),
-                                );
-                            }
-                        }
-                        _ => unreachable!("expected Case or U32 selector for >2 targets"),
-                    }
+                if calls_unreachable {
+                    cfg.set_terminator(bb, Terminator::Unreachable);
                 }
+            }
 
+            eliminate_unreachable_terminators_in_function(cfg, function);
+
+            // Replacing a terminator can disconnect its former successors. Their statements,
+            // including calls, must not contribute item dependencies either.
+            remove_disconnected_blocks(cfg, function);
+
+            if matches!(
+                cfg[cfg[function].entry_block()].terminator(),
+                Terminator::Unreachable
+            ) {
+                unreachable_functions.insert(function);
                 changed = true;
             }
-
-            cfg.remove_basic_block(bb);
         }
 
         if !changed {
             break;
         }
     }
+
+    unreachable_functions
+}
+
+fn remove_disconnected_blocks(cfg: &mut Cfg, function: Function) {
+    let mut visited = FxHashSet::default();
+    let mut pending = vec![cfg[function].entry_block()];
+
+    while let Some(bb) = pending.pop() {
+        if visited.insert(bb) {
+            pending.extend_from_slice(cfg.successors(bb));
+        }
+    }
+
+    let to_remove: Vec<_> = cfg[function]
+        .basic_blocks()
+        .iter()
+        .copied()
+        .filter(|bb| !visited.contains(bb))
+        .collect();
+
+    for bb in to_remove {
+        cfg.remove_basic_block(bb);
+    }
+}
+
+fn eliminate_unreachable_terminators_in_function(cfg: &mut Cfg, function: Function) {
+    loop {
+        let entry = cfg[function].entry_block();
+        let to_remove = cfg[function]
+            .basic_blocks()
+            .iter()
+            .copied()
+            .find(|&bb| bb != entry && matches!(cfg[bb].terminator(), Terminator::Unreachable));
+
+        let Some(bb) = to_remove else {
+            break;
+        };
+
+        let predecessors = predecessors(cfg, function);
+
+        for predecessor in predecessors[bb].iter().copied() {
+            let branch = cfg[predecessor].terminator().expect_branch().clone();
+            let targets = branch.targets().to_vec();
+
+            if targets.len() == 1 {
+                assert_eq!(targets[0], bb);
+
+                cfg.set_terminator(predecessor, Terminator::Unreachable);
+            } else if targets.len() == 2 {
+                let other_target = if targets[0] == bb {
+                    targets[1]
+                } else {
+                    targets[0]
+                };
+
+                cfg.set_terminator(predecessor, Terminator::branch_single(other_target));
+            } else {
+                let target_index = targets.iter().position(|&t| t == bb).unwrap();
+
+                let mut new_targets = targets.clone();
+                new_targets.remove(target_index);
+
+                match branch.selector().clone() {
+                    BranchSelector::Case {
+                        encoding,
+                        value,
+                        mut cases,
+                    } => {
+                        if target_index < cases.len() {
+                            cases.remove(target_index);
+                        } else {
+                            // It's the last target, remove the last case.
+                            cases.pop();
+                        }
+
+                        cfg.set_terminator(
+                            predecessor,
+                            Terminator::branch_case(encoding, value, cases, new_targets),
+                        );
+                    }
+                    BranchSelector::U32(value) => {
+                        if target_index == new_targets.len() {
+                            // Last target, just remove it.
+                            cfg.set_terminator(
+                                predecessor,
+                                Terminator::branch_u32(value, new_targets),
+                            );
+                        } else {
+                            // The unreachable block is not the last target, convert to a Case
+                            // selector.
+
+                            let mut cases: Vec<BranchCase> = (0..targets.len() as u32 - 1)
+                                .map(BranchCase::from)
+                                .collect();
+                            cases.remove(target_index);
+
+                            cfg.set_terminator(
+                                predecessor,
+                                Terminator::branch_case(Int::U32, value, cases, new_targets),
+                            );
+                        }
+                    }
+                    _ => unreachable!("expected Case or U32 selector for >2 targets"),
+                }
+            }
+        }
+
+        cfg.remove_basic_block(bb);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ty::{TY_BOOL, TY_U32};
+    use crate::cfg::BlockPosition;
+    use crate::ty::{TY_BOOL, TY_DUMMY, TY_U32};
     use crate::{FnArg, FnSig, Module, Symbol};
 
     #[test]
@@ -206,7 +273,7 @@ mod tests {
         cfg.set_terminator(bb_mid, Terminator::branch_single(bb_unreachable));
         cfg.set_terminator(bb_unreachable, Terminator::Unreachable);
 
-        eliminate_unreachable_terminators(&mut cfg, function);
+        eliminate_unreachable_terminators_in_function(&mut cfg, function);
 
         assert!(!cfg[function].basic_blocks().contains(&bb_unreachable));
         assert!(!cfg[function].basic_blocks().contains(&bb_mid));
@@ -256,7 +323,7 @@ mod tests {
 
         cfg.set_terminator(bb_unreachable, Terminator::Unreachable);
 
-        eliminate_unreachable_terminators(&mut cfg, function);
+        eliminate_unreachable_terminators_in_function(&mut cfg, function);
 
         assert!(!cfg[function].basic_blocks().contains(&bb_unreachable));
 
@@ -311,7 +378,7 @@ mod tests {
         cfg.set_terminator(bb1, Terminator::return_void());
         cfg.set_terminator(bb_unreachable, Terminator::Unreachable);
 
-        eliminate_unreachable_terminators(&mut cfg, function);
+        eliminate_unreachable_terminators_in_function(&mut cfg, function);
 
         assert!(!cfg[function].basic_blocks().contains(&bb_unreachable));
 
@@ -372,7 +439,7 @@ mod tests {
         cfg.set_terminator(bb2, Terminator::return_void());
         cfg.set_terminator(bb3, Terminator::return_void());
 
-        eliminate_unreachable_terminators(&mut cfg, function);
+        eliminate_unreachable_terminators_in_function(&mut cfg, function);
 
         assert!(!cfg[function].basic_blocks().contains(&bb_unreachable));
 
@@ -429,7 +496,7 @@ mod tests {
         cfg.set_terminator(bb1, Terminator::return_void());
         cfg.set_terminator(bb_unreachable, Terminator::Unreachable);
 
-        eliminate_unreachable_terminators(&mut cfg, function);
+        eliminate_unreachable_terminators_in_function(&mut cfg, function);
 
         assert!(!cfg[function].basic_blocks().contains(&bb_unreachable));
 
@@ -481,7 +548,7 @@ mod tests {
         cfg.set_terminator(bb2, Terminator::return_void());
         cfg.set_terminator(bb3, Terminator::return_void());
 
-        eliminate_unreachable_terminators(&mut cfg, function);
+        eliminate_unreachable_terminators_in_function(&mut cfg, function);
 
         assert!(!cfg[function].basic_blocks().contains(&bb_unreachable));
 
@@ -496,5 +563,56 @@ mod tests {
         } else {
             panic!("expected case selector");
         }
+    }
+
+    #[test]
+    fn test_infinite_loop_is_not_undefined() {
+        let mut module = Module::new(Symbol::from_ref("test_module"));
+        let forever = Function {
+            name: Symbol::from_ref("forever"),
+            module: module.name,
+        };
+        let caller = Function {
+            name: Symbol::from_ref("caller"),
+            module: module.name,
+        };
+        module.fn_sigs.register(
+            forever,
+            FnSig {
+                name: forever.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+        module.fn_sigs.register(
+            caller,
+            FnSig {
+                name: caller.name,
+                ty: TY_DUMMY,
+                args: vec![],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+
+        let forever_entry = cfg.register_function(&module, forever).entry_block();
+        cfg.set_terminator(forever_entry, Terminator::branch_single(forever_entry));
+
+        let caller_entry = cfg.register_function(&module, caller).entry_block();
+        let (call, _) =
+            cfg.add_stmt_op_call(caller_entry, BlockPosition::Append, forever, None, []);
+        cfg.set_terminator(caller_entry, Terminator::return_void());
+
+        let unreachable_functions = eliminate_unreachable_terminators(&mut cfg);
+
+        assert!(unreachable_functions.is_empty());
+        assert_eq!(cfg.successors(forever_entry), &[forever_entry]);
+        assert!(cfg[caller_entry].statements().contains(&call));
+        assert!(matches!(
+            cfg[caller_entry].terminator(),
+            Terminator::Return(None)
+        ));
     }
 }
