@@ -59,6 +59,8 @@ gen_intrinsic!(cycle_iter_ref: fn cycle_iter_mut<I>(iter: &mut core::iter::Cycle
 gen_intrinsic!(enumerate_iter_ref: fn enumerate_iter_mut<I>(iter: &mut core::iter::Enumerate<I>) -> &mut I);
 gen_intrinsic!(enumerate_count_ref: fn enumerate_count_mut<I>(iter: &mut core::iter::Enumerate<I>) -> &mut usize);
 
+gen_intrinsic!(peekable_peeked_ref: fn peekable_peeked_mut<I: Iterator>(iter: &mut core::iter::Peekable<I>) -> &mut Option<Option<I::Item>>);
+
 gen_intrinsic!(option_unwrap_unchecked: fn option_unwrap_unchecked<T>(option: Option<T>) -> T);
 
 gen_intrinsic!(non_zero_new: fn non_zero_new<T: ZeroablePrimitive>(n: T) -> Option<NonZero<T>>);

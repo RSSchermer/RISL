@@ -1,0 +1,14 @@
+mod count;
+mod fold;
+mod last;
+mod next;
+mod next_back;
+mod next_if;
+mod next_if_eq;
+mod nth;
+mod peek;
+mod peek_mut;
+mod rfold;
+mod size_hint;
+mod try_fold;
+mod try_rfold;

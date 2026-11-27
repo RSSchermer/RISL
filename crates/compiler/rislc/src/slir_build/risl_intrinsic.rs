@@ -36,7 +36,8 @@ pub fn maybe_rislc_intrinsic(item: MonoItem, cx: &CodegenContext) -> Option<Mono
             | RislIntrinsic::EnumerateIterRef => define_iterator_field_ref(instance, cx, 0),
             RislIntrinsic::ChainBRef
             | RislIntrinsic::CycleIterRef
-            | RislIntrinsic::EnumerateCountRef => define_iterator_field_ref(instance, cx, 1),
+            | RislIntrinsic::EnumerateCountRef
+            | RislIntrinsic::PeekablePeekedRef => define_iterator_field_ref(instance, cx, 1),
             RislIntrinsic::MemResourceAsRef => define_mem_resource_as_ref(instance, cx),
             RislIntrinsic::OptionUnwrapUnchecked => define_option_unwrap_unchecked(instance, cx),
             RislIntrinsic::NonZeroNew => define_non_zero_new(instance, cx),
@@ -109,6 +110,7 @@ pub enum RislIntrinsic {
     CycleIterRef,
     EnumerateIterRef,
     EnumerateCountRef,
+    PeekablePeekedRef,
     MemResourceAsRef,
     OptionUnwrapUnchecked,
     NonZeroNew,
@@ -185,6 +187,7 @@ fn resolve_intrinsic(attr: &Attribute) -> RislIntrinsic {
         "#[rislc::intrinsic(cycle_iter_ref)]" => RislIntrinsic::CycleIterRef,
         "#[rislc::intrinsic(enumerate_iter_ref)]" => RislIntrinsic::EnumerateIterRef,
         "#[rislc::intrinsic(enumerate_count_ref)]" => RislIntrinsic::EnumerateCountRef,
+        "#[rislc::intrinsic(peekable_peeked_ref)]" => RislIntrinsic::PeekablePeekedRef,
         "#[rislc::intrinsic(mem_resource_as_ref)]" => RislIntrinsic::MemResourceAsRef,
         "#[rislc::intrinsic(option_unwrap_unchecked)]" => RislIntrinsic::OptionUnwrapUnchecked,
         "#[rislc::intrinsic(non_zero_new)]" => RislIntrinsic::NonZeroNew,
