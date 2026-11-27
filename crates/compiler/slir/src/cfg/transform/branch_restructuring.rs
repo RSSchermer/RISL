@@ -96,9 +96,17 @@ fn reachability_search(
     end: BasicBlock,
     reachability: &mut Reachability,
 ) {
+    // This search records branch interiors, we don't consider the `end` boundary part of any
+    // branch. Including `end` could put it in a branch's dominated set, causing tail analysis to
+    // inspect successors outside the searched sub-graph. Therefore, if we've reach `end`, we simply
+    // stop, without updating `end`'s reachability.
+    if current == end {
+        return;
+    }
+
     let keep_going = reachability.update(current, edge);
 
-    if current != end && keep_going {
+    if keep_going {
         for successor in cfg.successors(current) {
             // We ignore loop re-entry edges during branch restructuring
             if !reentry_edges.contains(&Edge {
@@ -580,6 +588,89 @@ mod tests {
                 dest: bb4,
             }])
         );
+    }
+
+    #[test]
+    fn test_restructure_branches_with_identical_targets() {
+        let mut module = Module::new(Symbol::from_ref(""));
+        let function = Function {
+            name: Symbol::from_ref(""),
+            module: Symbol::from_ref(""),
+        };
+
+        module.fn_sigs.register(
+            function,
+            FnSig {
+                name: Default::default(),
+                ty: TY_DUMMY,
+                args: vec![FnArg {
+                    ty: TY_U32,
+                    shader_io_binding: None,
+                }],
+                ret_ty: None,
+            },
+        );
+
+        let mut cfg = Cfg::new(module.ty.clone());
+        let body = cfg.register_function(&module, function);
+        let condition = body.argument_values()[0];
+
+        let entry_bb = body.entry_block();
+        let branch_bb = cfg.add_basic_block(function);
+        let continuation_bb = cfg.add_basic_block(function);
+        let left_bb = cfg.add_basic_block(function);
+        let right_bb = cfg.add_basic_block(function);
+        let exit_bb = cfg.add_basic_block(function);
+
+        cfg.set_terminator(
+            entry_bb,
+            Terminator::branch_u32(condition, [branch_bb, continuation_bb]),
+        );
+        cfg.set_terminator(
+            branch_bb,
+            Terminator::branch_u32(condition, [continuation_bb, continuation_bb]),
+        );
+        cfg.set_terminator(
+            continuation_bb,
+            Terminator::branch_u32(condition, [left_bb, right_bb]),
+        );
+        cfg.set_terminator(left_bb, Terminator::branch_single(exit_bb));
+        cfg.set_terminator(right_bb, Terminator::branch_single(exit_bb));
+
+        // The nested branch has no interior blocks. Its continuation and that block's successors
+        // must remain outside the nested subgraph.
+        assert!(dominated_sets(&cfg, &FxHashSet::default(), branch_bb, continuation_bb).is_empty());
+
+        let tail_structure =
+            TailStructure::analyse(&cfg, &FxHashSet::default(), branch_bb, continuation_bb);
+
+        assert_eq!(
+            tail_structure.continuation_nodes,
+            IndexSet::from([continuation_bb])
+        );
+        assert_eq!(
+            tail_structure.branch_continuation_edges[&Edge {
+                source: branch_bb,
+                dest: continuation_bb,
+            }],
+            vec![Edge {
+                source: branch_bb,
+                dest: continuation_bb,
+            }]
+        );
+
+        let branch_info = restructure_branches(&mut cfg, function, &FxHashSet::default());
+
+        assert_eq!(branch_info.len(), 3);
+        assert_eq!(branch_info[&entry_bb], continuation_bb);
+        assert_eq!(branch_info[&branch_bb], continuation_bb);
+        assert_eq!(branch_info[&continuation_bb], exit_bb);
+        assert_eq!(cfg[function].basic_blocks().len(), 6);
+        assert_eq!(
+            cfg.successors(branch_bb),
+            &[continuation_bb, continuation_bb]
+        );
+        assert_eq!(cfg.successors(continuation_bb), &[left_bb, right_bb]);
     }
 
     #[test]
