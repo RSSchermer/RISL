@@ -14,3 +14,4 @@ mod intersperse_with;
 mod map;
 mod map_while;
 mod peekable;
+mod rev;
